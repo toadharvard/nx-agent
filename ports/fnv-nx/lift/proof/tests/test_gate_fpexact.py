@@ -175,6 +175,9 @@ class HelperTable(unittest.TestCase):
         mx = dsl.V("mx", 32)
         c = dsl.cvt("f2i", dsl.V("a", 64), mx, 32, True)
         self.assertEqual(H.node_call(c), ("fx_dsl_cvt", 96))
+        f = dsl.Form("k", 0, 1)
+        f.reg("eax", dsl.cvt_val(c))
+        self.assertEqual(H.table([("shapeK", f)])["fx_dsl_cvt"], {"ops": ["cvt"], "callers": ["shapeK"]})
         self.assertEqual(H.node_call(dsl.tab("rcp", dsl.V("i", 11))), ("fnvl_tab_rcp", 11))
         self.assertIsNone(H.node_call(dsl.uf("rdtsc", 64)))
         self.assertIsNone(H.node_call(dsl.V("a", 32)))
@@ -182,7 +185,7 @@ class HelperTable(unittest.TestCase):
 
     def test_classes_and_items(self):
         self.assertEqual((H.classify(11), H.classify(32), H.classify(33)), ("narrow", "narrow", "wide"))
-        tab = {"fx_dsl_cvt": {"bits": 96, "ops": ["cvt"]}, "fnvl_tab_rcp": {"bits": 11, "ops": ["tab"]}}
+        tab = {"fx_dsl_cvt": {"ops": ["cvt"], "callers": []}, "fnvl_tab_rcp": {"ops": ["tab"], "callers": []}}
         w = {"fx_dsl_cvt": 224, "fnvl_tab_rcp": 32, "sse_f2i": 96, "u": None}
         it = G.helper_items("r", tab, None, ["sse_f2i", "u"], True, w)
         self.assertEqual([c for c, _ in it["helper:r/fnvl_tab_rcp"]], ["helper-no-exhaustive-cert"])

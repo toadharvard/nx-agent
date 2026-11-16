@@ -6,8 +6,8 @@ expression or as a call of an lift/rt helper. This module asks the emitter itsel
 expression is a call (an identifier directly followed by an opening parenthesis), with the INPUT BITS of the call = the sum of the widths of the node's operands.
 No name list and no pattern over source text: a node op that a later change of the emitter turns into a call enters the table by itself.
 Not in the table, by rule: `uf` nodes (the declared platform functions, certified through the declared column of the form certificates, proof/declared.json).
-`table(forms)` -> {callee: {"bits": the largest input bits of any call, "ops": sorted node ops that call it}}.
-`pack_forms(cache)` -> the Forms of every shape of the lifted pack of formgate_inputs.json that has a symbolic builder (the shapes that formgate judges);
+`table(keyed_forms)` -> {callee: {"ops", "callers"}}; `universe(repo, cache, objects)` -> the rows {helper, input_bits, callers}, the importable form of the universe.
+`pack_forms(cache)` -> [(shape key, Form)] of every shape of the lifted pack of formgate_inputs.json that has a symbolic builder (the shapes that formgate judges);
 raises formgate.Red when the inputs are not declared.
 Widths (`dwarf_bits`): ONE rule for every helper, whatever source named it: the input bits are the sum of the byte sizes of the DWARF formal_parameter types of the helper's
 own definition (DW_TAG_subprogram of that name) in the objects of the root that defines it, times 8. A parameter that carries the MXCSR or another register value is a
@@ -49,16 +49,17 @@ def nodes(roots):
     return out
 
 
-def table(forms):
+def table(keyed_forms):
+    """KEYED_FORMS [(shape key, Form)] -> {callee: {"ops": sorted node ops that call it, "callers": sorted shape keys}}; the widths are not here: dwarf_bits is the one width rule"""
     t = {}
-    for f in forms:
+    for key, f in keyed_forms:
         for n in nodes(f.roots()):
             c = node_call(n)
             if c:
-                e = t.setdefault(c[0], {"bits": 0, "ops": set()})
-                e["bits"] = max(e["bits"], c[1])
+                e = t.setdefault(c[0], {"ops": set(), "callers": set()})
                 e["ops"].add(n.op)
-    return {k: {"bits": v["bits"], "ops": sorted(v["ops"])} for k, v in sorted(t.items())}
+                e["callers"].add(key)
+    return {k: {"ops": sorted(v["ops"]), "callers": sorted(v["callers"])} for k, v in sorted(t.items())}
 
 
 def classify(bits):
@@ -117,15 +118,24 @@ def dwarf_bits(paths):
     return out
 
 
-def pack_forms(cache):
-    x86sys.configure(formgate.X86SYS)
+def pack_forms(cache, repo=None):
+    x86sys.configure(formgate.X86SYS if repo is None else os.path.join(repo, "ports", "fnv-nx", "platform", "declared", "x86sys.json"))
     doc = formgate.load_inputs()
     ext = formgate.fetch(doc, cache)
     keys = sorted(formgate.load_shapes(formgate.path_in(ext, doc["shapes"], "shapes")))
     out = []
     for k in keys:
         try:
-            out.append(symform.symbuild(k).form)
+            out.append((k, symform.symbuild(k).form))
         except (KeyError, AssertionError, symform.SymbolicBranch, symform.FieldDecodeError, shape.ShapeError):
             pass      # no symbolic Form: the shape is uncertified by the forms gate and calls no helper through a Form
     return out
+
+
+def universe(repo, cache, objects=()):
+    """THE helper universe, importable: (repo = the checkout root, cache = a directory for the externals, OBJECTS = object files of the root that defines the helpers)
+    -> [{"helper": name, "input_bits": int or None (dwarf_bits: None = underived), "callers": [shape keys of the Forms that call it]}] sorted by helper. Raises formgate.Red when the
+    pack's inputs are not declared. The one derivation: the call table of the Forms (this module) and the width rule dwarf_bits; nothing else defines a helper or a width."""
+    t = table(pack_forms(cache, repo))
+    w = dwarf_bits(objects)
+    return [{"helper": h, "input_bits": w.get(h), "callers": v["callers"]} for h, v in t.items()]
