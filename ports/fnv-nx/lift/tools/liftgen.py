@@ -43,21 +43,21 @@ def lift_one(a):
     if G.get('prov'):      # --prov: the text is the tag-OFF text; the tag-ON lift of the same entry must give the same bytes (checked here for every entry of the universe)
         from fnvlift import prov
         prov.ON = False
-        t, ins = lifted.lift_with_instructions(a)
+        t, ins, paths = lifted.lift_with_paths(a)
         if t is None: return None, ins
         prov.take(); prov.ON = True
-        try: t_on, _ = lifted.lift_with_instructions(a)
+        try: t_on = lifted.lift_with_paths(a)[0]
         finally: prov.ON = False
         if t_on != t: raise SystemExit('liftgen --prov: the text of entry %08x differs with the tag on' % a)
     else:
-        t, ins = lifted.lift_with_instructions(a)
+        t, ins, paths = lifted.lift_with_paths(a)
         if t is None: return None, ins
     t0 = t
     t = re.sub(r'extern "C" void (L_%08x\(void\)\n\{)' % a, r'extern "C" __attribute__((section(".text.fnvl"))) void \1', t, count=1)
     assert '.text.fnvl' in t
     pv = prov_record(ins, t0, t) if G.get('prov') else None
     return t, (formcert.census(ins), [(formcert.form_key(i), bytes(i.bytes), x) for x, i in ins.items()],
-               collections.Counter((shape.shape_key(i), shape.family(i)) for i in ins.values()), pv)
+               collections.Counter((shape.shape_key(i), shape.family(i), paths[x]) for x, i in ins.items()), pv)
 
 
 def prov_record(ins, t0, t):
@@ -158,7 +158,7 @@ def shard(a):
     w('missing', [('%08x' % ad, k, why) for ad, k, why in miss])
     w('forms', [(f, n, certs.status(f)) for f, n in sorted(forms.items())])
     w('encs', [(f, r.hex(), '%08x' % x) for f, e in sorted(encs.items()) for r, x in sorted(e.items(), key=lambda t: (t[1], t[0]))])
-    w('shapes', [(k, fam, n) for (k, fam), n in sorted(shapes.items(), key=lambda t: (t[0][0].encode(), t[0][1]))])    # shape_key, family, instruction count (L3b formgate)
+    w('shapes', [(k, fam, n, path) for (k, fam, path), n in sorted(shapes.items(), key=lambda t: (t[0][0].encode(), t[0][2]))])    # shape_key, family, instruction count, emission path (core.dispatch: form, form+xfer, handler:<module>.<name>)
     print('shard %d/%d: entries %d lifted %d missing %d; text bytes %d; forms %d' % (K, N, len(mine), len(texts), len(miss), sum(len(t) for _, t in texts), len(forms)))
 
 
@@ -262,9 +262,9 @@ def finish(a):
         for f in sorted(glob.glob(d + '/texts_*.txt')):      # completeness: every shard that has texts has its shapes
             sf = os.path.join(os.path.dirname(f), 'shapes_' + os.path.basename(f)[len('texts_'):-len('.txt')] + '.tsv')
             if not os.path.isfile(sf): sys.exit('finish: %s: no shapes list beside %s' % (d, os.path.basename(f)))
-            for k, fam, n in tsv(sf):
+            for k, fam, n, path in tsv(sf):
                 if shape_fam.setdefault(k, fam) != fam: sys.exit('finish: shape %s has two families (%s, %s)' % (k, shape_fam[k], fam))
-                shapes[k] += int(n)
+                shapes[(k, path)] += int(n)
     if set(encs) != set(forms): sys.exit('finish: the encodings lists and the form lists name different forms')
     units = collections.defaultdict(list)
     for x in sorted(texts): units[bucket(x)].append(texts[x])
@@ -275,7 +275,7 @@ def finish(a):
     w = lambda n, rows: open('%s/%s.tsv' % (pk, n), 'w').write(''.join('\t'.join(map(str, x)) + '\n' for x in rows))
     w('entries', [('%08x' % x, sy, kind[x]) for x, sy in sorted(syms.items())])      # lifted and runtime rows
     open(pk + '/entries.tsv', 'a').write('# module_table sha256 %s\n' % table_sha)      # the loader's modules.tsv this pack was lifted against (the stage packentries.py checks it)
-    w('shapes', [(k, shape_fam[k], n) for k, n in sorted(shapes.items(), key=lambda t: t[0].encode())])      # the universe of formgate: exactly what was lifted
+    w('shapes', [(k, shape_fam[k], n, path) for (k, path), n in sorted(shapes.items(), key=lambda t: (t[0][0].encode(), t[0][1]))])      # one row per (shape key, path); a key with one path is one row      # the universe of formgate: exactly what was lifted
     w('forms', [(f, v[0], v[1]) for f, v in sorted(forms.items())])
     w('encs', [(f, r.hex(), '%08x' % x) for f, e in sorted(encs.items()) for r, x in sorted(e.items(), key=lambda t: (t[1], t[0]))])
     nc = sum(1 for v in forms.values() if v[1] == 'sail')

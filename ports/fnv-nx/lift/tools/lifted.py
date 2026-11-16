@@ -37,15 +37,21 @@ def install(img, emit, jtab):
     return L
 
 
-def lift_with_instructions(a):
-    """-> (text, instructions {va: capstone instruction}) of universe entry a, or (None, reason). The one lift step of liftgen and of lifted()."""
+def lift_with_paths(a):
+    """-> (text, instructions {va: capstone instruction}, paths {va: emission path}) of universe entry a, or (None, reason, None). paths: core.dispatch's record, one per instruction of the emitted body."""
     import fnvlift as L
     S['cap'].clear()
     try:
         t, m = L.lift_entry(S['img'], a)
     except L.Unsupported as e:
-        return None, str(e)
-    return t, S['cap'][-1][0]
+        return None, str(e), None
+    return t, S['cap'][-1][0], m['paths']
+
+
+def lift_with_instructions(a):
+    """-> (text, instructions {va: capstone instruction}) of universe entry a, or (None, reason). The one lift step of liftgen and of lifted()."""
+    t, ins, _ = lift_with_paths(a)
+    return t, ins
 
 
 def begin(img, emit, jtab):

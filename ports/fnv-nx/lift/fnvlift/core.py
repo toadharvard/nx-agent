@@ -85,6 +85,8 @@ class Ctx:
         self.calls, self.tails = set(), set()    # direct call targets / jumps to entries outside the function (meta, closure of the bench)
         self.nonlocal_ = False                   # a `goto nonlocal` / `goto after_tail` was emitted: the function needs the loop
         self.imports = False
+        self.paths = {}                          # instruction address -> its emission path (the rule of dispatch: `form`, `form+xfer`, `handler:<module>.<name>`); the generate driver writes it as the path column of shapes.tsv
+        self.xfer = False                        # set by f_flow when the current instruction's control-transfer tail was emitted
         self.raises = set()                      # addresses of instructions that can raise: ContinueExecution resumes there, so they are labels of the loop
 
     def em(self, t):
@@ -270,23 +272,34 @@ def tab_tails(img, insns, lo, hi):
     return sorted(out)
 
 
+def hpath(fn):
+    return 'handler:%s.%s' % (fn.__module__.split('.')[-1], fn.__name__)
+
+
 def dispatch(cx, ins):
+    """emit one instruction; cx.paths[cx.a] records which emission path took it (EMIT from the Form: `form`, or `form+xfer` when the transfer tail of f_flow was emitted too; else the handler)"""
     from . import f_sys
     if MISSING is None:
         raise RuntimeError('core.dispatch: no CPUID-UD gate (core.set_emit(emit, missing))')
     if getattr(ins, 'ud_gap', False):      # a Sail-decided #UD sequence (f_sys.UdIns): no Form, no operands
+        cx.paths[cx.a] = hpath(f_sys.ud_site)
         f_sys.ud_site(cx)
         return
     if MISSING(ins):         # CPUID-UD rule (proof/cpufeat.py): a form the model's CPUID denies is #UD before any handler of any family runs
+        cx.paths[cx.a] = hpath(f_sys.ud_site)
         f_sys.ud_site(cx)
         return
+    cx.xfer = False
     if EMIT is not None and EMIT(cx, ins) is not SKIP:
+        cx.paths[cx.a] = 'form+xfer' if cx.xfer else 'form'
         return
     h = OPS.get(cx.m)
     if h is not None and h(cx, ins) is not SKIP:
+        cx.paths[cx.a] = hpath(h)
         return
     for pred, fn in SHAPE_HANDLERS:
         if pred(cx, ins):
+            cx.paths[cx.a] = hpath(fn)
             fn(cx, ins)
             return
     raise Unsupported('insn ' + (cx.pfx + ' ' if cx.pfx else '') + cx.m)
@@ -422,6 +435,7 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
         cx.b0 = ins.opcode[0]
         cx.modrm = ins.modrm
         if bad_lock:
+            cx.paths[a] = hpath(f_sys.ud_site)
             f_sys.ud_site(cx)                  # LOCK on an instruction that cannot take it (or with a register destination): #UD
         elif f_sys.locked(ins, m, locked):
             # R9 atomic rule (rt/fnvl.h LK_*): the body runs on a private copy of the memory operand, the commit is a compare-and-swap, a lost race restores the registers and flags and runs it again
@@ -473,7 +487,7 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
     if cx.usesfs:
         kinds.add('fs')
     meta = dict(addr=start, size=size, selfcalls=cx.selfcalls, callrets=cx.callrets, kinds=sorted(kinds), n=len(order), tables=len(tables),
-                calls=sorted(cx.calls), tails=sorted(cx.tails), noentry=sorted(cx.noentry), tabtails=tab_tails(img, insns, lo, hi))
+                calls=sorted(cx.calls), tails=sorted(cx.tails), noentry=sorted(cx.noentry), tabtails=tab_tails(img, insns, lo, hi), paths=dict(cx.paths))
     return txt, meta
 
 

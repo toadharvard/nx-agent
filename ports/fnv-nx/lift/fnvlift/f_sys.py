@@ -133,9 +133,6 @@ def asz16(ins):
 
 
 
-@op('repz ret', 'repnz ret', 'repe ret', 'repne ret')
-def h_repz_ret(cx, ins):
-    f_flow.h_ret(cx, ins)
 
 
 # ---- class 3: segment registers, far transfers, descriptor-table instructions --------------------------------------------------------------------------------------
