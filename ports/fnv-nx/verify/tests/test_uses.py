@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/hostabi/product/build.json ports/fnv-nx/link
+# reads: ports/fnv-nx/shim/build.json ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for cross-root outputs of verify/recipe.py (RECIPE.md "Outputs and uses"): a root declares `outputs`, another admitted root takes them by
 `uses` as stage inputs at /uses/<root>/<name>; the stage key holds the output's content hash. Toy roots in temp git repos, real sandbox stages.
 Plain script: exit 0 on pass, one PASS/FAIL line per case. Needs root (sandbox). Scratch: test_recipe's BASE, removed at exit."""
@@ -55,7 +57,7 @@ def main():
     check("uses: the producer's output changed (other bytes): the consumer's stage keys change", rb["status"] == "green" and rb["stage_keys"] != r["stage_keys"], "")
     rc = recipe.build(repo_of("uc", pfiles=dict(PF, **{"mk.py": MK.replace("#PAD", "# a comment: the tool changes, the output does not")})), ROOT, SS, BASE + "/o-uc")
     check("uses: the producer's tool changed but its output is byte-identical: the consumer's stage keys do not change", rc["status"] == "green"
-          and rc["stage_keys"] == r["stage_keys"], "")
+          and rc["pp_keys"] == r["pp_keys"] and rc["du_keys"] == r["du_keys"], "")   # the consumer's own stages (its units' PP and compile keys); the producer's tool stage keys change by definition
 
     def errs(rec, name, prec=PREC):
         repo = repo_of(name, prec=prec, crec=rec)

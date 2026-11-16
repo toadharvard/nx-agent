@@ -139,6 +139,8 @@ def main():
             if not (isinstance(rec, dict) and rec.get("link")):
                 continue
             res, _ = gate_build.ensure(spec, cache, repo)     # the image's link members are derived by the build (ld's archive selection, recipe.link_candidates), never written
+            if res["status"] == "red":      # a red link has no derived members to judge (a strong duplicate makes the member selection itself red): the image is red, so is this gate
+                raise recipe.RecipeError(["%s: build red (stage %s)" % (spec, res["failure"]["stage"])])
             group = [spec] + [x["root"] for x in res.get("link_roots", [])]
             ii, ifs = judge_image(spec, image_parts(spec, group, cache, repo))
             items, finds = items + ii, finds + ifs

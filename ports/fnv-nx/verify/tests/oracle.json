@@ -55,26 +55,14 @@
     {
      "anchor": "## farm/boot_job.sh",
      "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    },
-    {
-     "anchor": "## verify/bootinputs.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    },
-    {
-     "anchor": "## verify/boot.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
+     "path": "ports/fnv-nx/hostabi/include/fnvnx/hostapi.h"
     }
    ],
    "subject": [
-    "ports/fnv-nx/farm/boot_job.sh",
-    "ports/fnv-nx/verify/bootinputs.py",
-    "ports/fnv-nx/verify/boot.py"
+    "ports/fnv-nx/verify/bootmachine.py"
    ]
   },
-  "test_bootgpu.py": {
+  "test_bootlayout.py": {
    "references": [
     {
      "anchor": "## verify/bootgpu.py",
@@ -122,47 +110,7 @@
     "ports/fnv-nx/verify/boot.py"
    ]
   },
-  "test_bootlayout.py": {
-   "references": [
-    {
-     "anchor": "## verify/bootlayout.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/verify/bootlayout.py"
-   ]
-  },
-  "test_bootmachine.py": {
-   "references": [
-    {
-     "kind": "contract",
-     "path": "ports/fnv-nx/hostabi/include/fnvnx/hostapi.h"
-    },
-    {
-     "anchor": "## verify/bootmachine.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    },
-    {
-     "anchor": "## verify/boothost.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    },
-    {
-     "anchor": "## verify/bootlayout.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/verify/bootmachine.py",
-    "ports/fnv-nx/verify/boothost.py",
-    "ports/fnv-nx/verify/bootlayout.py"
-   ]
-  },
-  "test_bootmiles.py": {
+  "test_bootsock.py": {
    "references": [
     {
      "anchor": "## verify/bootmiles.py",
@@ -174,19 +122,7 @@
     "ports/fnv-nx/verify/bootmiles.py"
    ]
   },
-  "test_bootpath.py": {
-   "references": [
-    {
-     "anchor": "## verify/bootpath.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/verify/bootpath.py"
-   ]
-  },
-  "test_bootsock.py": {
+  "test_bootthreadcpu.py": {
    "references": [
     {
      "anchor": "## verify/bootsock.py",
@@ -259,19 +195,6 @@
    ],
    "subject": [
     "ports/fnv-nx/verify/gate_datamodel.py",
-    "ports/fnv-nx/verify/recipe.py"
-   ]
-  },
-  "test_descs.py": {
-   "references": [
-    {
-     "anchor": "### Objects of every admitted product root (`objects_of`): the fact universe",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/RECIPE.md"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/lift/descs/descs.py",
     "ports/fnv-nx/verify/recipe.py"
    ]
   },
@@ -680,33 +603,6 @@
     "ports/fnv-nx/verify/verdict.py"
    ]
   },
-  "test_loader.py": {
-   "references": [
-    {
-     "anchor": "## Link: the guest ELF",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/RECIPE.md"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/verify/recipe.py"
-   ]
-  },
-  "test_loader_tables.py": {
-   "references": [
-    {
-     "anchor": "## contract/modules.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/loader/build.json",
-    "ports/fnv-nx/contract/modules.py",
-    "ports/fnv-nx/contract/mkidentity.py",
-    "ports/fnv-nx/contract/iat.py"
-   ]
-  },
   "test_n3wiring.py": {
    "references": [
     {
@@ -998,6 +894,43 @@
    ],
    "subject": [
     "ports/fnv-nx/verify/sdcheck.py"
+   ]
+  },
+  "test_shard.py": {
+   "references": [
+    {
+     "anchor": "## Shards and store merge",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
+  "test_stageref_cost.py": {
+   "references": [
+    {
+     "anchor": "### Stage refs evaluate their closure",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
+  "test_storeexport.py": {
+   "references": [
+    {
+     "anchor": "## Shards and store merge",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py",
+    "ports/fnv-nx/verify/sandbox.py"
    ]
   },
   "test_systemlibs.py": {

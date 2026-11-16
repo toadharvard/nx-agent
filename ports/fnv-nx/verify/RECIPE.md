@@ -382,10 +382,7 @@ no object) makes the CC stage print GCC's pass table to stderr, kept in the reco
 ...) and per unit, the TIMEREPORT summed per pass, and the stages that have no sidecar (hits only). Build with `@time` into a fresh store to time every pass.
 
 ## Include
-`include` is the unit's include path in order. A repo directory of it that lies in another admitted product root P (with a recipe for the unit's target) also brings
-P's own repo directories of `include`, transitively, after the consumer's own and each once (`recipe.include_closure`): a header that P ships names its dependencies once,
-in the recipe of P, and every consumer finds them. The entries of P's `include` that lie in an external are P's toolchain and are not carried. A directory of P's `include` that holds no tracked file is a generated tree of P and is not carried either (it does not exist in a consumer's tree): its headers reach a consumer through `include_uses`. A header root
-(class header) has no recipe and carries nothing; a header it includes from another root is named by the consumer.
+`include` is the unit's include path in order, and it is the whole path: a directory of another root enters it only by being named here (a root of class `header`, or a directory output the recipe `uses`, `include_uses`), never by being carried from the recipe of the root that ships it. A header that a root ships names its own dependencies in that root's recipe; a consumer that includes it names them as well. The entries that lie in an external are the toolchain's. A directory of another root's tree that is neither a header home nor a `uses` output is a check error (`include_uses_errors`, `include_home`).
 
 **A path into another root.** An `include` entry inside a generated tree of another root (a directory a generate stage of that root writes into that holds no tracked file, `recipe.generated_trees`, for example `platform/freetype/gen/include`) is a check error: a generated file of a root is its declared output, and a consumer takes it through `uses`. The root's own generated tree is not affected.
 
@@ -420,14 +417,9 @@ consumers: a later step's `inputs` ref `{"stage": "<root>:gen:I", "path": DIR}` 
 root reads it through `uses`. A directory output does not overlap another output or a tracked file. A stage whose stage-ref input is an output of a
 red generator is blocked by it (never run on a missing path). Tests: `tests/test_genchain.py` (a 3-stage chain, unmounted paths fail, the re-key rule).
 
-### Derived forms of a run step (`debs.closure`, `{"plugins": "root"}`)
+### Stage refs evaluate their closure
 
-Two sets are never written twice (they are derived once from their source):
-
-- `"debs": {"closure": [TOP, ...]}`: TOP are the packages of the programs the step runs; the step's debs are TOP and their Pre-Depends/Depends closure on the declared machine, `envcheck.dep_closure`, the rule that defines the declared package set itself (`debs.packages` is checked against it). The result is sorted, every deb's sha256 is in the stage key as before. A top that env.json does not declare is red in `check`; a top that is not installed on the declared machine is red in the build. A list of names is still accepted for a step whose few debs are the whole set.
-- `{"plugins": "root"}` as an input: one `{"plugin": NAME}` per plugin of the root's `plugins`, in declaration order (the order is written once). Red when the root declares no plugins or when it is written twice.
-
-`recipe.expand_run` is the one reader of the expanded steps (`check` after the form check, the build).
+A stage-ref input names one output of one run step. Evaluating it evaluates that step and the run steps whose outputs its inputs name (the transitive producers), in declaration order, and no other step of the root: the result and its key are the same as for the whole root, because a step's key is the content of what it mounts. A step that is not a producer cannot change them. One Job builds the root's artifacts once. The per-process memo of a stage-ref result is keyed by the content of the tracked tree (index blob hashes plus the sha256 of modified files), the store, the root, the step, the path and the step declaration; no stat or mtime is in a key.
 
 ### Generator tool reads (`gen:file-escape`)
 

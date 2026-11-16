@@ -266,7 +266,9 @@ def run_one(path, timeout, base, idx, extra=None, trace=None, cwd=None):
                                  start_new_session=True, env=env, cwd=cwd)
             try:
                 rc = p.wait(timeout=timeout)
-                if rc:
+                if rc < 0:
+                    why.append("killed by signal %d (%s)" % (-rc, signal.Signals(-rc).name if -rc in {int(x) for x in signal.Signals} else "?"))
+                elif rc:
                     why.append("exit %d" % rc)
             except subprocess.TimeoutExpired:
                 why.append("timeout %gs" % timeout)

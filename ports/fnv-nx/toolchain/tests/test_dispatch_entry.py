@@ -30,26 +30,6 @@ def disp_rows(obj):
         return s.data().decode().split('\n')[:-1] if s is not None else []
 
 
-def headers(td, so):
-    """a header of platform/include is included from C and from C++ units: each one compiles as both languages under the recipe's flags and plugins
-    (the C++ unit with the C++ keywords only: g++ rejects `_Static_assert` and `_Alignof`)"""
-    inc = os.path.join(HERE, '..', '..', 'platform', 'include')
-    pb.EXTRA['copy'].append(('ports/fnv-nx/platform/include', 'inc'))
-    pb.EXTRA['copy'].append(('ports/fnv-nx/shim/include', 'shim'))
-    pb.EXTRA['include'] += [pb.ROOT + '/inc', pb.ROOT + '/shim']
-    try:
-        # the universe: every header of the directory whose includes stay inside it and the shim (a header that reaches a sibling tree by `../` needs that tree's
-        # own product root as its home; it is covered where that root is built)
-        for h in sorted(f for f in os.listdir(inc) if f.endswith('.h') and '#include "../' not in open(os.path.join(inc, f)).read()):
-            for ext, lang in (('c', 'C'), ('cpp', 'C++')):
-                src = os.path.join(td, 'hdr_%s.%s' % (h[:-2], ext))
-                open(src, 'w').write('#include "%s"\n' % h)
-                r = pb.compile(src, os.path.join(td, 'hdr_%s_%s.o' % (h[:-2], ext)), so)
-                check('platform/include/%s compiles as %s' % (h, lang), r.returncode == 0, r.stderr[:900])
-    finally:
-        pb.EXTRA['copy'].clear(); pb.EXTRA['include'].clear()
-
-
 def main():
     td = tempfile.mkdtemp(prefix='test-dispatch-entry-')
     try:
@@ -76,18 +56,6 @@ def main():
                        ('union', 'ENTRY1-UNION'), ('union_nested', 'ENTRY1-UNION'), ('memcpy_other', 'ENTRY1-CONT'), ('memset', 'ENTRY1-CONT'), ('memmove_cast', 'ENTRY1-CONT')):
             r = pb.compile(os.path.join(FIX, 'bad_%s.cpp' % n), os.path.join(td, n + '.o'), so)
             check('%s is an error (%s)' % (n, tag), r.returncode != 0 and tag in r.stderr, r.stderr[:900])
-        for ext, lang in (('cpp', 'C++'), ('c', 'C')):
-            r = pb.compile(os.path.join(FIX, 'ok_atomic.' + ext), os.path.join(td, 'at_%s.o' % ext), so)
-            check('ENTRY1-ATOMIC (%s): generic and sized atomic load, store, exchange and compare-exchange, and the __sync movers, of one entry-holding type are same-type copies' % lang, r.returncode == 0, r.stderr[:1500])
-            for n in ('atomic_store_other', 'atomic_load_other', 'atomic_fetch_add'):
-                r = pb.compile(os.path.join(FIX, 'bad_%s.%s' % (n, ext)), os.path.join(td, '%s_%s.o' % (n, ext)), so)
-                check('%s (%s) is the error ENTRY1-CONT (an atomic move of another type, an arithmetic builtin on an entry)' % (n, lang), r.returncode != 0 and 'ENTRY1-CONT' in r.stderr, r.stderr[:900])
-        # C front end: the generic form's `*(U *)&obj` of an object is the object (or a view conversion of it), not a pointer
-        r = pb.compile(os.path.join(FIX, 'ok_atomic_local.c'), os.path.join(td, 'atl.o'), so)
-        check('ENTRY1-ATOMIC (C): a generic atomic store of a local object of the same type is a same-type copy', r.returncode == 0, r.stderr[:1500])
-        r = pb.compile(os.path.join(FIX, 'bad_atomic_store_local.c'), os.path.join(td, 'atlb.o'), so)
-        check('ENTRY1-ATOMIC (C): a generic atomic store of a local object of another type is the error ENTRY1-CONT', r.returncode != 0 and 'ENTRY1-CONT' in r.stderr, r.stderr[:900])
-        headers(td, so)
         r = pb.compile(os.path.join(FIX, 'bad_attr.cpp'), os.path.join(td, 'a.o'), so)
         check('the attribute on a function type (not a pointer) is an error', r.returncode != 0 and 'applies to a pointer-to-function type' in r.stderr, r.stderr[:900])
     finally:

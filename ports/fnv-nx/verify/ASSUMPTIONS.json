@@ -1062,7 +1062,7 @@
     "L3b:A-RCPPURE"
    ],
    "status": "REMOVE",
-   "removed_by": "planned: the exhaustive 2^32 run is repeated under every MXCSR RC\u00d7FTZ\u00d7DAZ combination (16) and every result recorded in the cert; rcpcert is red unless all 16 tables are equal",
+   "removed_by": "planned: the exhaustive 2^32 run is repeated under every MXCSR RC×FTZ×DAZ combination (16) and every result recorded in the cert; rcpcert is red unless all 16 tables are equal",
    "owner": "L3b"
   },
   {
