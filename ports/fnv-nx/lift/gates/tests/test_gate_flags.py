@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Self-test of gates/gate_flags.py (flag liveness, item 21) and of proof/flagagree.py on hand-assembled x86-32 bytes (no game data).   python3 -I tests/test_gate_flags.py
+"""Self-test of gates/gate_flags.py (flag liveness, item 21) and of gates/flagagree.py on hand-assembled x86-32 bytes (no game data).   python3 -I tests/test_gate_flags.py
 Each case is one body at 0x1000; the gate must give the stated result: None = green, else the (flag, origin, class) rows of the red reads.
 Origins: E = as at the entry of the body, C = as after a call, U = left undefined by an instruction."""
 import os
@@ -12,6 +12,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), '..', 'fnvlift', 'tests')); import _inputs; _inputs.configure_declared()      # the declared-machine inputs, as the lifter's program passes them
 import gate_flags as g
 
 A = 0x1000
@@ -277,7 +278,7 @@ class UndefWhen(unittest.TestCase):
 
 class Agree(unittest.TestCase):
     def test_agreement_rows(self):
-        from lift.proof import flagagree
+        import flagagree
         reps = {'and': bytes.fromhex('21d8'), 'cmp': bytes.fromhex('39c0'), 'imul': bytes.fromhex('0fafc1'), 'shl0': bytes.fromhex('c1e000'),
                 'rol1': bytes.fromhex('d1c0'), 'test_mem': bytes.fromhex('845e00')}
         n, bad = flagagree.agreement(reps)
