@@ -1585,3 +1585,10 @@ Paused: w3b, w4, farm; no other work.
     - objstub on gl4 at 8faa8175d: 0 findings in render/gl4; the od:gl-shader-failure citations resolve.
     - This branch (claude/fnv-l6-render) has a history unrelated to the trunk; it holds only the status file. The L6 code enters through w6-cand4.
 - bottleneck: w6-cand4 verdict → L1; base3 retake (L3a); lift/rt red (L3a).
+- 06:45Z cand4 on trunk fac693694 is BLOCKED. Only 3 of 13 L6 roots pass recipe check (shaders/total, bridgefacts, gl4shim).
+    - Missing from the trunk: the roots lib/sha256, shim INCLUDE, hostabi and tests/bootrt; and the w28 recipe forms external_of, include_of, foreach, named rows and the per-target host forms.
+    - The DATAMODEL `types` key needs L2's later DATAMODEL.json.
+    - The 3 roots alone are not submitted; they unblock no step. L1 has been asked which candidate carries the w28 forms.
+    - w6 is archived. Its prepared takeover is mechanical: checkout of w6-root 8faa8175d's L6 paths, then recipe check.
+- workers: none active (w6 and w7 archived; they wait on other layers).
+- bottleneck: L1 names the trunk head with the w28 recipe forms and the lib/sha256, shim, hostabi and bootrt roots; base3 (L3a); lift/rt (L3a).
