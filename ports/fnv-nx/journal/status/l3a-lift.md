@@ -1711,3 +1711,10 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Open on L5: the vectors 0x2a/0x2b/0x2c/0x2e. Once the farm-2 exe run lands, send L5 the vectors of the exe int-n sites.
 - Done (w13): xferpub.py @1fbcf5384, which publishes and pins the pack externals; test 8/8.
 - Queued on farm 2: xfer-density, variants B (72d7bb259) and R2 (1fbcf5384), all images: tally, publish, PP token diff. R12 follows w12's rule 1.
+- Done (w12): rule 1, labels only where an emitted goto names one, claude/fnv-l3a-lift-w12-density @5302901b.
+  - Sound because a label is entered only by goto, and a missing label is a compile error.
+  - The nonlocal cases were already the derived arrival set.
+  - On 7 snippets: -4..-7 % bytes. 8/8 fnvlift tests pass.
+  - The prov tag tool (b5a902dd) is accepted.
+- Found (w12): recipe.use_inputs skipped `run` steps (fix 5511b3f0); the lift/sdm debs lacked their closure; lift/liftsrc/build.json was stale. Sent to w8 for base3.
+- Doing (w12): three heads b/r1/r12 with the same recipe. Farm 2's density STARTs are on hold and will be replaced by one brief over them.
