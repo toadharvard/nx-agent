@@ -12,6 +12,8 @@ Updated 2026-11-14 23:30Z (path plan). Older sections below are from 2026-11-12 
 - Goal path: product roots -> lifted packs as roots -> ELF -> boot -> WinMain -> menu -> first frame (GL in the emulator).
 
 
+**2026-11-16 04:10Z (orchestrator).** Trunk fb9dd044f unchanged. cand3b moved to 597f2e007; L1 told to run one verdict on that head and merge on green. Platform candidate claude/fnv-l5-platform-w32 1897a4fcc (L1 w28 merged), waiting for its farm verdict. Compiler: L2 w3 building the compiler stage, w2 fixing a decltype error in the lift/rt units. Lift: w7 on the virtual-call pop sites; w2, w8, w13 open; L1 asked L3a to take w28 322698c53 into base3. Emulator stuck since 02:51Z: the boot data install stopped at 7/11 on a full disk; resumed onto a farm. Decision 03:10Z (CLAUDE.md a172a44b7): every FP helper the Forms call goes to one REMOVE record, isla over the host object, after the first frame.
+
 **2026-11-16 01:10Z (orchestrator).**
 - Trunk fb9dd044f. cand3b (w15) is cut to the green roots and waits on a warm verdict before merge. Red at f536286ff: cold 789 s, 42 gates.
 - Cut again: platform, loader, bridgefacts, rt/guest_main and the render roots. Their reds are with their owners:
