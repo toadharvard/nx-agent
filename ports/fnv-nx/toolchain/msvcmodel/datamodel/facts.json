@@ -1,20 +1,20 @@
 {
  "target": "Microsoft Visual C++ 2008 (cl 15.00), x86, /Zc:wchar_t, /J off, /Zp8",
  "types": [
-  {"type": "char", "size": 1, "align": 1, "signed": true, "row": "S01"},
-  {"type": "signed char", "size": 1, "align": 1, "signed": true, "row": "S03"},
-  {"type": "unsigned char", "size": 1, "align": 1, "signed": false, "row": "S03"},
-  {"type": "bool", "size": 1, "align": 1, "signed": false, "row": "S03"},
-  {"type": "short", "size": 2, "align": 2, "signed": true, "row": "S04"},
-  {"type": "int", "size": 4, "align": 4, "signed": true, "row": "S05"},
-  {"type": "long", "size": 4, "align": 4, "signed": true, "row": "S05"},
-  {"type": "long long", "size": 8, "align": 8, "signed": true, "row": "S06"},
-  {"type": "float", "size": 4, "align": 4, "signed": true, "row": "S07"},
-  {"type": "double", "size": 8, "align": 8, "signed": true, "row": "S08"},
-  {"type": "long double", "size": 8, "align": 8, "signed": true, "row": "S09"},
-  {"type": "pointer", "size": 4, "align": 4, "signed": false, "row": "S10"},
-  {"type": "enum", "size": 4, "align": 4, "signed": true, "row": "S14"},
-  {"type": "wchar_t", "size": 2, "align": 2, "signed": false, "row": "S02"}
+  {"type": "char", "row": "S01"},
+  {"type": "signed char", "row": "S03"},
+  {"type": "unsigned char", "row": "S03"},
+  {"type": "bool", "row": "S03"},
+  {"type": "short", "row": "S04"},
+  {"type": "int", "row": "S05"},
+  {"type": "long", "row": "S05"},
+  {"type": "long long", "row": "S06"},
+  {"type": "float", "row": "S07"},
+  {"type": "double", "row": "S08"},
+  {"type": "long double", "row": "S09"},
+  {"type": "pointer", "row": "S10", "size_as": "long"},
+  {"type": "enum", "row": "S14", "size_as": "int"},
+  {"type": "wchar_t", "row": "S02"}
  ],
  "facts": [
   {
