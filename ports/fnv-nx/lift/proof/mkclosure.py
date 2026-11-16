@@ -17,7 +17,8 @@ def main(argv):
     tree = "/scratch/repo/ports/fnv-nx"      # the checkout layout certbasis reads: lift/{proof,fnvlift} and verify
     lift = tree + "/lift"
     os.makedirs(lift)
-    os.symlink(proof, os.path.join(lift, "proof")); os.symlink(fnvlift, os.path.join(lift, "fnvlift")); os.symlink(verify, os.path.join(tree, "verify")); os.symlink(contract, os.path.join(tree, "contract")); os.symlink(link, os.path.join(tree, "link"))
+    os.symlink(proof, os.path.join(lift, "proof")); os.symlink(fnvlift, os.path.join(lift, "fnvlift"))
+    for name, src in (("verify", verify), ("contract", contract), ("link", link)): shutil.copytree(src, os.path.join(tree, name), ignore=shutil.ignore_patterns("__pycache__"))      # copies, not links: recipe.py reaches its siblings by `verify/../link`, which the OS resolves physically through a link
     sys.path.insert(0, lift)
     from proof import certbasis
     sha = certbasis.prover_sha()
