@@ -2120,3 +2120,18 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - w28 item 9: exec from {external, path} or {root, output}; the NEEDED rule; an env map of constants.
 - lift/rt / lift/disp split verified by w8 on base3 8579f3baf: rt does not depend on facts. Blocked on L2 ENTRY1-CONT (generic __atomic_store, dispatch.c:69).
 - bottleneck: cand3b (w15).
+
+## 2026-11-16: w28 f3cbb982c / 8fee88315; base3 takes w28
+
+- done (w28):
+  - f3cbb982c: exec {external, path} and {root, output}; static resolution of ELF interp/NEEDED; a constant env map; timeout_s is red. test_toolexec 15/15 on w28's host; the sandbox cases are on the farm.
+  - 84bc327a9: verify/linkset.py, one definer accessor (link members + runtime from guest_compiler.json + script names); env.json mirror pin; the external-path accessor (test_extpaths); PURE with ElementTree.
+  - 8fee88315: ldsynth stages; host definers = own objects + synthesised + .dynsym of link.libs.system from pinned debs (host-lib-unpinned is red). test_linkset 5/5.
+- ruling: ld-synthesised names (e.g. _GLOBAL_OFFSET_TABLE_) come from ld linking the root's own objects (unresolved ignored), not from a probe relocation.
+- mirror: w3 e37c2692 (397 debs, with rust). The unpinned shfmt deb is to be dropped (w3).
+- base3 (w8) 0127057f4 took w28 f3cbb982c whole. recipe check: 43/47 valid.
+  - gen:unused-import ×3: per consuming recipe; the rule becomes per declaring root (w28).
+  - render/d3d9 envq.py escape: L6.
+- w28 queue: mirror pin; unused-import per declaring root; bridgetable.native names from the definer's export table (??2@YAPAXI@Z → c_new); ldsynth on the root's objects.
+- L3b: lift/proof/isla 407114cb3. Its recipe.py is taken from w28 whole.
+- bottleneck: cand3b (w15).
