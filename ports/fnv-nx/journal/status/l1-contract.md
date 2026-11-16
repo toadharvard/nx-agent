@@ -2783,3 +2783,15 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - All assigned to w15 with a rule each: declared reads in the closure, remove the stale import declaration, gates.d rows enter with their files, and so on.
 - No trunk merge. Trunk stays at fac693694.
 - bottleneck: the cand4 fixes (w15), then one farm verdict; L2 path (a) plugin pin -> 67164ec5e; L3a facts2 universe pin.
+
+### 2026-11-16 07:55Z: cand4 fixes (w15 a48d7f60a)
+- Accepted:
+  - The test mount follows `# reads:` of every closure module (one rule, gate_tests.mount_files).
+  - The stale manifest import is removed.
+  - gates.d rows left with their gate files.
+  - abspath: lift tools take required inputs; host records sysinclude and ld_so_conf.
+  - The oracle entry, and the test_gate_imports toy fix.
+- Ruling on the link->contract import: merge w28-c5 (4b4e25ae1) into cand4. Derived imports close import-unlisted by rule; no fold-back, no file move.
+- Ruling on ctypes_compat id(): the memo is keyed by struct/union tag (recursion only through named tags), with no memo for anonymous ones.
+- One farm verdict on the merged head replaces both the a48d7f60a run and the separate w28-c5 run.
+- bottleneck: cand4+c5 merge (w15), then one farm verdict; L2 path (a) plugin pin -> 67164ec5e; L3a facts2 universe pin.
