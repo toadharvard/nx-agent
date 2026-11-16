@@ -758,3 +758,5 @@ After the first frame:
   - Job.archives in __init__;
   - the behavioural include_uses test.
   - test_archive_sources: 0 fails. Sent to L1 for cand5.
+- 2026-11-16 09:35Z: cand5 takes toolchain/ from cand4b. 3 base3 commits are missing on our line: dafe97810, daf35981b (-Wformat-diag) and the plugbuild hunk of d15047cd6. w2 lands them.
+  - Caveat sent to L1: our toolchain/ carries FNPARM, which needs the patched compiler. So it enters with the recipe-path pin, or else with ba2aa4dcb on top until the pin lands.
