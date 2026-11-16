@@ -14,3 +14,12 @@ def configure():
     """sets the x86sys input (a second call with the same value is a no-op: fnvlift.inputs); returns the record's sha256, as proof.x86sys.configure"""
     from proof import x86sys
     return x86sys.configure(PATH)
+
+
+def shape_keys():
+    """the shape universe: the keys (first column) of shapes.tsv of the mounted produced input PACK of root lift/liftsrc (tests/inputs.json; FNVNX_INPUT_PACK), the shapes the lifter built for every image.  No default: an unmounted input is an error"""
+    p = os.environ.get('FNVNX_INPUT_PACK')
+    if not p:
+        raise SystemExit('FNVNX_INPUT_PACK is not mounted (declare the produced input PACK of root lift/liftsrc in tests/inputs.json)')
+    with open(os.path.join(p, 'shapes.tsv')) as f:
+        return sorted({l.split('\t')[0] for l in f if l.strip() and not l.startswith('#')})

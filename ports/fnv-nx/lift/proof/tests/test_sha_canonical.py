@@ -1,5 +1,5 @@
 """shape_sha is a pure function of the Form's structure: the same in every process, whatever was built before it.
-The universe is a declared input (FNVNX_SHAPE_KEYS, one shape key per line).  Two fresh processes compute the sha of every key of it: one in sorted order, one in reversed order
+The universe is a declared input (the PACK output of lift/liftsrc, its shapes.tsv; tests/inputs.json).  Two fresh processes compute the sha of every key of it: one in sorted order, one in reversed order
 (so node serials, z3 AST ids and the hash-cons table all differ); every sha must be equal.  The whole universe is compared (no sampling)."""
 import os
 import subprocess
@@ -19,7 +19,7 @@ def child(order, out):
     import _inputs
     _inputs.configure_declared()      # the declared-machine files the Form builders read (x86sys, cpumodel, the certified rcp table)
     from proof import symform
-    keys = sorted(set(l.strip() for l in open(os.environ['FNVNX_SHAPE_KEYS']) if l.strip()))
+    keys = declared_x86sys.shape_keys()
     sample = keys[::-1] if order == 'reversed' else keys      # the other order is the unrelated batch of every key
     with open(out, 'w') as f:
         for k in sample:

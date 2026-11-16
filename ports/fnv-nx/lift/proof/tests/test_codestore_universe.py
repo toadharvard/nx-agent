@@ -1,5 +1,5 @@
 """every built Form of the shape universe that carries a code-segment store fault has, over the domain of the registers it writes through (both halves: data selectors and code selectors), exactly the SDM fault condition
-(sysspec_store.prove_codestore).  The universe is a declared input: FNVNX_SHAPE_KEYS = a file with one shape key per line (no default; unset is a KeyError).  Forms are built by the one builder, never listed."""
+(sysspec_store.prove_codestore).  The universe is a declared input: the PACK output of lift/liftsrc, its shapes.tsv keys (tests/inputs.json; no default).  Forms are built by the one builder, never listed."""
 import os
 import sys
 import unittest
@@ -17,7 +17,7 @@ import sysspec_store
 
 class Universe(unittest.TestCase):
     def test_every_codestore_form_has_the_sdm_condition(self):
-        keys = [l.strip() for l in open(os.environ['FNVNX_SHAPE_KEYS']) if l.strip()]
+        keys = declared_x86sys.shape_keys()
         rec = x86sys.load(); built = proved = 0; bad = []
         for k in keys:
             try: f = symform.symbuild(k).form

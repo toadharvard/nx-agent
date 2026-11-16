@@ -27,7 +27,8 @@ class T(unittest.TestCase):
             except (KeyError, AssertionError): continue                          # undecided on the declared OS: no concrete Form, nothing to equal
             ok, why = symform.link_ok(sf, raw, 0x401000); n += 1
             self.assertTrue(ok, (v, why))
-        self.assertEqual(n, 255)
+        from fnvlift import x86sys
+        self.assertEqual(n, 256 - len(x86sys.INT_EXCLUDED))      # every vector but those the record excludes (undecided on the declared OS) has a concrete Form that the shape equals; the count is the record's, not a constant
 
     def test_excluded_vector_is_red_at_instantiation(self):
         from fnvlift import x86sys
