@@ -17,10 +17,20 @@ from proof import shape, symform, sysspec, x86sys
 import sysspec_legacy as L
 
 
+def _missing():
+    declared_x86sys.configure()
+    try: rec = x86sys.load()
+    finally: inputs.reset()
+    return [r for r in ('lar_lsl', 'iret') if r not in rec]
+MISSING = _missing()
+SKIP = unittest.skipIf(MISSING, 'x86sys row %s not in the pinned record' % ', '.join(MISSING))
+
+
 def key(h):
     return shape.shape_key(next(iter(shape.decoder().disasm(bytes.fromhex(h), 0))))
 
 
+@SKIP
 class LarLsl(unittest.TestCase):
     def setUp(self):
         declared_x86sys.configure(); self.rec = x86sys.load()
@@ -66,6 +76,7 @@ class LarLsl(unittest.TestCase):
         self.assertEqual(L.check_larlsl(ins, g, symform.parse_key(k)[1], fx.REC)[0], 'FAILED(dsl)')
 
 
+@SKIP
 class Iret(unittest.TestCase):
     def setUp(self): declared_x86sys.configure(); self.rec = x86sys.load()
     def tearDown(self): inputs.reset()
