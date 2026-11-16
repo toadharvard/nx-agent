@@ -3045,3 +3045,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - 1 red: toolchain declares plugins with the stage1 compiler (RECIPE "Plugins"). Sent to L2: delete the key, or move the guest unit.
   - ssce5432: the may-load "total" rule (every non-system dll in the exe dir).
   - Pending: the sweep's FAIL-set diff against the trunk, lift/ from base3, then the farm verdict.
+- 12:27: w29 2B. The BFD assert is ld 2.42 on an undefined TLS-IE symbol under --unresolved-symbols=ignore-all. It is not PIE: non-PIE fails the same way. Reproduced minimally. The real link (with thread.cpp) passes.
+  - The ldsynth premise (own objects alone) is the defect. Rule (L3a's correction, so no synthesized double): ldsynth adds the defining product object of every undefined STT_TLS symbol through onedef, closed transitively. With no definer: red tls-undefined.
+  - Item 3: the reach facts were never present at objstub's turn, because the gates run by name and o < r. Rule: a gatefile `needs`, run in topological order, red on a cycle or unknown name. objstub needs reach. A missing facts file gives one finding, reach-facts-missing.
+  - Item 5 (doubles per link target) is in w29-c5 2fca329a.
