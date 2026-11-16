@@ -2020,10 +2020,7 @@ def emms_effect(d):
 
 # DSL fault kinds: the one source is L3a's fault table fnvlift/faults.json (read through fnvlift/faults.py: FAULTS, BYNAME); the order of the unmasked
 # checks is that of Wine 9.0 get_fpu_code (dlls/ntdll/unix/signal_i386.c): IE (with SF: STACK_CHECK), then DE, ZE, OE, UE, PE.
-import importlib.util as _ilu, os as _os
-_spec = _ilu.spec_from_file_location("fnvlift_faults", _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "fnvlift", "faults.py"))
-_faults = _ilu.module_from_spec(_spec)
-_spec.loader.exec_module(_faults)
+from fnvlift import faults as _faults
 FLT = {n: _faults.BYNAME[n]["code"] for n in ("FLT_IE", "FLT_DE", "FLT_ZE", "FLT_OE", "FLT_UE", "FLT_PE", "FLT_SF")}
 
 

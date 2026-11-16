@@ -7,7 +7,7 @@ python3 -I tests/test_x87spec.py"""
 import math, os, re, struct, sys, unittest
 from fractions import Fraction
 import z3
-HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.dirname(HERE))
+HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.dirname(HERE)); sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))      # proof/ (bare module names) and lift/ (fnvlift, proof.*)
 import x87spec as X
 K = X.K
 

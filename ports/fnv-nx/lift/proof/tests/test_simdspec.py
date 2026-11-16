@@ -4,7 +4,7 @@ against the C function itself.  No emulator (Unicorn / QEMU) and no host CPU: th
 citations are checked by acl2_cite_check.py DIR, the SDM quotes by sdm_cite_check.py.     python3 -I tests/test_simdspec.py"""
 import os, random, sys, unittest
 import z3
-HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.dirname(HERE))
+HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.dirname(HERE)); sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))      # proof/ (bare module names) and lift/ (fnvlift, proof.*)
 import simdspec as S
 CACHE = os.environ.get('GATE_CACHE')      # declared input of this test (the verdict store); without it the tests that need the published GEN output are skipped with the reason
 if CACHE: S.F.configure(CACHE)
