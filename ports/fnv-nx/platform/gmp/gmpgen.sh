@@ -7,7 +7,7 @@
 # (records.py cc), configure's link tests answered by rule CFG-LINK (toolchain/gcc/cfg_link.py: the linker's own archive closure over the runtime; no start files: the
 # product link has its own entry, so the test link line has none: -nostartfiles).
 set -euo pipefail
-trap 'rc=$?; for l in /scratch/w/b/config.log /scratch/w/bs.log /scratch/w/make.log; do [ -f "$l" ] && { echo "== $l: tail"; tail -n 6 "$l"; } >&2; done; echo "stage failed: line $LINENO: $BASH_COMMAND (exit $rc)" >&2; exit $rc' ERR
+trap 'rc=$?; for l in /scratch/w/b/config.log /scratch/w/bs.log /scratch/w/make.log; do [ -f "$l" ] && { echo "== $l: tail"; tail -n 2 "$l"; } >&2; done; echo "stage failed: line $LINENO: $BASH_COMMAND (exit $rc)" >&2; exit $rc' ERR
 SCRIPT_DIR_IN=/in
 RECREC=/in/2; MKUNITS=/in/3; CFG_LINK_PY=/in/4; GUEST_LD=/in/5; PROTO_SRC=/in/6; RECORDS=/in/7; TARBALL=/in/8; GCC=/in/9
 PY=/usr/bin/python3.12

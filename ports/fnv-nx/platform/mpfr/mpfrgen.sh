@@ -6,7 +6,7 @@
 # GMP is the `gmp` root's: its headers and its built objects (as libgmp.a) come in through the `archive` input (RECIPE.md "Archive inputs"). Configure's link tests are
 # answered by rule CFG-LINK (toolchain/gcc/cfg_link.py), as for gmp; a test that would run a built binary is a stage failure (the host cannot run an ILP32 guest).
 set -euo pipefail
-trap 'rc=$?; for l in /scratch/w/b/config.log /scratch/w/make.log; do [ -f "$l" ] && { echo "== $l: tail"; tail -n 6 "$l"; } >&2; done; echo "stage failed: line $LINENO: $BASH_COMMAND (exit $rc)" >&2; exit $rc' ERR
+trap 'rc=$?; for l in /scratch/w/b/config.log /scratch/w/make.log; do [ -f "$l" ] && { echo "== $l: tail"; tail -n 2 "$l"; } >&2; done; echo "stage failed: line $LINENO: $BASH_COMMAND (exit $rc)" >&2; exit $rc' ERR
 SCRIPT_DIR_IN=/in
 RECREC=/in/2; MKUNITS=/in/3; CFG_LINK_PY=/in/4; GUEST_LD=/in/5; PROTO_SRC=/in/6; RECORDS=/in/7; TARBALL=/in/8; GCC=/in/9; GMPDIR=/in/10
 PY=/usr/bin/python3.12
