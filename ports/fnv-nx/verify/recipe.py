@@ -4169,6 +4169,8 @@ def synth_names(repo, root, cache, kinds, script=None, objs=()):
     """The linker-synthesised names of ROOT for each link kind in KINDS (Job.synthesised, one cached stage per root and kind): the pinned ld of ROOT's compiler on ROOT's own objects OBJS
     [(unit, path)] and the kind's fixed options. A guest kind is `pie` (emulation aarch64linux32, link/guest.json's SCRIPT); a host kind is `shared` or `exe` (elf_x86_64, no script).
     -> {kind: set of names}. BuildRed/RecipeError as the stage."""
+    if not objs:   # a root with no objects (a header-only root) links nothing: ld defines no name for it, so it synthesises none (ld itself refuses a link with no input file)
+        return {k: set() for k in kinds}
     store = os.path.join(cache, "store")
     j = Job(repo, root, store, 1, ext_dir(cache))
     ws = tempfile.mkdtemp(prefix="synth-")
