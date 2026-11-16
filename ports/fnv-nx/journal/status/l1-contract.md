@@ -2528,3 +2528,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 ## 2026-11-16 04:44
 - w28 9bece3474: build-time foreach table (stage/external table, rows into DIR, red on empty/bad/shared rows; test_foreach_dynamic is farm-only); ASSUMPTIONS takes L6's retirements (no citers). Accepted. Asked for: the 7 assumptions findings (146/153) to route; whether L3b needs cross-root DIR consumption. Next: named rows.
 - bottleneck: the cand3b head with the pool, walk and budget fixes.
+
+## 2026-11-16 04:45
+- w28 702fcc133: named row inputs (as, @rows:NAME); chkall 0; L6 told. Accepted. w28 open items: the assumptions findings, the cross-root DIR question, the farm job, the head to w15.
+- bottleneck: the cand3b head with the pool, walk and budget fixes.
