@@ -118,6 +118,10 @@ TLC="-O2 $(tlflags c) $PLUG_C"   # no -ffunction-sections/-fdata-sections: rtasm
 # recipe's PP and CC stages do; the ODR definition record re-lexes the unit and can only do so from its own preprocessed text (a raw unit's include chains and macros are
 # not readable from the plugin). The flag changes no code: the same cc1 input, the preprocessed text is what the compiler would have lexed.
 TLCXX="-O2 -save-temps=obj $(tlflags cxx) $PLUG_CXX"
+# a plugin that writes a report (recipe.PLUGIN_OUT, the records' PLUGIN_REPORT) requires its out=FILE at every compile, configure's included. The runtime build has no unit report to
+# keep (the gates read the product units' reports), so each such plugin writes to /dev/null: a build argument, not part of the compiler's flags in MANIFEST (TLC/TLCXX).
+REPORT=""; for n in "${PLUGIN_REPORT[@]}"; do REPORT="$REPORT -fplugin-arg-$n-out=/dev/null"; done
+TLC_RUN="$TLC$REPORT"; TLCXX_RUN="$TLCXX$REPORT"
 note "CFLAGS_FOR_TARGET=$TLC"
 note "CXXFLAGS_FOR_TARGET=$TLCXX"
 
@@ -132,8 +136,8 @@ printf '*lib:\n%%{!shared:%%{g*:-lg} %%{!p:%%{!pg:--start-group -lc -lsysbase --
 
 {
   mkdir -p b-newlib; cd b-newlib
-  note "newlib configure: CFLAGS_FOR_TARGET='$TLC' $NL/configure --disable-newlib-supplied-syscalls --enable-newlib-mb --disable-newlib-wide-orient --enable-newlib-register-fini --target=$T --prefix=$P"
-  CFLAGS_FOR_TARGET="$TLC" "$NL/configure" --disable-newlib-supplied-syscalls --enable-newlib-mb \
+  note "newlib configure: CFLAGS_FOR_TARGET='$TLC_RUN' $NL/configure --disable-newlib-supplied-syscalls --enable-newlib-mb --disable-newlib-wide-orient --enable-newlib-register-fini --target=$T --prefix=$P"
+  CFLAGS_FOR_TARGET="$TLC_RUN" "$NL/configure" --disable-newlib-supplied-syscalls --enable-newlib-mb \
     --disable-newlib-wide-orient --enable-newlib-register-fini --target=$T --prefix="$P" > ../configure-newlib.log 2>&1
   # the .info manuals (libgloss/doc, newlib/doc) are documentation, not part of the runtime: the pinned environment has no texinfo, and the
   # tarball's own prebuilt .info files are what `make` would regenerate when the unpack order leaves a .texinfo newer than its .info.
@@ -160,9 +164,9 @@ printf '*lib:\n%%{!shared:%%{g*:-lg} %%{!p:%%{!pg:--start-group -lc -lsysbase --
   export PYTHON_CFG_LINK=""$PY" -I $CFG_LINK_PY"
   export FNVNX_CFG_NM=$P/bin/$T-nm FNVNX_CFG_LD=$P/bin/$T-ld FNVNX_CFG_EMUL=aarch64elf${ABI#ilp}
   export FNVNX_CFG_GUEST_LD=$CFG_GUEST_LD FNVNX_CFG_PROTOCOL_SRC=$CFG_PROTOCOL_SRC FNVNX_CFG_CACHE=$W/cfg-cache
-  note "target libraries: make -C b-gcc CFLAGS_FOR_TARGET='$TLC' CXXFLAGS_FOR_TARGET='$TLCXX'"
-  make -C b-gcc -j"$JOBS" CFLAGS_FOR_TARGET="$TLC" CXXFLAGS_FOR_TARGET="$TLCXX" > make-libs.log 2>&1
-  make -C b-gcc install CFLAGS_FOR_TARGET="$TLC" CXXFLAGS_FOR_TARGET="$TLCXX" > install-libs.log 2>&1
+  note "target libraries: make -C b-gcc CFLAGS_FOR_TARGET='$TLC_RUN' CXXFLAGS_FOR_TARGET='$TLCXX_RUN'"
+  make -C b-gcc -j"$JOBS" CFLAGS_FOR_TARGET="$TLC_RUN" CXXFLAGS_FOR_TARGET="$TLCXX_RUN" > make-libs.log 2>&1
+  make -C b-gcc install CFLAGS_FOR_TARGET="$TLC_RUN" CXXFLAGS_FOR_TARGET="$TLCXX_RUN" > install-libs.log 2>&1
   # The record of what the configure computed under CFG-LINK: the ac_cv_func_* / ac_cv_search_* values of each multilib's config.log (the
   # cache-variable section). The multilibs must agree; the MANIFEST carries it as cfg_func.
   "$PY" -I - "$W/b-gcc/$T" "$P/CFG-FUNC.json" <<'EOF5'
