@@ -155,16 +155,20 @@ def new_fresh(esp, st, mark, e):
 
 
 ALLREGS = ('eax', 'ebx', 'ecx', 'edx', 'esi', 'edi', 'ebp')
+ESPLOST = ('esplost',)      # key of the fpe dict (never an FPU image key): where the tracked esp was first lost on this path and the class; a join of paths that lost it differently drops the key, which is the class 'set join'
 ARG_LIMIT = 256      # widening bound of feed(): 64 stack argument words. 256 is a PRECISION parameter, not a correctness one: an input slot deeper than it goes to ALLCODE_INPUT, the top of the lattice (every register and slot possibly a code address), which is sound for any bound; with the bound the set of slot keys of an input is finite, so a join chain is finite and the argument pass terminates
 ALLCODE_INPUT = ({n: T_CODE for n in ALLREGS}, {}, True)      # an unknown input is possibly a code address: the sound value, not a fallback
 
 
-def ij_why(esp, st):
-    """why an indirect jmp is not a clean arrival (esp 0 and the entry's return address still at [esp]): the recorded reason of its residue row."""
-    if esp is None: return 'esp-lost'
-    if is_fresh(esp): return 'esp-fresh (esp loaded from a value that is not entry_esp + k)'
-    if esp != 0: return 'esp=%d' % esp
-    return 'ra-slot-%s' % ('absent' if 0 not in st else 'overwritten')
+def ij_why(esp, st, fpe=None):
+    """why an indirect jmp is not a clean arrival (esp 0 and the entry's return address still at [esp]): the recorded reason of its residue row.
+    esp is general there (the lifter keeps the run-time register); the reason names where and why the static value was lost."""
+    if esp is None:
+        c = (fpe or {}).get(ESPLOST)
+        return 'esp: general, first lost at %08x: %s' % c if c else 'esp: general, set join (paths disagree on the esp offset or its cause)'
+    if is_fresh(esp): return 'esp: general, esp loaded from a value that is not entry_esp + k (fresh stack space)'
+    if esp != 0: return 'esp: %d (proven)' % esp
+    return 'esp: 0 (proven), ra-slot-%s' % ('absent' if 0 not in st else 'overwritten')
 
 
 def feed(img, t, regs_t, stk_t):
@@ -334,7 +338,9 @@ def analyse_entry(img, e, mode='owner', force=False):
                     if key is not None and key[0] == 'stk': st[key[1]] = T_S4
                     else: emit(a, 's4', 'escape-stored', 'arithmetic result stored to memory', True)
             if X.X86_REG_ESP in g.regs_access()[1]:
-                img.info['esp-lost'] += 1; esp = None
+                img.info['esp-lost'] += 1
+                if esp is not None: fpe[ESPLOST] = (a, 'esp written by an arithmetic form')
+                esp = None
             succ = [nxt]
         elif mn == 'call' and img.calltg.get(a) == nxt:
             # call $+5: pushes the concrete address of the next instruction (a typed source of its own)
@@ -379,7 +385,9 @@ def analyse_entry(img, e, mode='owner', force=False):
             pp = sm['pop'] if sm is not None and sm['pop'] is not None else img.pops.get(tg) if tg is not None else img.imp.get(islot) if islot is not None else None
             if pp is not None and esp is not None: esp = esp + pp
             else:
-                if esp is not None: img.info['esp-lost'] += 1
+                if esp is not None:
+                    img.info['esp-lost'] += 1
+                    fpe[ESPLOST] = (a, 'vptr or function-pointer call (pop unknown)' if tg is None and islot is None else 'call of an entry whose pop is unknown' if tg is not None else 'import whose pop is unknown')
                 esp = None
             for k in [k for k in st if esp is None or (k < esp and is_fresh(k) == is_fresh(esp))]: st.pop(k)
             succ = [nxt]
@@ -412,7 +420,7 @@ def analyse_entry(img, e, mode='owner', force=False):
                 if not anyra and isinstance(v, tuple) and v[0] == 'ra': img.ijret.add(a)      # a jmp to this entry's own return-address symbol is a return to the caller's continuation: not an arrival at any entry (ruling 2026-11-16)
                 elif not anyra:
                     img.ijall.add(a)
-                    if esp != 0 or st.get(0) != ('ra', 0): img.ijbad.add(a); img.ijwhy[a] = ij_why(esp, st)
+                    if esp != 0 or st.get(0) != ('ra', 0): img.ijbad.add(a); img.ijwhy[a] = ij_why(esp, st, fpe)
                 if v == T_S4: emit(a, 's4', 'target-s4', 'jmp through a register holding arithmetic on a code address', True)
                 elif v == T_CODE: emit(a, 'code', 'code-target', 'jmp reg', False)
                 if tracked(v):
@@ -440,7 +448,7 @@ def analyse_entry(img, e, mode='owner', force=False):
                     img.ijimp.add(a)       # a tail call through an import slot (the loader's IAT): the callee is an import, not an entry of the image, so no arrival is recorded
                 else:       # an indirect jmp through memory that is not a table of relocated words: its targets are not enumerated
                     if not anyra: img.ijall.add(a)
-                    if not anyra and (esp != 0 or st.get(0) != ('ra', 0)): img.ijbad.add(a); img.ijwhy[a] = ij_why(esp, st)
+                    if not anyra and (esp != 0 or st.get(0) != ('ra', 0)): img.ijbad.add(a); img.ijwhy[a] = ij_why(esp, st, fpe)
             else:
                 t = o.imm & M32
                 if t != e and t in img.entries and owner(img, t):
@@ -572,7 +580,9 @@ def analyse_entry(img, e, mode='owner', force=False):
         elif mn == 'leave':
             al = None
             v = regs.get('ebp'); esp = (v[1] + 4) if isinstance(v, tuple) and v[0] == 'sp' else None
-            if esp is None: img.info['esp-lost'] += 1
+            if esp is None:
+                img.info['esp-lost'] += 1
+                fpe[ESPLOST] = (a, 'leave with an ebp that is not a tracked frame pointer')
             else:
                 pv = st.pop(esp - 4, None); regs.pop('ebp', None)
             for k in [k for k in st if esp is None or (k < esp and is_fresh(k) == is_fresh(esp))]: st.pop(k)
@@ -608,7 +618,9 @@ def analyse_entry(img, e, mode='owner', force=False):
                 regs.pop(n, None)
                 for ik in [k for k in fpe if k[0] == 'reg' and k[1] == n]: fpe.pop(ik)
             if X.X86_REG_ESP in wr and mn not in ('push', 'pop'):
-                if esp is not None: img.info['esp-lost'] += 1
+                if esp is not None:
+                    img.info['esp-lost'] += 1
+                    fpe[ESPLOST] = (a, 'esp written by %s' % mn)
                 esp = None
             succ = [nxt]
         if term: continue
@@ -833,8 +845,8 @@ def run(text, T0, entries, ranges, outdir, name, rd=None, rset=None, parent=None
                red_by_class={'%s/%s' % k: n for k, n in sorted(redc.items())}, s4_red=sum(1 for r in red if r[2] == 's4'), s4_target=sum(1 for r in red if r[2] == 's4' and not r[3].startswith('escape')), s4_escape_red=sum(1 for r in red if r[2] == 's4' and r[3].startswith('escape')), s4_red_proven=sum(1 for r in red if r[2] == 's4' and r[0] not in cand), s4_escapes=sum(1 for r in rows if r[2] == 's4' and not r[5]), code_sources=sum(1 for r in rows if r[2] == 'code'), red_candidate_entries=redcand, red_proven_entries=len(red) - redcand, esp_lost=img.info['esp-lost'], cond_fresh_entries=len(img.fresh), cond_fresh_list=['%08x' % x for x in sorted(img.fresh)], entries=len(entries), info=dict(img.info))
     json.dump(res, open(outdir + '/gate_pcsrc.json', 'w'), sort_keys=True)
     with open(outdir + '/pcsrc_ijmp.tsv', 'w') as f:      # the indirect jmp sites of the owners' flow and how each arrives: clean, a return through the RA symbol, or the recorded reason it is not clean
-        f.write('# site, status (clean | return | not-clean), reason; a not-clean site gives the whole ptr set as its dispatcher targets (arrival join)\n')
-        for a in sorted(img.ijall | img.ijret | img.ijimp): f.write('%08x\t%s\t%s\n' % (a, 'import-tail' if a in img.ijimp else 'return' if a in img.ijret else 'not-clean' if a in img.ijbad else 'clean', img.ijwhy.get(a, '-')))
+        f.write('# site, status (clean | return | import-tail | not-clean), esp fact; esp is a proven single value or general (the lifter then uses the run-time register: dispatcher or non-local loop); a not-clean site gives the whole ptr set as its dispatcher targets (arrival join)\n')
+        for a in sorted(img.ijall | img.ijret | img.ijimp): f.write('%08x\t%s\t%s\n' % (a, 'import-tail' if a in img.ijimp else 'return' if a in img.ijret else 'not-clean' if a in img.ijbad else 'clean', img.ijwhy.get(a, 'esp: 0 (proven)' if a not in img.ijret and a not in img.ijimp else '-')))
     json.dump({'s4_violations': res['s4_red']}, open(outdir + '/pcsrc_s4.json', 'w'), sort_keys=True)      # read by modlift's residual: no file = unchecked, N > 0 = violation
     return len(red), res
 
