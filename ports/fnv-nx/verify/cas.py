@@ -83,7 +83,27 @@ def _put(store, kind, name, data=None, mode=0o444):
     _publish(tmp, final)
     return final
 
+# POOL (env FNVNX_CAS_POOL, a store directory on the same filesystem as every store that uses it): the one copy of every object. Objects are
+# immutable and named by their content, so a store that has a POOL does not hold its own bytes: the object is made once in the POOL and each
+# store links it (a hard link, MAX_LINKS replicas as for placement). Which store, scratch or cache holds an object changes nothing but where the
+# bytes are: tests that build many stores of the same compiler closure hold it once. Unset: every store holds its own objects.
+POOL = os.environ.get("FNVNX_CAS_POOL") or None
+
 def _ingest_file(path, store, x):
+    if POOL and os.path.realpath(POOL) != os.path.realpath(store):
+        hx = _ingest_obj(path, POOL, x)
+        name = hx + (".x" if x else "")
+        final = os.path.join(store, "obj", hx[:2], name)
+        if not os.path.exists(final):
+            os.makedirs(os.path.dirname(final), exist_ok=True)
+            try:
+                _link_obj(os.path.join(POOL, "obj", hx[:2], name), final)
+            except FileExistsError:
+                pass
+        return hx
+    return _ingest_obj(path, store, x)
+
+def _ingest_obj(path, store, x):
     st = os.lstat(path)
     d = os.path.join(store, "obj")
     os.makedirs(d, exist_ok=True)

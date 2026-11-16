@@ -1816,6 +1816,8 @@ def fetch_externals(exts, store, extcache, ws):
                 shutil.rmtree(tmpco, ignore_errors=True)
             raise BuildRed({"stage": stage, "exit": None, "stderr": ["tree_sha256 is %s, recipe says %s" % (tree, e["tree_sha256"])]})
         if tmpco:
+            shutil.rmtree(tmpco)   # the checkout was only the thing to hash: the published one is the verified tree placed as hard links of the store's objects (one copy of the bytes)
+            cas.materialize(tree, store, tmpco)
             publish_dir(tmpco, co)   # a lost race: the published checkout is the same commit and the same verified tree
         os.makedirs(os.path.dirname(fact), exist_ok=True)
         ftmp = "%s.tmp%d-%s" % (fact, os.getpid(), os.urandom(4).hex())
@@ -2175,7 +2177,8 @@ class Job:
         host = os.path.join(self.extcache, "stage-" + tree)
         if not os.path.isdir(host):
             tmp = "%s.tmp%d-%s" % (host, os.getpid(), os.urandom(4).hex())
-            shutil.copytree(path, tmp, symlinks=True)
+            os.makedirs(self.extcache, exist_ok=True)
+            cas.materialize(tree, self.store, tmp)   # hard links of the store's objects: the mount is the ingested tree itself, not a second copy
             publish_dir(tmp, host)
         os.makedirs(os.path.join(self.extcache, "stage-ext"), exist_ok=True)   # the pointer a gate reads (host_compilers): name -> the tree this build used
         ptr = os.path.join(self.extcache, "stage-ext", e["name"] + ".json")
