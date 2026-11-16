@@ -2599,3 +2599,8 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - cand3b c93b807f3: GREEN, 42 gates, 0 red, at 868.8 s. That run was not a clean warm one: it hit the cache only partly, with a concurrent build. The farm reruns warm on an idle machine; the merge follows if warm is ≤300 s.
 - L6 sm_link: green at render-w6-root 21872d6be. 1,809 bytecodes, 115,776 stage certificates and 121,394 programs, 0 failed. Walk 18 (was 4,754). Certificate form given: the gate_cert request kind of gate_reach, with the branch as fnvnx_reach_violation(FNVNX_<id>).
 - bottleneck: the clean warm verdict at c93b807f3.
+
+## 2026-11-16 05:40
+- L6's claim of a made-up citation is unfounded. od:gl-shader-failure is the owner decision of 2026-11-15 20:20Z, with its anchor at CLAUDE.md:415 on cand3b and the integration branch. objstub reads only those anchors, and the test's OWN dict is a synthetic input. The GL compile/link-failure branch stays and is not converted. The gate_cert form applies to deko3d only.
+- Reported to the orchestrator: a missing rule. Nothing proves that the bytecode at run time is in the sm_link universe, because gatecert does not follow file provenance. deko3d is off the path, so this does not block GL.
+- bottleneck: the clean warm verdict at c93b807f3.
