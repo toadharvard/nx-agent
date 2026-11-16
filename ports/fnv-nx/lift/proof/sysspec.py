@@ -184,7 +184,10 @@ def check(key):
         try: rec = x86sys.load()
         except x86sys.Undecided as e: return 'uncertified', 'uncertified: %s' % e
         return check_far(key, fk, rec)
-    import sysspec_gap
+    import sysspec_gap, sysspec_legacy
+    if sysspec_legacy.family(sysspec_gap.decode(key)) is not None:      # BCD adjusts, SALC, SLDT, LES/LDS, far RET: claimed by decoding (sysspec_legacy.py, quotes checked against sysspec_legacy_pages.tsv)
+        try: return sysspec_legacy.check(key)
+        except x86sys.Undecided as e: return 'uncertified', 'uncertified: %s' % e
     if sysspec_gap.family(sysspec_gap.decode(key)) is not None:      # bswap, xlat, mov m16 from Sreg, bts: claimed by decoding (sysspec_gap.py, SDM quotes checked against sysspec_gap_pages.tsv)
         try: return sysspec_gap.check(key)
         except x86sys.Undecided as e: return 'uncertified', 'uncertified: %s' % e
