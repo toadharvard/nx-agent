@@ -91,7 +91,7 @@
   },
   {
    "root": "ports/fnv-nx/platform/mpfr",
-   "output": "INC_SRC"
+   "output": "INC_PUBLIC"
   }
  ],
  "include_uses": [
@@ -101,7 +101,7 @@
   },
   {
    "root": "ports/fnv-nx/platform/mpfr",
-   "output": "INC_SRC"
+   "output": "INC_PUBLIC"
   }
  ]
 }

@@ -91,7 +91,8 @@
    "dirs": [
     "u",
     "inc/build",
-    "inc/src"
+    "inc/src",
+    "pub"
    ],
    "scratch": [
     "/scratch"
@@ -101,7 +102,8 @@
  "sources": "units.list",
  "outputs": {
   "INC_BUILD": "inc/build",
-  "INC_SRC": "inc/src"
+  "INC_SRC": "inc/src",
+  "INC_PUBLIC": "pub"
  },
  "uses": [
   {

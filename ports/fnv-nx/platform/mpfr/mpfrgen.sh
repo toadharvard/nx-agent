@@ -36,4 +36,8 @@ cp "$RECREC" "$W/ccrec"; chmod +x "$W/ccrec"
 export CCREC_LOG=$W/compiles.log
 make -j"$JOBS" -C src CC="$W/ccrec" AR=true RANLIB=true libmpfr.la > ../make.log 2>&1
 "$PY" -I "$MKUNITS" "$W/b" "$SRC" "$CCREC_LOG" "$OUT_DIR" "$GMPDIR/INC_BUILD"
+# the installed API headers are the Makefile's own include_HEADERS (mpfr.h, mpf2mpfr.h): the output `pub`, the include directory of the roots that use MPFR
+printf 'print-pub:\n\t@echo $(include_HEADERS)\n' > "$W/pub.mk"
+mkdir -p "$OUT_DIR/pub"
+for h in $(make -s -C src -f Makefile -f "$W/pub.mk" print-pub); do cp "$SRC/src/$h" "$OUT_DIR/pub/$h"; done
 echo "mpfrgen:u" > "$OUT_DIR/units.list"   # the `sources` line: the units are the files of this step's directory output u (RECIPE.md, Generated sources)
