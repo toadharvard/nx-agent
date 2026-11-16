@@ -27,7 +27,7 @@ Nothing else enters: no run id, no hash of the DSL sources. A DSL edit voids exa
 - Only proved shapes get a row; one row per proved shape; rows are unique and sorted; the output depends on the set of records only (not on shard order, file names or time).
 - A record that does not match the key rule is STALE: it is ignored and counted, never a refusal and never a row. Stale kinds: `stale-model` (IR sha differs), `stale-dsl` (dsl_sha differs).
 - The run is REFUSED (exit 2, no output) when the records contradict each other: the same current (shape, dsl_sha, model_sha) is `proved` in one record and `FAILED(...)` in another.
-- A record that is not `proved` (`timeout`, `FAILED(...)`, `model-gap`) is counted by its result and gives no row.
+- A record that is not `proved` (`bound`, `FAILED(...)`, `model-gap`) is counted by its result and gives no row.
 - `--queue`: the shapes of a shapes.tsv (family `int` with a symbolic Form) that have no valid certificate; the queue id is the first 12 hex of sha256 over `key TAB dsl_sha` of the queue lines.
 - `--coverage`: every int key with a Form has one decided record at the current (dsl_sha, model_sha); exit 1 and the missing list otherwise.
 
@@ -96,7 +96,7 @@ against `x87spec.py` (OWNER 10 for the parts no pinned formal model covers; the 
   (`acl2_cite_check.py DIR` resolves every cite and fails on a stale or missing one). A row ACL2 lacks is an SDM row with the quote, as in x87spec.py.
 - Obligation (per encoding shape, `simdcheck.py`): the symbolic Form's z3 post-state (xmm0-7, fr0-7, ftop, ftag, mxcsr, the eight general registers, memory,
   the fault kind) equals the spec's on every pre-state and every displacement/immediate value, under the declared environment. unsat is the proof; the
-  result classes are proved | FAILED (counter-model) | no-row | no-form | timeout.
+  result classes are proved | FAILED (counter-model) | no-row | no-form | bound.
 - Dependences stated, not hidden: the effective address is the Form's own (`forms.ea` of the same adapter operand): it is the integer path's certified fact.
   The environment is `cr0_em = 0, cr0_ts = 0, cr4_osfxsr = 1` (Res.env): the rows of L5's x86sys (the user-mode machine); the spec reads them as state
   variables, never as a constant.

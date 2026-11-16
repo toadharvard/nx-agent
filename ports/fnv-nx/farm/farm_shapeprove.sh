@@ -18,7 +18,7 @@
 # Resumable and incremental: the shard's results branch is updated every PUBLISH_EVERY seconds (default 600) and on SIGTERM/SIGINT; a rerun of the same command resumes from the published file (shapes with a record are skipped), so a time limit, a crash or a kill loses at most one increment.
 # Env: GATE_CACHE (required: the verdict cache; the Sail toolchain and caches are under it)  FNVNX_BUILD (clone of fnv-nx-build)  FNVNX_WORK (default $GATE_CACHE/farm-shapeprove)
 #      SHAPES_BRANCH (default l3b-lift/shapes; the census branch, KEYS.tsv-pinned; a re-pinned census goes to ANOTHER branch, the running farms read the head of this one)  BRANCH_PREFIX (default l3b-lift/shapeprove; tests use l3b-lift/shapeprove-test)  PUBLISH (1 default; 0: prove only)
-#      TIMEOUT (s per shape, default 600)  EIP (sym|fixed, default sym)  SLICE (default 1)  LIMIT (first LIMIT shapes of the shard, default all)
+#      EIP (sym|fixed, default sym)  SLICE (default 1)  LIMIT (first LIMIT shapes of the shard, default all)
 #      VMEM_KB (address-space limit per process, default 6000000)  SHAPES (a shapes.tsv: skips the fetch of l3b-lift/shapes; local tests)
 # Last line: SHAPEPROVE shard=K/N id=ID shapes=<n> proved=<n> ... seconds=<wall> ; exit 1 if publication failed.
 set -euo pipefail
@@ -157,7 +157,7 @@ if [ "$MODE" = simd ]; then
     [ "$(sha256sum "$CF" | cut -d' ' -f1)" = "$CFH" ] || { echo "cpufeat table sha256 differs from the queue header" >&2; exit 1; }
     python3 -I "$HERE/simdshard.py" --cpufeat "$CF" --x86sys "$X86SYS_FILE" --shapes "$QUEUE" --shard "$K/$N" --out "$OUT" --timeout "${TIMEOUT:-60}" --slice "${SLICE:-1}" --cache "$GATE_CACHE" ${LIMIT:+--limit "$LIMIT"} >> "$OUT/shapeprove_${K}_of_$N.log" 2>&1 &
 else
-python3 -I "$HERE/shapeprove.py" "${TC[@]}" --shapes "$QUEUE" --shard "$K/$N" --out "$OUT" --timeout "${TIMEOUT:-600}" --eip "${EIP:-sym}" --slice "${SLICE:-1}" ${LIMIT:+--limit "$LIMIT"} >> "$OUT/shapeprove_${K}_of_$N.log" 2>&1 &
+python3 -I "$HERE/shapeprove.py" "${TC[@]}" --shapes "$QUEUE" --shard "$K/$N" --out "$OUT" --eip "${EIP:-sym}" --slice "${SLICE:-1}" ${LIMIT:+--limit "$LIMIT"} >> "$OUT/shapeprove_${K}_of_$N.log" 2>&1 &
 fi
 PP=$!
 trap 'kill $PP 2>/dev/null; wait $PP 2>/dev/null; publish; exit 143' TERM INT

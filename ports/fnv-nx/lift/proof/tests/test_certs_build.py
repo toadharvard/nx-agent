@@ -51,7 +51,7 @@ class Aggregate(unittest.TestCase):
 
     def test_rows_sorted_and_independent_of_shard_order(self):
         a = self.write('shapeprove_1_of_2.jsonl', [rec(KEYS[2]), rec(KEYS[0])])
-        b = self.write('shapeprove_2_of_2.jsonl', [rec(KEYS[1]), rec(KEYS[1], 'timeout')])
+        b = self.write('shapeprove_2_of_2.jsonl', [rec(KEYS[1]), rec(KEYS[1], 'bound')])
         o1, o2 = os.path.join(self.d, 'o1'), os.path.join(self.d, 'o2')
         self.assertEqual(self.run_main([a, b], o1), 0)
         self.assertEqual(self.run_main([b, a], o2), 0)
@@ -63,7 +63,7 @@ class Aggregate(unittest.TestCase):
 
     def test_only_proved_rows(self):
         keys = KEYS
-        a = self.write('shapeprove_1_of_1.jsonl', [rec(KEYS[0]), rec(KEYS[1], 'timeout'), {'shape': KEYS[2], 'result': 'no-form'}])
+        a = self.write('shapeprove_1_of_1.jsonl', [rec(KEYS[0]), rec(KEYS[1], 'bound'), {'shape': KEYS[2], 'result': 'no-form'}])
         o = os.path.join(self.d, 'o')
         self.assertEqual(self.run_main([a], o), 0)
         self.assertEqual(len(open(o).read().splitlines()), 2)
@@ -162,9 +162,9 @@ class Aggregate(unittest.TestCase):
             certs_build._SHA.clear()
         self.assertEqual(self.queue([a], keys), [])
 
-    def test_failed_and_timeout_stay_queued(self):
+    def test_failed_and_bound_stay_queued(self):
         keys = KEYS
-        a = self.write('shapeprove_1_of_1.jsonl', [rec(KEYS[0]), rec(KEYS[1], 'timeout'), rec(KEYS[2], 'FAILED(dsl)')])
+        a = self.write('shapeprove_1_of_1.jsonl', [rec(KEYS[0]), rec(KEYS[1], 'bound'), rec(KEYS[2], 'FAILED(dsl)')])
         self.assertEqual(self.queue([a], keys), KEYS[1:])
 
     def test_directory_argument(self):
