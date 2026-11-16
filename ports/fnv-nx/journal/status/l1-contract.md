@@ -3004,3 +3004,5 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - Ruling on Galaxy: platform/declared_modules.tsv (L5) with dll, kind=served-absent-service, and a cite to the CLAUDE.md section. served = declared with no file ∪ served-absent-service rows.
   - Reds: a dll not declared, a bad or missing cite, a duplicate row, a reached export with no bridge row.
   - Expected images 10 -> 8. L5 adds the 2 rows, then w28 goes on to reached + pins.
+- 12:04: corrected the Galaxy rule (w28 found my red was wrong: galaxy and galaxywrp are not in declared_dlls, since Wine has no spec for them). A declared_modules row = a module of the declared install (it has a file) whose service is absent.
+  - Red: already declared with no file (redundant); no file; not reached by the closure (orphan); a bad cite, duplicate, bad kind or malformed row; a reached export with no bridge row.
