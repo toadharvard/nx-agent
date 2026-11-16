@@ -183,30 +183,27 @@ class HelperTable(unittest.TestCase):
         self.assertIsNone(H.node_call(dsl.V("a", 32)))
         self.assertEqual({n.op for n in H.nodes([dsl.cvt_val(c)])} >= {"cvt", "extract", "var"}, True)
 
-    def test_classes_and_items(self):
-        self.assertEqual((H.classify(11), H.classify(32), H.classify(33)), ("narrow", "narrow", "wide"))
-        tab = {"fx_dsl_cvt": {"ops": ["cvt"], "callers": []}, "fnvl_tab_rcp": {"ops": ["tab"], "callers": []}}
-        w = {"fx_dsl_cvt": 224, "fnvl_tab_rcp": 32, "sse_f2i": 96, "u": None}
-        it = G.helper_items("r", tab, None, ["sse_f2i", "u"], True, w)
-        self.assertEqual([c for c, _ in it["helper:r/fnvl_tab_rcp"]], ["helper-no-exhaustive-cert"])
-        self.assertEqual([c for c, _ in it["helper:r/u"]], ["helper-width-underived"])
-        self.assertEqual((it["helper:r/fx_dsl_cvt"], it["helper:r/sse_f2i"], it["r:helper-record"]), ([], [], []))
-        self.assertEqual([c for c, _ in G.helper_items("r", tab, None, ["sse_f2i"], False, w)["r:helper-record"]], ["helper-record-missing"])
-        self.assertEqual(G.wide_scope(tab, ["sse_f2i", "u"], w), ["fx_dsl_cvt", "sse_f2i"])
-        self.assertEqual(G.helper_items("r", None, "why", ["x"], True, {}), {"r:helper-table": [("helper-table-inputs", "why")]})
-        self.assertEqual(G.helper_items("r", tab, None, [], True, {}), {})
+    def test_coverage(self):
+        tab = {"fx_dsl_cvt": {"ops": ["cvt"], "callers": []}, "fnvl_tab_rcp": {"ops": ["tab"], "callers": []}, "fnvl_rcp32": {"ops": ["tab"], "callers": []}}
+        cd = {"fnvl_rcp32"}
+        it = G.helper_items("r", tab, None, ["sse_f2i"], True, cd)
+        self.assertEqual({k: v for k, v in it.items() if v}, {})
+        self.assertEqual(sorted(it), ["helper:r/fnvl_rcp32", "helper:r/fnvl_tab_rcp", "helper:r/fx_dsl_cvt", "helper:r/sse_f2i"])
+        nr = G.helper_items("r", tab, None, ["sse_f2i"], False, cd)
+        self.assertEqual(sorted(k for k, v in nr.items() if v), ["helper:r/fnvl_tab_rcp", "helper:r/fx_dsl_cvt", "helper:r/sse_f2i"])
+        self.assertEqual([c for c, _ in nr["helper:r/fx_dsl_cvt"]], ["helper-uncovered"])
+        self.assertEqual(G.covered_scope(tab, ["sse_f2i"], cd), (["fnvl_tab_rcp", "fx_dsl_cvt", "sse_f2i"], ["fnvl_rcp32"]))
+        self.assertEqual(G.helper_items("r", None, "why", ["x"], True, set()), {"r:helper-table": [("helper-table-inputs", "why")]})
+        self.assertEqual(G.helper_items("r", tab, None, [], True, set()), {})
 
-    def test_dwarf_width_of_a_real_object(self):
+    def test_defining_unit_from_object_symbols(self):
         import subprocess, tempfile
-        d = tempfile.mkdtemp(prefix="dw-")
-        src, obj = os.path.join(d, "h.cc"), os.path.join(d, "h.o")
-        open(src, "w").write("typedef unsigned int u32; struct fv{unsigned long long v; u32 k;};\n"
-                             "u32 sse_f2i(double v, u32 rc){ return (u32)(int)v + rc; }\n"
-                             "unsigned long long fv_i(fv a, u32 b, const u32 c){ return a.v + b + c; }\n"
-                             "u32 nodw(u32 a, ...){ return a; }\n")
-        subprocess.check_call(["g++", "-g", "-O0", "-c", src, "-o", obj])
-        w = H.dwarf_bits([obj])
-        self.assertEqual((w["sse_f2i"], w["fv_i"], w["nodw"]), (96, 128 + 64, None))
+        d = tempfile.mkdtemp(prefix="cs-")
+        for n, body in (("rcptab.c", "unsigned fnvl_rcp32(unsigned a){return a;}\n"), ("x.c", "extern unsigned fnvl_rcp32(unsigned); unsigned g(unsigned a){return fnvl_rcp32(a);}\n")):
+            subprocess.check_call(["gcc", "-c", os.path.join(d, n) if open(os.path.join(d, n), "w").write(body) is not None else "", "-o", os.path.join(d, n + ".o")])
+        objs = [("rcptab.c", os.path.join(d, "rcptab.c.o")), ("x.c", os.path.join(d, "x.c.o"))]
+        self.assertEqual(G.cert_symbols(objs, d, None) >= {"fnvl_rcp32"}, True)
+        self.assertEqual(G.cert_symbols(objs, None, None), set())
 
     def test_record_is_in_the_registry(self):
         self.assertTrue(G.record_ok(os.path.normpath(os.path.join(LIFT, "..", "..", ".."))))

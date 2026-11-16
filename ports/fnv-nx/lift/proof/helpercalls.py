@@ -6,14 +6,10 @@ expression or as a call of an lift/rt helper. This module asks the emitter itsel
 expression is a call (an identifier directly followed by an opening parenthesis), with the INPUT BITS of the call = the sum of the widths of the node's operands.
 No name list and no pattern over source text: a node op that a later change of the emitter turns into a call enters the table by itself.
 Not in the table, by rule: `uf` nodes (the declared platform functions, certified through the declared column of the form certificates, proof/declared.json).
-`table(keyed_forms)` -> {callee: {"ops", "callers"}}; `universe(repo, cache, objects)` -> the rows {helper, input_bits, callers}, the importable form of the universe.
+`table(keyed_forms)` -> {callee: {"ops", "callers"}}; `universe(repo, cache)` -> the rows {helper, callers}, the importable form of the universe.
 `pack_forms(cache)` -> [(shape key, Form)] of every shape of the lifted pack of formgate_inputs.json that has a symbolic builder (the shapes that formgate judges);
 raises formgate.Red when the inputs are not declared.
-Widths (`dwarf_bits`): ONE rule for every helper, whatever source named it: the input bits are the sum of the byte sizes of the DWARF formal_parameter types of the helper's
-own definition (DW_TAG_subprogram of that name) in the objects of the root that defines it, times 8. A parameter that carries the MXCSR or another register value is a
-parameter, so it is counted; global state read inside a body is not a parameter and is not derived here. A helper with no DWARF definition, a parameter type of unknown size,
-a variadic parameter, or two definitions that disagree has NO width: it is red (`helper-width-underived`), never wide.
-Classes (`classify`, over a derived width): "narrow" = input bits <= 32 (an exhaustive host check over the whole domain is possible); "wide" = more. The REMOVE record ASM-329 covers exactly the wide class."""
+Every helper of the table is covered by the REMOVE record ASM-329 (any width), or by rcpcert when its defining unit is the rcpcert table unit (decided by gate_fpexact from the object symbol tables)."""
 import os
 import sys
 
@@ -22,9 +18,6 @@ LIFT = os.path.dirname(HERE)
 sys.path.insert(0, LIFT)
 from fnvlift import dsl  # noqa: E402
 from proof import formgate, shape, symform, x86sys  # noqa: E402
-
-NARROW_BITS = 32
-
 
 def node_call(n):
     """-> (callee, input bits) iff the emitter writes node N as a call of a runtime helper, else None"""
@@ -50,7 +43,7 @@ def nodes(roots):
 
 
 def table(keyed_forms):
-    """KEYED_FORMS [(shape key, Form)] -> {callee: {"ops": sorted node ops that call it, "callers": sorted shape keys}}; the widths are not here: dwarf_bits is the one width rule"""
+    """KEYED_FORMS [(shape key, Form)] -> {callee: {"ops": sorted node ops that call it, "callers": sorted shape keys}}; no widths: every helper is covered by ASM-329 or rcpcert"""
     t = {}
     for key, f in keyed_forms:
         for n in nodes(f.roots()):
@@ -60,62 +53,6 @@ def table(keyed_forms):
                 e["ops"].add(n.op)
                 e["callers"].add(key)
     return {k: {"ops": sorted(v["ops"]), "callers": sorted(v["callers"])} for k, v in sorted(t.items())}
-
-
-def classify(bits):
-    """bits: a derived width (int)"""
-    assert isinstance(bits, int)
-    return "narrow" if bits <= NARROW_BITS else "wide"
-
-
-_FOLLOW = ("DW_TAG_typedef", "DW_TAG_const_type", "DW_TAG_volatile_type", "DW_TAG_restrict_type", "DW_TAG_atomic_type")
-
-
-def _size(die):
-    """byte size of the type DIE's value, following typedefs and qualifiers; None when the DWARF does not give it"""
-    t = die
-    while t is not None:
-        if t.tag in _FOLLOW:
-            if "DW_AT_type" not in t.attributes:
-                return None
-            t = t.get_DIE_from_attribute("DW_AT_type")
-            continue
-        a = t.attributes.get("DW_AT_byte_size")
-        return a.value if a is not None else None
-    return None
-
-
-def dwarf_bits(paths):
-    """-> {helper name: input bits or None} over the object files PATHS: the width rule of the module docstring. None = underived (a definition without usable DWARF, or definitions that disagree)"""
-    from elftools.elf.elffile import ELFFile
-    out = {}
-    for p in paths:
-        with open(p, "rb") as fh:
-            elf = ELFFile(fh)
-            if not elf.has_dwarf_info():
-                continue
-            for cu in elf.get_dwarf_info().iter_CUs():
-                for d in cu.iter_DIEs():
-                    if d.tag != "DW_TAG_subprogram" or "DW_AT_name" not in d.attributes or d.get_parent() is None:
-                        continue
-                    name = d.attributes["DW_AT_name"].value.decode()
-                    kids = list(d.iter_children())
-                    if not kids and "DW_AT_abstract_origin" in d.attributes:
-                        continue      # a concrete instance: the abstract one carries the parameters
-                    total = 0
-                    for k in kids:
-                        if k.tag == "DW_TAG_unspecified_parameters":
-                            total = None
-                            break
-                        if k.tag != "DW_TAG_formal_parameter":
-                            continue
-                        sz = _size(k.get_DIE_from_attribute("DW_AT_type")) if "DW_AT_type" in k.attributes else None
-                        if sz is None:
-                            total = None
-                            break
-                        total += 8 * sz
-                    out[name] = total if out.get(name, total) == total else None
-    return out
 
 
 def pack_forms(cache, repo=None):
@@ -132,10 +69,9 @@ def pack_forms(cache, repo=None):
     return out
 
 
-def universe(repo, cache, objects=()):
-    """THE helper universe, importable: (repo = the checkout root, cache = a directory for the externals, OBJECTS = object files of the root that defines the helpers)
-    -> [{"helper": name, "input_bits": int or None (dwarf_bits: None = underived), "callers": [shape keys of the Forms that call it]}] sorted by helper. Raises formgate.Red when the
-    pack's inputs are not declared. The one derivation: the call table of the Forms (this module) and the width rule dwarf_bits; nothing else defines a helper or a width."""
+def universe(repo, cache):
+    """THE helper universe, importable: (repo = the checkout root, cache = a directory for the externals)
+    -> [{"helper": name, "callers": [shape keys of the Forms that call it]}] sorted by helper. Raises formgate.Red when the pack's inputs are not declared.
+    The one derivation: the call table of the Forms (this module); nothing else defines a helper."""
     t = table(pack_forms(cache, repo))
-    w = dwarf_bits(objects)
-    return [{"helper": h, "input_bits": w.get(h), "callers": v["callers"]} for h, v in t.items()]
+    return [{"helper": h, "callers": v["callers"]} for h, v in t.items()]

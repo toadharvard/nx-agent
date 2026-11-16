@@ -11,17 +11,19 @@ its object}: the `f2i` field of the object's row, the single place where the rec
 The table files are files of the admitted root that holds them (L3a's guest root lift/rt: rcptab.c, rcptab.cert.json; rcpref.h is in the root's published GEN output, genout.gen_dir): the item
 `<image>:rcpcert` exists per linked image (a root with a link stage) iff another object of the image references a symbol that the object compiled from the unit rcptab.c defines (symbol tables of the objects: the link resolves exactly those references); no image, or no such reference: no item (universe 0 for check 1).
 
-Check 0, the helpers of lift/rt (items `helper:<root>/<callee>`, `<root>:helper-table`, `<root>:helper-record`). The shape certificates (gate "forms") prove that a Form equals the Sail model;
-they stop at the call into a lift/rt helper, so the C body of a helper is NOT covered by them, and this gate makes no claim that it is. What this check certifies, exactly:
-  the HELPER UNIVERSE is derived, never listed: (A) the Form -> helper call table of proof/helpercalls.py (the lifter's own emitter decides which Form node is a call; the Forms are
-  those of the lifted pack of formgate_inputs.json), and (B) the functions that the plugin fnvnx_ftoi reports as `helpers` (attribute fnvnx_f2i) in the f2i files of the root's objects. A root has
-  these items iff (B) is not empty there (the root of the lift/rt runtime holds the FNVL_F2I helpers; (A) is the table of that runtime).
-  Each helper is classified by INPUT BITS (helpercalls.dwarf_bits, one rule for A and B: the DWARF formal_parameter byte sizes of the helper's definition; underived = red `helper-width-underived`, never wide): narrow = at most 32 bits, wide = anything else.
-  narrow: certified only by the exhaustive-compare output of the host-test root lift/proof/fpchost (L3a w13; libfpchost.so exporting fpc_cvt, fpc_fp, fpc_f2i): a run step that reports per helper 0 mismatches, the term sha and the object sha. That output does not exist yet and is read only when present (its reader is written with the step, no format is guessed here): the item is red, code `helper-no-exhaustive-cert`, "no exhaustive helper certificate".
-  wide: not red. Its C body is tested, not proven, and is covered by the REMOVE record ASM-329 (verify/ASSUMPTIONS.json, owner L3b); the gate reports the wide helpers by name in its detail and computes
-  that scope from the table, the record does not list them. The item `<root>:helper-record` is red (`helper-record-missing`) when a wide helper exists and ASM-329 is not a REMOVE record of L3b.
+Check 0, the helpers of lift/rt (items `helper:<root>/<callee>` and `<root>:helper-table`). The shape certificates (gate "forms") prove that a Form equals the Sail model; they stop at the call into a
+lift/rt helper, so the C body of a helper is NOT covered by them, and this gate makes no claim that it is. What this check certifies, exactly: every helper of the derived universe is covered,
+by one of two things, and a helper covered by neither is red.
+  the HELPER UNIVERSE is derived, never listed: (A) the Form -> helper call table of proof/helpercalls.py (the lifter's own emitter decides which Form node is a call; the Forms are those of
+  the lifted pack of formgate_inputs.json), and (B) the functions that the plugin fnvnx_ftoi reports as `helpers` (attribute fnvnx_f2i) in the f2i files of the root's objects. A root has these items iff
+  (B) is not empty there (the root of the lift/rt runtime holds the FNVL_F2I helpers; (A) is the table of that runtime).
+  rcpcert: a helper whose DEFINING UNIT is the rcpcert table unit: the object of the unit rcptab.c defines a symbol of that name (symbol table, as table_item) and the item `<image>:rcpcert` exists
+  for the root (its certificate is check 1). Decided from the build's object facts, never from a name prefix.
+  ASM-329 (verify/ASSUMPTIONS.json, REMOVE, owner L3b; integ CLAUDE.md a172a44b7): every other helper, of any width. Its C body is tested, not proven; removed by isla over the helper's host x86_64
+  object under the pinned Sail model plus four static conditions, after the first frame. The gate computes the scope from the universe, the record does not list it, and reports it by name in its detail.
+  A helper that is neither rcpcert's nor covered because ASM-329 is not a REMOVE record of L3b in the registry is red, code `helper-uncovered`.
   `<root>:helper-table` is red (`helper-table-inputs`) when the Forms of the pack cannot be read (the declared inputs of formgate): the universe cannot be derived, nothing is skipped.
-Check 0 says nothing about the rcp table (check 1) or about the conversion sites (check 3).
+Check 0 says nothing about the rcp table itself (check 1) or about the conversion sites (check 3).
 
 Check 1, certificate (item `<root>:rcpcert`, files of the root): rcptab.c is the table of RCPSS / RSQRTSS of the one reference CPU. The pinned certificate
 rt/rcptab.cert.json (made on that CPU by farm/rcpcert.sh: CPUID identity read with the instruction, all 2^32 inputs of both functions
@@ -396,11 +398,9 @@ def ftoi_why(doc):
 TABLE_UNIT = "rcptab.c"
 
 
-def table_item(objs, image_dir, cache=None):
-    """-> None (no item) or [findings] of the item `<image>:rcpcert`. IMAGE_DIR: the directory of the root that is linked into one image, or None when
-    the root links nothing. The table object is the object of the unit rcptab.c of the image; the symbols it defines come from its symbol table. The image
-    needs the item iff another object of the image references one of those symbols (the link resolves the reference to the table). The certificate is
-    judged on the directory that holds the unit rcptab.c (rcptab.c, rcptab.cert.json there; rcpref.h from the published GEN)."""
+def table_defined(objs, image_dir):
+    """-> None (no item `<image>:rcpcert`) or (the symbols the objects of the unit rcptab.c define, those units): the item exists iff the root links one image and another object of the image
+    references one of the defined symbols (the link resolves the reference to the table)."""
     if image_dir is None:
         return None
     tabs = [(u, p) for u, p in objs if os.path.basename(u) == TABLE_UNIT]
@@ -410,13 +410,20 @@ def table_item(objs, image_dir, cache=None):
     for _, p in tabs:
         defined |= symbols_of(p)[0]
     used = sorted({n for u, p in objs if os.path.basename(u) != TABLE_UNIT for n in symbols_of(p)[1] & defined})
-    if not used:
+    return (defined, tabs) if used else None
+
+
+def table_item(objs, image_dir, cache=None):
+    """-> None (no item) or [findings] of the item `<image>:rcpcert` (existence: table_defined). The certificate is
+    judged on the directory that holds the unit rcptab.c (rcptab.c, rcptab.cert.json there; rcpref.h from the published GEN)."""
+    td = table_defined(objs, image_dir)
+    if td is None:
         return None
     try:
         gen = genout.gen_dir(cache)
     except RuntimeError as e:
         return ["reference identity unreadable: %s" % e]
-    return check_cert(os.path.join(image_dir, os.path.dirname(tabs[0][0])), gen)
+    return check_cert(os.path.join(image_dir, os.path.dirname(td[1][0][0])), gen)
 
 
 def object_result(oid, path, asm, unit, f2i_path, cache):
@@ -433,32 +440,29 @@ def object_result(oid, path, asm, unit, f2i_path, cache):
     return {k: [tuple(x) for x in items] for k, items in v.items()}
 
 
-def helper_items(root, tab, why, names, record_ok, widths):
+def helper_items(root, tab, why, names, record_ok, cert_defined):
     """-> {item id: [(code, text)]} of check 0 for one root. TAB: the call table (helpercalls.table) or None with WHY (reason string); NAMES: the helper names of the objects' f2i files
-    (empty: the root holds no f2i helper and has no item of check 0); RECORD_OK: ASM-329 is a REMOVE record of L3b; WIDTHS: {name: input bits or None} (helpercalls.dwarf_bits, the one rule
-    for every helper). A helper without a derived width is red `helper-width-underived`."""
+    (empty: the root holds no f2i helper and has no item of check 0); RECORD_OK: ASM-329 is a REMOVE record of L3b; CERT_DEFINED: the symbols that the rcpcert table unit defines when
+    the item `<root>:rcpcert` exists (empty otherwise)."""
     if not names:
         return {}
     if tab is None:
         return {root + ":helper-table": [("helper-table-inputs", why)]}
-    items, wide = {}, False
-    for h in sorted(set(tab) | set(names)):
-        b = widths.get(h)
-        if b is None:
-            items["helper:%s/%s" % (root, h)] = [("helper-width-underived", "helper %s: input width not derivable from the DWARF of its definition in the root's objects" % h)]
-        elif helpercalls.classify(b) == "narrow":
-            items["helper:%s/%s" % (root, h)] = [("helper-no-exhaustive-cert", "helper %s (%d input bits): no exhaustive helper certificate (certifier: root lift/proof/fpchost, exhaustive-compare output absent)" % (h, b))]
-        else:
-            items["helper:%s/%s" % (root, h)] = []
-            wide = True
-    if wide:
-        items[root + ":helper-record"] = [] if record_ok else [("helper-record-missing", "wide helpers exist and %s is not a REMOVE record of L3b in verify/ASSUMPTIONS.json" % RECORD)]
-    return items
+    return {"helper:%s/%s" % (root, h): [] if h in cert_defined or record_ok else
+            [("helper-uncovered", "helper %s is neither defined in the rcpcert table unit nor covered by %s (not a REMOVE record of L3b in verify/ASSUMPTIONS.json)" % (h, RECORD))]
+            for h in sorted(set(tab) | set(names))}
 
 
-def wide_scope(tab, names, widths):
-    """the helpers that ASM-329 covers: the wide class of the derived universe, sorted"""
-    return sorted(h for h in set(tab or {}) | set(names) if widths.get(h) is not None and helpercalls.classify(widths[h]) == "wide")
+def covered_scope(tab, names, cert_defined):
+    """-> (the helpers ASM-329 covers, the helpers rcpcert covers), sorted"""
+    u = set(tab or {}) | set(names)
+    return sorted(u - cert_defined), sorted(u & cert_defined)
+
+
+def cert_symbols(objs, image_dir, cache):
+    """the symbols defined by the object of the rcpcert table unit, iff the root has the item `<root>:rcpcert` (table_item), else the empty set"""
+    td = table_defined(objs, image_dir)
+    return set() if td is None else td[0]
 
 
 def record_ok(repo):
@@ -493,7 +497,7 @@ def judge_objects(root, objs, image_dir, helpers, docs=None, f2i=None):
 
 def fixture_findings(root, items):
     """-> [{"id", "code"}] (RECIPE.md "Fixtures"): one per distinct code of each item: `rcp:<root>/<unit>` and `f2i:<root>/<unit>` give id `<root>/<unit>`;
-    `helper:<root>/<callee>` gives id `<root>/<callee>`; `<root>:helper-table`, `<root>:helper-record` and `<root>:rcpcert` give id `<root>/helper-table` ... (a finding id is under its root: gate_fixtures.py)"""
+    `helper:<root>/<callee>` gives id `<root>/<callee>`; `<root>:helper-table` and `<root>:rcpcert` give id `<root>/helper-table` ... (a finding id is under its root: gate_fixtures.py)"""
     out = set()
     for k, v in items.items():
         i = k.split(":", 1)[1] if k.split(":", 1)[0] in ("rcp", "f2i", "helper") else root + "/" + k.split(":", 1)[1]
@@ -501,8 +505,8 @@ def fixture_findings(root, items):
     return [{"id": i, "code": c} for i, c in sorted(out)]
 
 
-RECORD = "ASM-329"       # the REMOVE record of the wide helpers (verify/ASSUMPTIONS.json)
-WIDE = {}                # root -> the wide helpers of this run (the scope of RECORD)
+RECORD = "ASM-329"       # the REMOVE record of the lift/rt helper bodies (verify/ASSUMPTIONS.json)
+WIDE = {}                # root -> the helpers of this run that ASM-329 covers (the scope of RECORD)
 FINDINGS = []   # every finding of the run as {id, code}, written to fpexact.json (RECIPE.md "Fixtures")
 
 
@@ -527,9 +531,9 @@ def judge_root(root, repo, cache, table):
         paths = read_f2i_paths(res)
         names = sorted({h for p in paths.values() if p for h in ((read_f2i(p)[0] or {}).get("helpers") or [])})
         tab, why = table() if names else (None, None)
-        widths = helpercalls.dwarf_bits([o for _, o in read_inputs(res)]) if names else {}
-        WIDE[root] = wide_scope(tab, names, widths)
-        coded = judge_objects_coded(root, read_inputs(res), image, helper_items(root, tab, why, names, record_ok(repo), widths), docs, paths, cache)
+        cdef = cert_symbols(read_inputs(res), image, cache) if names else set()
+        WIDE[root] = covered_scope(tab, names, cdef)[0]
+        coded = judge_objects_coded(root, read_inputs(res), image, helper_items(root, tab, why, names, record_ok(repo), cdef), docs, paths, cache)
         FINDINGS.extend(fixture_findings(root, coded))
         items = {k: [t for _, t in v] for k, v in coded.items()}
     except (OSError, ValueError, ELFError) as e:
@@ -564,7 +568,7 @@ def main(argv):
                 memo.append((None, "the Forms of the pack cannot be read: %s" % str(e)[:300]))
         return memo[0]
     u, c, ids, detail = gate_build.quantify(".", lambda root: judge_root(root, ".", cache, table))
-    gatefile.write(NAME, u, c, ids, detail if u != c else ("rcp table certified, no rcp/rsqrt estimate instruction and no uncertified float->int conversion in %d items" % u + ("; wide helpers, covered by %s (tested, not proven): %s" % (RECORD, "; ".join("%s: %s" % kv for kv in sorted(WIDE.items()) if kv[1])[:600]) if any(WIDE.values()) else "") if u else detail))
+    gatefile.write(NAME, u, c, ids, detail if u != c else ("rcp table certified, no rcp/rsqrt estimate instruction and no uncertified float->int conversion in %d items" % u + ("; helpers covered by %s (tested, not proven): %s" % (RECORD, "; ".join("%s: %s" % kv for kv in sorted(WIDE.items()) if kv[1])[:600]) if any(WIDE.values()) else "") if u else detail))
     st = "green" if u == c else "red"
     if os.environ.get("GATE_OUT"):     # also in normal mode: a whole-root fixture is judged in normal mode
         path = os.path.join(os.environ["GATE_OUT"], NAME + ".json")
