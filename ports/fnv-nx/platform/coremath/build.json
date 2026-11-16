@@ -6,9 +6,18 @@
    "-O2",
    "-g",
    "-ffunction-sections",
-   "-fdata-sections"
+   "-fdata-sections",
+   "-Werror=attributes"
   ],
-  "cxx": [],
+  "cxx": [
+   "-O2",
+   "-g",
+   "-ffunction-sections",
+   "-fdata-sections",
+   "-std=gnu++20",
+   "-DFNVNX_SDD=1",
+   "-Werror=attributes"
+  ],
   "asm": []
  },
  "include": [],
