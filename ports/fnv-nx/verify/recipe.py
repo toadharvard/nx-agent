@@ -682,6 +682,33 @@ def import_trees(roots, owner):
     return {r: gate_admit.trees(roots[r]) for r in (roots[owner].get("imports", []) if owner in roots and isinstance(roots[owner].get("imports", []), list) else []) if r in roots}
 
 
+def declared_import_uses(owner, imports, files, repo="."):
+    """{declared import root} that some module of the declaring root OWNER imports from: every tracked .py file of OWNER, its absolute imports (`ast`, any depth) resolved
+    by the rule of foreign_imports (a dotted name, or its top package, is a tracked file of a tree of the declared root). IMPORTS: {root: [its trees]} (import_trees).
+    A declaration is unused iff its root is not in this set: the rule is per declaring root, never per consuming recipe (the stage of one tool mounts only its own closure)."""
+    import ast
+    cand = {r: [f for f in files if f.endswith(".py") and any(under(f, t) for t in ts)] for r, ts in imports.items()}
+
+    def home(name):
+        for r, fs in cand.items():
+            for suf in ("/".join(name.split(".")) + ".py", "/".join(name.split(".")) + "/__init__.py"):
+                if any(c == suf or c.endswith("/" + suf) for c in fs):
+                    return r
+        return None
+    out = set()
+    for f in files:
+        if not (f.endswith(".py") and under(f, owner)):
+            continue
+        try:
+            tree = ast.parse(open(os.path.join(repo, f)).read())
+        except (OSError, SyntaxError, ValueError):
+            continue
+        for n in ast.walk(tree):
+            names = [a.name for a in n.names] if isinstance(n, ast.Import) else [n.module] if isinstance(n, ast.ImportFrom) and not n.level and n.module else []
+            out |= {r for r in (home(x) or home(x.split(".")[0]) for x in names) if r}
+    return out
+
+
 def import_mount(tool, owner, files, inputs, roots, repo="."):
     """([bad], [files of the declared import roots in the import closure of TOOL]): what the generate stage of TOOL mounts under /imp (repo-relative layout) next to its
     own root's /tool: the .py closure plus the data files those modules read by a path of their own location (decided by pathflow). The key covers exactly these files: an
@@ -1701,9 +1728,6 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
             err += ["gen:foreign-import:%s:%s (generated[%d]: the stage mounts the tool's own root and the declared inputs; the module lies in another root and no input carries it)" % (t, m, i)
                     for m in foreign_imports(t, owner, files, g["inputs"] if isinstance(g["inputs"], list) else [], repo, clo,
                                              [x for ts in import_trees(roots, owner).values() for x in ts])]
-            for ir, ts in import_trees(roots, owner).items():
-                if any(under(c, x) for c in clo for x in ts):
-                    used.setdefault(owner, set()).add(ir)
             # the file-escape rule (pathflow.escapes, the one implementation the abspath gate also runs): a read built from __file__, __path__ or sys.argv[0] that leaves the
             # tree the stage mounts the file from, or that cannot be decided, is red; a resolved file inside the mounted tree and a read through require_mounted are green
             for cf in sorted(set(clo)):
@@ -1748,8 +1772,8 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
             if o in seen:
                 err.append("generated output %s is produced twice" % o)
             seen.add(o)
-    err += ["gen:unused-import:%s:%s (admit.json `imports` of %s declares a root that no generator of this recipe imports from: remove the declaration)" % (o, ir, o)
-            for o in sorted(used) for ir in import_trees(roots, o) if ir not in used[o]]
+    err += ["gen:unused-import:%s:%s (admit.json `imports` of %s declares a root that no module of %s imports from: remove the declaration)" % (o, ir, o, o)
+            for o in sorted(used) for ir in sorted(set(import_trees(roots, o)) - declared_import_uses(o, import_trees(roots, o), files, repo))]
     err += run_errors(rec, root, files, roots, mine, seen, repo)
     err += uses_errors(rec, root, roots, repo, files) + include_uses_errors(rec, roots, repo)
     ea, ident = rec.get("error_abi"), lambda x: isinstance(x, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", x)

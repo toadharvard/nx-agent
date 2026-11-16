@@ -408,7 +408,7 @@ A generator tool may import modules of other admitted roots only through the `im
 `gen:foreign-import` accepts an import that resolves inside a tree of a declared import root. The generate stage mounts the tool's own root at `/tool` and, at `/imp` in
 the repo-relative layout, exactly the files of the declared import roots that the import closure (by `ast`, transitively) reaches plus the data those modules read (below), and nothing else of those roots;
 `PYTHONPATH` lists their directories. The stage key therefore covers only the closure: an edit to another file of an import root leaves the key unchanged. Red:
-an import of a root that is not declared (`gen:foreign-import`); a declared root that no generator of the recipe reaches (`gen:unused-import:<root>:<import root>`); a
+an import of a root that is not declared (`gen:foreign-import`); a declaration that no module of the declaring root imports from (`gen:unused-import:<root>:<import root>`; the rule is per declaring root, never per consuming recipe, so a root with two tools of which one imports the declared root is green for both consumers; the stage of a tool whose closure does not reach the declared root simply mounts none of it); a
 read by a path of its own location (`__file__`) in a module of an import root that leaves that root's tree or that the rule cannot decide. A data file such a module reads by a
 constant path of its own location inside its root's tree (decided by `pathflow`, a directory: every tracked file under it) is mounted with the closure and so is in the key. Functions: `recipe.import_trees`, `recipe.import_mount`. Tests: `tests/test_genimports.py`.
 
