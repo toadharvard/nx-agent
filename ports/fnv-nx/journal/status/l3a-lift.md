@@ -350,7 +350,7 @@ Update 2026-11-12, at 698adefb:
 ## 2026-11-12 09:27
 - int3 4115a256a (w6):
   - prove.py and shapeprove.py edits done.
-  - Correction: formgate.py, gate_fpexact.py and formgate_inputs.json are now the trunk's 862b0708 versions (model_sha256 70c8dc39), and ASM-322/323/325 are back in the registry.
+  - Correction: formgate.py, gate_fpexact.py and formgate_inputs.json are now the trunk's 862b0708 versions (model_sha256 70c8dc39), and ASM-329/323/325 are back in the registry.
   - The gate_lift fixtures carry cli.py.
   - w14 merge test 7424c1f5b: test_gate_lift all pass, flags 9/9, order and eh OK. gate_assumptions 132/143. It is superseded by int-l3a.
 - Being deleted on int3 (doubles): lift/proof/tests/test_formgate.py, test_fpexact.py and fakeext.py. test_rtroot will read the lifted flags through recipe.py.
@@ -1632,7 +1632,7 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 ## 2026-11-16 05:58 — assumptions gate at 0 on base3
 - w8 (done, base3 30030c1e8): the assumptions gate is at 148/148 mentions certified, 0 findings.
   - L6 render d98bb7faa is taken whole (14 roots recipe-valid).
-  - ASM-329 replaces ASM-322 (the shared alias).
+  - ASM-329 replaces ASM-329 (the shared alias).
   - L3b's gate_fpexact, helpercalls, x86sys and genout come from a1caba273.
 - L3b bases its later handover on 30030c1e8.
 - bottleneck: the L2 recipe-path pin and dispatch.c ENTRY1-CONT (L2 w2); the w7 universe engine (modlift for every image); the int 0x29 / far-selector rows (L5).
