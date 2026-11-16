@@ -1,5 +1,5 @@
 # id	contract_name	fact	source	kind	value	lasterror
-# fact: no-network | time-zone | registry | no-galaxy | single-process | process-end | thread-end (CLAUDE.md "The declared machine", "GOG Galaxy is not lifted"); source: hostabi:<header>:<service> | win-doc:<page slug>:<function> | wine-9.0:<path>:<function> | std:<doc>:<section> (the standard's own clause: std:C11:7.22.4.4, std:POSIX.1-2017:pthread_exit) | galaxy-sdk:<page>:<function>; kind void|u32|u64|addr|u32nz<N> as in wine_fixme.tsv; kind noreturn (value `-`) for process-end/thread-end: a body declared noreturn in our headers that ends the process or the thread
+# fact: no-network | time-zone | registry | no-galaxy | single-process | process-end | thread-end (CLAUDE.md "The declared machine", "GOG Galaxy is not lifted"); source: hostabi:<header>:<service> | win-doc:<page slug>:<function> | wine-9.0:<path>:<function> | std:<doc>:<section> (the standard's own clause: std:C11:7.22.4.4, std:POSIX.1-2017:pthread_exit) | galaxy-sdk:<page>:<function> | steamworks-sdk:<header>#<function> (a function declared in a header of the Steamworks SDK: galaxywrp.dll exports the Steam API); kind void|u32|u64|addr|u32nz<N> as in wine_fixme.tsv; kind noreturn (value `-`) for process-end/thread-end: a body declared noreturn in our headers that ends the process or the thread
 # lasterror (7th column): `-` or `<NAME>=<decimal>` (NAME [A-Z][A-Z0-9_]*, its winerror.h/winsock2.h value): the last error the body sets on the path that returns `value`; kind noreturn always `-`; any other kind `-` only when the cited source leaves the last error unchanged on that path; a hostabi: source never gives a non-`-` value
 # the source column is one token with no spaces; several sources joined by |, sorted and unique, each alone matching the grammar
 # rows come from the platform owner (L5) with the body that cites them; see VERDICT.md "Declared-machine bodies"
@@ -21,3 +21,14 @@
 9	c_purecall	process-end	wine-9.0:dlls/msvcrt/exit.c:_purecall	noreturn	-	-
 11	FatalAppExitA	process-end	wine-9.0:dlls/kernelbase/debug.c:FatalAppExitA	noreturn	-	-
 12	os_terminate_process	process-end	hostabi:hostabi/include/fnvnx/hostapi.h:exit|wine-9.0:dlls/ntdll/unix/process.c:NtTerminateProcess	noreturn	-	-
+# 13-19: the galaxywrp.dll constant bodies (no Galaxy or Steam service on the declared machine: CLAUDE.md "GOG Galaxy is not lifted"); the Steamworks SDK header that declares the function
+13	SteamAPI_Init	no-galaxy	steamworks-sdk:steam_api.h#SteamAPI_Init	u32	0	-
+14	SteamAPI_IsSteamRunning	no-galaxy	steamworks-sdk:steam_api.h#SteamAPI_IsSteamRunning	u32	0	-
+15	SteamUser	no-galaxy	steamworks-sdk:isteamuser.h#SteamUser	u32	0	-
+16	SteamFriends	no-galaxy	steamworks-sdk:isteamfriends.h#SteamFriends	u32	0	-
+17	SteamUtils	no-galaxy	steamworks-sdk:isteamutils.h#SteamUtils	u32	0	-
+18	SteamApps	no-galaxy	steamworks-sdk:isteamapps.h#SteamApps	u32	0	-
+19	SteamUserStats	no-galaxy	steamworks-sdk:isteamuserstats.h#SteamUserStats	u32	0	-
+# 20-21: SteamAPI_Shutdown and SteamAPI_RunCallbacks of galaxywrp.dll, void bodies on the declared machine (no Steam client: nothing to release, nothing to dispatch)
+20	SteamAPI_Shutdown	no-galaxy	steamworks-sdk:steam_api.h#SteamAPI_Shutdown	void	-	-
+21	SteamAPI_RunCallbacks	no-galaxy	steamworks-sdk:steam_api.h#SteamAPI_RunCallbacks	void	-	-

@@ -1,0 +1,57 @@
+{
+ "format": "fnvnx-recipe/1",
+ "compiler": {
+  "cc": "x86_64-linux-gnu-gcc-13",
+  "cxx": "x86_64-linux-gnu-g++-13"
+ },
+ "flags": {
+  "c": [
+   "-O1",
+   "-fPIC",
+   "-frounding-math",
+   "-fno-fast-math"
+  ],
+  "cxx": [
+   "-std=gnu++17",
+   "-O1",
+   "-fPIC",
+   "-frounding-math",
+   "-fno-fast-math"
+  ],
+  "asm": []
+ },
+ "include": [
+  "ports/fnv-nx/platform/include"
+ ],
+ "units": "all",
+ "link": {
+  "output": "libfpchost.so",
+  "kind": "shared",
+  "version_script": "exports.ver",
+  "flags": [
+   "-m",
+   "elf_x86_64"
+  ],
+  "libs": {
+   "system": [
+    "/lib/x86_64-linux-gnu/libm.so.6"
+   ]
+  }
+ },
+ "uses": [
+  {
+   "root": "ports/fnv-nx/lift/rt",
+   "output": "GEN"
+  },
+  {
+   "root": "ports/fnv-nx/platform",
+   "output": "INCLUDE"
+  }
+ ],
+ "include_uses": [
+  {
+   "root": "ports/fnv-nx/lift/rt",
+   "output": "GEN"
+  }
+ ]
+}

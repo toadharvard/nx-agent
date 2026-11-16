@@ -1,0 +1,23 @@
+{
+ "format": "fnvnx-selftest-inputs/1",
+ "tests": {
+  "test_codestore_universe.py": [
+   {
+    "root": "ports/fnv-nx/lift/liftsrc",
+    "output": "PACK"
+   }
+  ],
+  "test_sha_canonical.py": [
+   {
+    "root": "ports/fnv-nx/lift/liftsrc",
+    "output": "PACK"
+   }
+  ],
+  "test_dsl_lock.py": [
+   {
+    "root": "ports/fnv-nx/lift/facts",
+    "output": "SEGWRITES"
+   }
+  ]
+ }
+}

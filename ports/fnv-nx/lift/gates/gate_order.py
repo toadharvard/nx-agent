@@ -110,6 +110,8 @@ operand, "2 HEXADDR mem|ax" for every FPU status instruction, from the facts' sh
 every record's address is in the file. One row per address of either set.
 
 Exit 0 iff all three results are green."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..")) # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import json
 import multiprocessing
 import os
@@ -136,6 +138,8 @@ ORDERED = {'ldar', 'ldarb', 'ldarh', 'stlr', 'stlrb', 'stlrh', 'ldaxr', 'ldaxrb'
 NOACC = {'prfm', 'prfum'}
 COND_Z = {'eq': True, 'ne': False}
 
+
+JOBS_DEFAULT = 4      # worker processes when the stage does not set JOBS (a count, not a path)
 
 def elf(path):
     """-> [(section name, bytes, {offset: reloc type}, [function offsets], [data ranges], [(offset, name, size) of the STT_FUNC symbols])] for the executable sections."""
@@ -896,7 +900,7 @@ def run(rtobj, lifted, asm=(), sites=None):
     for f in files: funcs |= deffuncs(f)[0]
     init(cpusize(rtobj), asm, frozenset(funcs))
     rows = {g: [] for g in GATES}; n = {k: 0 for k in ('x27_writes', 'cpu_outside_struct', 'cpu_accesses_inside_struct', 'rule_violations')}     # the global counts of the two CPU-class checks are always reported
-    with multiprocessing.Pool(int(os.environ.get('JOBS', '4')), init, (CPUSIZE, asm, FUNCS)) as pool:
+    with multiprocessing.Pool(int(os.environ.get('JOBS', str(JOBS_DEFAULT))), init, (CPUSIZE, asm, FUNCS)) as pool:
         recs = []; fswrecs = []
         for r in pool.imap(analyse, files, chunksize=4):
             recs += r['locks']; fswrecs.append(r['fsw'])
@@ -934,6 +938,9 @@ def verdict(g, rws, n):
 
 
 def main(argv):
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools'))
+    from fnvnx.lift.tools import cli
+    cli.parse('usage: gate_order.py IMAGE [OBJ...] [--asm FILE]... [--sites FILE]   memory-ordering completeness gate over the objects', argv, (1, 10**9), {'--asm': True, '--sites': True})
     objs, asm, k, locks = [], [], 1, None
     while k < len(argv):
         if argv[k] == '--asm': asm.append(argv[k + 1]); k += 2
@@ -952,7 +959,7 @@ def main(argv):
         green, u, c, bad = verdict(g, rws[g], n)
         counts = ', '.join('%s %d' % kv for kv in sorted(n.items()))
         res = {'format': 'fnvnx-gate/1', 'name': g, 'status': 'green' if green else 'red', 'universe': u, 'certified': c,
-               'uncertified': ['%s %s: %s' % r for r in bad[:50]], 'counts': n,
+               'uncertified': ['%s %s: %s' % r for r in bad], 'counts': n,
                'detail': '%d objects; struct cpu %d bytes; %d of %d certified; %s' % (nfiles, CPUSIZE, c, u, counts) if nfiles else 'no object given'}
         with open(os.path.join(os.environ['GATE_OUT'], g + '.json'), 'w') as fh: json.dump(res, fh, sort_keys=True)
         print('%s %s %d/%d' % (g, res['status'], c, u), file=sys.stderr)

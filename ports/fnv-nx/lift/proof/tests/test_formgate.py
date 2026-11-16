@@ -1,0 +1,409 @@
+"""Tests of proof/formgate.py: the inputs contract (externals fetched by the trunk's loader from local bare repos, no network), every red reason,
+the certification rule on synthetic encodings (byte strings written here, nothing derived from game data)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", "..")) # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
+import itertools
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+PROOF = os.path.join(HERE, '..')
+LIFT = os.path.join(PROOF, '..')
+sys.path.insert(0, HERE)
+import fnvnx.lift.proof.tests.declared_x86sys as declared_x86sys; declared_x86sys.configure()
+sys.path.insert(0, LIFT)
+sys.path.insert(0, os.path.join(LIFT, "..", "verify"))     # cas, recipe: the trunk loader the gate itself uses (-I drops PYTHONPATH)
+import fnvnx.lift.proof.tests.fakeext as fakeext
+from fnvnx.lift.proof import certbasis, formgate, forms, prove, shape
+from fnvnx.verify import recipe
+
+WORK = os.environ.get('FNVNX_TEST_WORK') or __import__('tempfile').mkdtemp(prefix='fnvnx-proof-test-')     # declared input: the directory the fixtures are written below
+_SEQ = itertools.count()
+
+
+class workdir:
+    """a fresh empty directory WORK/formgate_<n> (n counts the uses in this process), removed on exit"""
+    def __enter__(self):
+        self.path = os.path.join(WORK, 'formgate_%d' % next(_SEQ))
+        shutil.rmtree(self.path, ignore_errors=True)
+        os.makedirs(self.path)
+        return self.path
+
+    def __exit__(self, *exc):
+        shutil.rmtree(self.path)
+
+
+def skip_cache(d, names):
+    return [n for n in names if n in ('__pycache__', 'tests')]
+
+
+REAL = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(fakeext.VERIFY)), ''))      # ports/fnv-nx of this tree
+MD = shape.decoder()
+IR_TEXT = 'fixture: the x86_proof.ir of the external x86ir\n'
+MODEL = hashlib.sha256(IR_TEXT.encode()).hexdigest()      # derived from the file, as formgate derives it
+# encodings with a DSL builder (add / xor / mov / push / ret / nop) and one without (x87 fadd st,st(1))
+GOOD = ['01c8', '31c0', '8b4510', '6a05', 'c3', '90']
+def first_nobuild():
+    """the encoding with no DSL builder, by a rule: the first, in sorted order of the hex text, of the x87 register-form escapes (D8..DF, ModRM 0xC0..0xFF: the universe of two-byte encodings of the
+    family) for which forms.build raises KeyError.  [] when every one has a Form (the case is then skipped, with the reason)."""
+    md = shape.decoder()
+    for h in sorted('%02x%02x' % (op, m) for op in range(0xd8, 0xe0) for m in range(0xc0, 0x100)):
+        ins = list(md.disasm(bytes.fromhex(h), 0))
+        if len(ins) != 1 or ins[0].size != 2:
+            continue
+        try:
+            forms.build(ins[0], 0x1000)
+        except KeyError:
+            return [h]
+    return []
+
+
+NOBUILD = first_nobuild()
+
+
+def key_of(h):
+    ins = list(MD.disasm(bytes.fromhex(h), 0))
+    assert len(ins) == 1 and ins[0].size == len(h) // 2, h
+    return shape.shape_key(ins[0]), shape.family(ins[0])
+
+
+class Fixture:
+    """one fake artifacts repo with externals liftpack (shapes.tsv) and certs (certs.tsv), the inputs file (and the fake IR as the external x86ir)"""
+    def __init__(self, td, encs, certs_for=None, dsl_override=None, model=MODEL, result='proved', shapes_text=None, declare=('liftpack', 'certs'), ir_declared=True,
+                 shapes_file='shapes.tsv', cert_rows=None, instrs_text=None):
+        self.td = td
+        self.keys = sorted(set(key_of(h) for h in encs))
+        shapes = shapes_text if shapes_text is not None else '# fixture\n' + ''.join('%s\t%s\t1\n' % kf for kf in self.keys)
+        rows = ['# shape_key\tfamily\tdsl_sha\tmodel_sha\treference\tresult\n']
+        for k, f in self.keys:
+            if certs_for is not None and k not in certs_for:
+                continue
+            rows.append('%s\t%s\t%s\t%s\tsail\t%s\t%s\t-\t0\t0\t-\t-\n' % (k, f, dsl_override or formgate.dsl_sha(k, MD) or 'none', model, result, ','.join(certbasis.OBLIGATIONS)))
+        self.art = fakeext.Artifacts(os.path.join(td, 'art'))
+        os.makedirs(os.path.join(td, 'art'), exist_ok=True)
+        self.art = fakeext.Artifacts(os.path.join(td, 'art'))
+        instrs = instrs_text if instrs_text is not None else '# fixture\n' + ''.join('exe\t%08x\t%d\t%s\n' % (0x401000 + 0x10 * i, len(h) // 2, h) for i, h in enumerate(sorted(set(encs))))
+        self.ext = {'liftpack': self.art.publish('liftpack', {shapes_file: shapes, 'instrs.tsv': instrs, 'README': 'pack\n'}),
+                    'certs': self.art.publish('certs', {'certs.tsv': ''.join(cert_rows if cert_rows is not None else rows)}),
+                    'x86ir': self.art.publish('x86ir', {'ir/x86_proof.ir': IR_TEXT})}
+        self.inputs = os.path.join(td, 'inputs.json')
+        self.repo = os.path.join(td, 'repo')
+        self.ir_declared = ir_declared
+        self.write_owner(self.repo)
+        self.write(declare=declare)
+        self.cache = os.path.join(td, 'cache')
+        os.makedirs(self.cache)
+
+    def write_owner(self, root):
+        """the owner's side of the pin in checkout ROOT: admit.json with the row of formgate.OWNER and its build.json, the committed one with the external x86ir replaced by the fixture's"""
+        rows = [r for r in json.load(open(os.path.join(REAL, 'verify', 'admit.json')))['roots'] if r['path'] == formgate.OWNER]
+        rec = json.load(open(os.path.join(REAL, rows[0]['recipe'][len('ports/fnv-nx/'):])))
+        rec['external'] = [e for e in rec['external'] if e['name'] != 'x86ir'] + ([self.ext['x86ir']] if self.ir_declared else [])
+        for rel, doc in (('verify/admit.json', {'format': 'fnvnx-admit/1', 'roots': rows}), (rows[0]['recipe'][len('ports/fnv-nx/'):], rec)):
+            q = os.path.join(root, 'ports', 'fnv-nx', rel)
+            os.makedirs(os.path.dirname(q), exist_ok=True)
+            with open(q, 'w') as fh:
+                json.dump(doc, fh)
+        # the pin's checkout is a git repository: recipe.load_admit derives the roots' python imports from the tracked files (gate_admit.derived_imports, `git ls-files`)
+        for cmd in (['init', '-q'], ['add', '-A']):
+            subprocess.run(['git', '-C', root] + cmd, check=True, capture_output=True)
+
+    def write(self, declare=('liftpack', 'certs'), **over):
+        doc = {'format': 'fnvnx-forms-inputs/1', 'external': [self.ext[n] for n in declare], 'shapes': 'liftpack/shapes.tsv',
+               'certs': 'certs/certs.tsv', 'instrs': 'liftpack/instrs.tsv'}
+        doc.update(over)
+        with open(self.inputs, 'w') as fh:
+            json.dump(doc, fh)
+
+    def judge(self):
+        with fakeext.use_artifacts(self.art):
+            return formgate.judge(self.cache, self.inputs, self.repo)
+
+
+class Green(unittest.TestCase):
+    def test_green_and_detail(self):
+        with workdir() as td:
+            f = Fixture(td, GOOD)
+            u, c, ids, detail = f.judge()
+            self.assertEqual((u, c, ids), (2 * len(GOOD), 2 * len(GOOD), []))
+            self.assertIn('int %d/%d' % (len(GOOD), len(GOOD)), detail)
+
+    def test_result_file_accepted_by_the_trunk_reader(self):
+        if not NOBUILD: self.skipTest('every x87 register-form escape (D8..DF, mod 3) has a Form: no key without a builder exists in this universe')
+        for encs, status in ((GOOD, 'green'), (GOOD + NOBUILD, 'red')):
+            with workdir() as td:
+                f = Fixture(td, encs)
+                out = os.path.join(td, 'out')
+                os.makedirs(out)
+                env = dict(os.environ, GATE_OUT=out, GATE_CACHE=f.cache)
+                old = os.environ.get('GATE_OUT')
+                os.environ['GATE_OUT'] = out
+                try:
+                    u, c, ids, detail = f.judge()
+                    formgate.gatefile.write('forms', u, c, ids, detail)
+                finally:
+                    if old is None:
+                        del os.environ['GATE_OUT']
+                    else:
+                        os.environ['GATE_OUT'] = old
+                st = fakeext.accepted('forms', out, 0 if status == 'green' else 2)
+                self.assertEqual(st[0], status, st)
+                with open(os.path.join(out, 'forms.json')) as fh:
+                    txt = fh.read()
+                d = json.loads(txt)
+                self.assertEqual(sorted(d), ['certified', 'detail', 'format', 'name', 'status', 'uncertified', 'universe'])
+                self.assertEqual(txt, json.dumps(d, sort_keys=True, separators=(',', ':')) + '\n')
+
+
+class CertificationRule(unittest.TestCase):
+    def test_missing_row_is_red_and_named(self):
+        with workdir() as td:
+            k0 = key_of(GOOD[0])[0]
+            f = Fixture(td, GOOD, certs_for={key_of(h)[0] for h in GOOD[1:]})
+            self.assertEqual(f.judge()[:3], (2 * len(GOOD), 2 * len(GOOD) - 1, [k0]))
+
+    def test_wrong_dsl_sha_is_red(self):
+        with workdir() as td:
+            u, c, ids, _ = Fixture(td, GOOD, dsl_override='0' * 64).judge()
+            self.assertEqual((u, c, len(ids)), (2 * len(GOOD), len(GOOD), len(GOOD)))
+
+    def test_certificate_stale_after_a_dsl_edit_is_refused(self):
+        # certificates written under the current DSL; then the builder of ONE mnemonic (xor) changes: exactly the shapes of xor lose their certificate,
+        # the others (their Form did not change) stay certified.  The key of a certificate is (shape, shape_sha of the CURRENT Form, IR sha), nothing else.
+        from fnvnx.lift.proof import forms
+        with workdir() as td:
+            f = Fixture(td, GOOD)
+            self.assertEqual(f.judge()[:3], (2 * len(GOOD), 2 * len(GOOD), []))
+            orig = forms.H['xor']
+
+            def edited(c):
+                orig(c)
+                c.F.undefined('df', 'edited')
+            forms.H['xor'] = edited
+            try:
+                u, c, ids, _ = f.judge()
+            finally:
+                forms.H['xor'] = orig
+            self.assertEqual((u, c, ids), (2 * len(GOOD), 2 * len(GOOD) - 1, [key_of('31c0')[0]]))
+            self.assertEqual(f.judge()[:3], (2 * len(GOOD), 2 * len(GOOD), []))
+
+    def test_wrong_model_sha_in_the_certificates_is_red(self):
+        with workdir() as td:
+            self.assertEqual(Fixture(td, GOOD, model='f' * 64).judge()[1], len(GOOD))      # the link check still passes: 0 shape certificates + the linked instances
+
+    def test_result_not_proved_is_red(self):
+        for res in ('failed', 'model-gap', 'PROVED'):
+            with workdir() as td:
+                self.assertEqual(Fixture(td, GOOD, result=res).judge()[1], len(GOOD), res)      # only the linked instances count
+
+    def test_link_check_unlinked_and_mismatch_are_red(self):
+        # an instance whose shape has no symbolic Form while the concrete builder covers it: `unlinked`; an undecodable row: red; a bad instrs.tsv: red `inputs`
+        with workdir() as td:
+            f = Fixture(td, GOOD, instrs_text='exe\t00401000\t2\t01c8\nexe\t00401010\t3\tff\n')
+            u, c, ids, detail = f.judge()
+            self.assertEqual(ids, ['inputs']); self.assertIn('instrs.tsv', detail)
+        with workdir() as td:
+            f = Fixture(td, GOOD, instrs_text='exe\t00401000\t2\t01c8\nexe\t00401010\t2\tffff\n')
+            u, c, ids, detail = f.judge()
+            self.assertEqual(ids, ['link:undecodable:exe:401010'], detail)
+
+    def test_shape_without_builder_is_uncertified(self):
+        if not NOBUILD: self.skipTest('every x87 register-form escape (D8..DF, mod 3) has a Form: no key without a builder exists in this universe')
+        with workdir() as td:
+            u, c, ids, detail = Fixture(td, GOOD + NOBUILD).judge()
+            self.assertEqual((u, c, ids), (2 * len(GOOD) + 1, 2 * len(GOOD), [key_of(NOBUILD[0])[0]]))
+            self.assertIn('without a DSL builder: 1', detail)
+
+    def test_uncertified_ids_are_sorted(self):
+        with workdir() as td:
+            ids = Fixture(td, GOOD, dsl_override='0' * 64).judge()[2]
+            self.assertEqual(ids, sorted(ids))
+
+
+class InputsRed(unittest.TestCase):
+    """every red reason: item `inputs`, universe 1, certified 0, the reason in detail"""
+    def red(self, f, text):
+        u, c, ids, detail = f.judge()
+        self.assertEqual((u, c, ids), (1, 0, ['inputs']), detail)
+        self.assertIn(text, detail)
+
+    def test_no_inputs_file(self):
+        with workdir() as td:
+            f = Fixture(td, GOOD)
+            os.remove(f.inputs)
+            self.red(f, 'no inputs.json')
+
+    def test_not_json_wrong_format_wrong_keys(self):
+        with workdir() as td:
+            f = Fixture(td, GOOD)
+            with open(f.inputs, 'w') as fh:
+                fh.write('{')
+            self.red(f, 'not JSON')
+            f.write(format='other/1')
+            self.red(f, 'format is not')
+            f.write(extra=1)
+            self.red(f, 'keys must be exactly')
+
+    def test_external_not_declared(self):
+        with workdir() as td:
+            f = Fixture(td, GOOD, declare=('certs',))
+            self.red(f, 'inputs: external liftpack not declared')
+
+    def test_bad_external_entry_and_path(self):
+        with workdir() as td:
+            f = Fixture(td, GOOD)
+            f.write(shapes='liftpack/../x')
+            self.red(f, 'NAME/path')
+            f.write(external=[dict(f.ext['liftpack'], commit='abc'), f.ext['certs']])
+            self.red(f, 'bad name, repo, commit')
+
+    def test_hash_mismatch(self):
+        with workdir() as td:
+            f = Fixture(td, GOOD)
+            f.write(external=[dict(f.ext['liftpack'], tree_sha256='0' * 64), f.ext['certs']])
+            self.red(f, 'tree_sha256 is')
+
+    def test_external_does_not_fetch(self):
+        with workdir() as td:
+            f = Fixture(td, GOOD)
+            f.write(external=[dict(f.ext['liftpack'], commit='1' * 40), f.ext['certs']])
+            self.red(f, 'does not fetch')
+
+    def test_shapes_tsv_missing(self):
+        with workdir() as td:
+            f = Fixture(td, GOOD, shapes_file='other.tsv')
+            self.red(f, 'shapes: shapes.tsv is missing from external liftpack')
+
+    def test_certs_tsv_missing(self):
+        with workdir() as td:
+            f = Fixture(td, GOOD)
+            f.write(certs='certs/none.tsv')
+            self.red(f, 'certs: none.tsv is missing')
+
+    def test_the_ir_external_is_required(self):
+        with workdir() as td:
+            f = Fixture(td, GOOD, ir_declared=False)
+            self.red(f, 'external x86ir (the pinned x86_proof.ir) is not declared by the recipe of')
+
+    def test_the_ir_external_is_not_repeated_in_the_inputs(self):
+        with workdir() as td:
+            f = Fixture(td, GOOD, declare=('liftpack', 'certs'))
+            f.write(external=[f.ext['liftpack'], f.ext['certs'], f.ext['x86ir']])
+            self.red(f, 'is declared once, in the recipe of')
+
+    def test_a_certificate_of_another_ir_is_not_a_certificate(self):      # the model sha is derived from the file of the external, not typed anywhere
+        with workdir() as td:
+            f = Fixture(td, GOOD, model='a' * 64)
+            u, c, ids, detail = f.judge()
+            self.assertEqual((u, c), (2 * len(GOOD), len(GOOD)))
+
+    def test_shapes_malformed(self):
+        a, b = key_of(GOOD[0]), key_of(GOOD[1])
+        lo, hi = sorted([a, b])
+        for text, why in (('%s\tint\n' % lo[0], 'bad row'), ('%s\tfoo\t1\n' % lo[0], 'bad row'), ('', 'no shapes'),
+                          ('%s\tint\t1\n%s\tint\t1\n' % (hi[0], lo[0]), 'not sorted'), ('%s\tint\t1\n%s\tint\t1\n' % (lo[0], lo[0]), 'not sorted')):
+            with workdir() as td:
+                self.red(Fixture(td, GOOD, shapes_text=text), why)
+
+    def test_certs_malformed(self):
+        with workdir() as td:
+            self.red(Fixture(td, GOOD, cert_rows=['a\tb\n']), 'certs.tsv: bad row')
+
+    def test_committed_inputs_are_valid_and_red_for_the_pack(self):
+        """the committed file: loads up to the missing liftpack; certs external is the pinned one"""
+        with open(formgate.INPUTS) as fh:
+            doc = json.load(fh)
+        self.assertNotIn('model_sha256', doc)      # the IR is pinned in one place: the x86ir external of the recipe of formgate.OWNER
+        self.assertEqual([e['name'] for e in doc['external']], ['certs'])
+        with workdir() as td:
+            u, c, ids, detail = formgate.judge(td)
+        self.assertEqual((u, c, ids, detail), (1, 0, ['inputs'], 'inputs: external liftpack not declared'))
+
+
+class Cli(unittest.TestCase):
+    """the gate as the verdict runs it: python -I, cwd = checkout root, GATE_OUT; the checkout is a copy of lift/ beside the overlay of verify/"""
+    def run_gate(self, td, f):
+        co = os.path.join(td, 'co')
+        os.makedirs(os.path.join(co, 'ports', 'fnv-nx'))
+        os.symlink('fnv-nx', os.path.join(co, 'ports', 'fnvnx'))      # the one module path: `fnvnx.<root path>` is ports/fnvnx (a link to the tree, as in the repository)
+        shutil.copytree(LIFT, os.path.join(co, 'ports', 'fnv-nx', 'lift'), ignore=skip_cache, copy_function=shutil.copyfile)
+        os.makedirs(os.path.join(co, 'ports', 'fnv-nx', 'verify'))      # the real verify/ except admit.json (the fixture's owner row)
+        for n in os.listdir(fakeext.VERIFY):
+            if n != 'admit.json':
+                os.symlink(os.path.abspath(os.path.join(fakeext.VERIFY, n)), os.path.join(co, 'ports', 'fnv-nx', 'verify', n))
+        os.symlink(os.path.abspath(os.path.join(fakeext.VERIFY, '..', 'contract')), os.path.join(co, 'ports', 'fnv-nx', 'contract'))
+        os.symlink(os.path.abspath(os.path.join(fakeext.VERIFY, '..', 'link')), os.path.join(co, 'ports', 'fnv-nx', 'link'))      # recipe.py imports relocs from ../link of its own directory
+        os.symlink(os.path.abspath(os.path.join(fakeext.VERIFY, '..', 'toolchain')), os.path.join(co, 'ports', 'fnv-nx', 'toolchain'))      # recipe.py reads the DATAMODEL table that verify/targets.json references (references.datamodel)
+        os.symlink(os.path.abspath(os.path.join(fakeext.VERIFY, '..', 'platform')), os.path.join(co, 'ports', 'fnv-nx', 'platform'))      # the declared x86 system record (formgate.X86SYS)
+        shutil.copyfile(f.inputs, os.path.join(co, 'ports', 'fnv-nx', 'lift', 'proof', 'formgate_inputs.json'))
+        f.write_owner(co)
+        out = os.path.join(td, 'out')
+        os.makedirs(out)
+        from fnvnx.verify import recipe
+        recipe.set_artifacts(recipe.ext_dir(os.path.join(out, 'forms-cache')), f.art.url)    # the artifacts repository is a record beside the cache the gate fills (formgate.cache_dir), never an environment variable
+        env = {'PATH': os.environ['PATH'], 'GATE_OUT': out, 'HOME': td, 'GIT_TERMINAL_PROMPT': '0'}
+        r = subprocess.run([sys.executable, '-I', 'ports/fnv-nx/lift/proof/formgate.py'], cwd=co, env=env, capture_output=True, text=True)
+        return r, out
+
+    def test_green_and_red_without_cache_and_without_z3(self):
+        if not NOBUILD: self.skipTest('every x87 register-form escape (D8..DF, mod 3) has a Form: no key without a builder exists in this universe')
+        for encs, status, rc in ((GOOD, 'green', 0), (GOOD + NOBUILD, 'red', 2)):
+            with workdir() as td:
+                f = Fixture(td, encs)
+                r, out = self.run_gate(td, f)
+                self.assertEqual(r.returncode, rc, r.stderr + r.stdout)
+                self.assertEqual(fakeext.accepted('forms', out, rc)[:2], (status, len(GOOD) + len(encs)))
+
+    def test_missing_pack_is_red_with_reason(self):
+        with workdir() as td:
+            f = Fixture(td, GOOD, declare=('certs',))
+            r, out = self.run_gate(td, f)
+            self.assertEqual(r.returncode, 2)
+            with open(os.path.join(out, 'forms.json')) as fh:
+                d = json.load(fh)
+            self.assertEqual((d['status'], d['detail'], d['uncertified']), ('red', 'inputs: external liftpack not declared', ['inputs']))
+
+    def test_arguments_are_refused(self):
+        r = subprocess.run([sys.executable, '-I', os.path.join(PROOF, 'formgate.py'), '--shapes', 'x'], capture_output=True, text=True, env={'GATE_OUT': '/'})
+        self.assertEqual(r.returncode, 1)
+
+
+class DeclaredOutputs(unittest.TestCase):
+    def test_declared_column_is_checked_against_the_contract_and_the_tree(self):
+        sha = certbasis.platform_sha(['cpuid0'])
+        self.assertTrue(formgate.declared_ok('eax:cpuid0,edx:cpuid3@' + sha))
+        self.assertFalse(formgate.declared_ok('eax:cpuid0@' + '0' * 64))               # the platform source changed
+        self.assertFalse(formgate.declared_ok('esi:cpuid0@' + sha))                    # an output the contract does not allow
+        self.assertTrue(formgate.declared_ok('eax:rdtsc,edx:rdtsc@' + certbasis.platform_sha(['rdtsc'])))      # rdtsc is declared (rt/cpumodel.c)
+        self.assertFalse(formgate.declared_ok('eax:nosuchfn@' + sha))                  # a function that is not in declared.json
+        self.assertFalse(formgate.declared_ok('garbage'))
+
+
+
+class EaRule(unittest.TestCase):
+    """item ea-rule (proof/eaaudit.py): the Form builders of this tree hold the rule; a builder that loads or stores raw, or hands an mload / mstore an address that no address function made, is one violation each"""
+    def test_this_tree_holds_the_rule(self):
+        from fnvnx.lift.proof import eaaudit
+        self.assertEqual(eaaudit.violations(PROOF), [])
+
+    def test_violations_are_found(self):
+        from fnvnx.lift.proof import eaaudit
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, 'forms.py'), 'w') as f:
+                f.write('def mload(m, a, n): return a\ndef good(c):\n    a = ea(c)\n    return mload(a, 4)\ndef bad(c):\n    return mload(c.raw, 4)\n')
+            with open(os.path.join(d, 'forms_x.py'), 'w') as f:
+                f.write('from dsl import load\ndef g(c):\n    x = load(c)\n    c.store(1)\n    return mstore(c, c.r, 1, 4)\n')
+            got = eaaudit.violations(d)
+        self.assertEqual(got, [('forms.py', 6, 'address-source: mload argument is not from an address function'),
+                               ('forms_x.py', 1, 'raw-access: import load'), ('forms_x.py', 3, 'raw-access: load('), ('forms_x.py', 4, 'raw-access: .store('),
+                               ('forms_x.py', 5, 'address-source: mstore argument is not from an address function')])
+
+
+if __name__ == '__main__':
+    unittest.main()

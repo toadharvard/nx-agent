@@ -2,9 +2,17 @@
 semantics (what each load/store/arithmetic does to the value) are in rt/fnvl_x87.h. The transcendental / remainder forms (fsin fcos fsincos fptan fpatan f2xm1 fyl2x
 fyl2xp1 fscale fprem fprem1 fxtract) call rt/fmath.c: correctly rounded binary64 (R8, one reference CPU model); fsincos and fptan always use the dynamic stack because
 their stack effect depends on the operand (C2 = 1: |x| >= 2^63, nothing pushed). fbld / fbstp (packed BCD, rt/x87.c) and fstpnce (D9 D8+i, the undocumented alias of fstp st(i)) are here;
-fldenv / frstor / fnstenv / fnsave (dynamic stack only) are in f_x87_ctl.py. h_x87 is the one entry of every x87 opcode: it records FIP / FDP (ptrs) for the non-control ones."""
+fldenv / frstor / fnstenv / fnsave (dynamic stack only) are in f_x87_ctl.py. h_x87 is the one entry of every x87 opcode: it records FIP / FOP / FCS / FDP / FDS (ptrs) for the non-control ones.
+
+ES / B (FSW bits 7 and 15). SDM Vol 1 8.1.3 "x87 FPU Status Word": ES (error summary) is set when any unmasked exception flag is set; B (busy) mirrors ES. Both are a function of (the six exception
+flags IE DE ZE OE UE PE, the FCW masks) and of nothing else, so they are observable only where an FSW image is produced or where the pending-exception check of a waiting x87 instruction reads them:
+fstsw / fnstsw, fnstenv, fnsave, fxsave (rt/seh.cc fx_capture), a CONTEXT capture, and the #MF check before the next waiting x87 instruction (SDM Vol 1 8.6 "x87 FPU exception synchronization", Vol 2 FWAIT).
+Each of those points computes them with the one function fx_esb() (rt/fnvl_x87.h: restored ES/B | ((flags & ~FCW & 0x3f) != 0)), so computing at production equals tracking at every flag change
+(the flags cannot change between a change and the next observation without being observed). FRSTOR / FLDENV / a CONTEXT restore load ES/B verbatim (c->fsw); FNINIT / FNCLEX clear them. OPEN: the #MF
+check itself is part of 2.5 and does not exist yet: h_fwait refuses `fwait` unless the pinned fact ASM-204 (no unmasked exception at any instruction of any module) holds, so no waiting x87 instruction
+reads ES today; when 2.5 adds the check it must call fx_esb() (an FLDCW that unmasks a pending flag then raises #MF at the next waiting instruction)."""
 from capstone import x86 as X
-from .core import fallback, op, Unsupported, X87Dyn
+from .core import shape_handler, op, Unsupported, X87Dyn
 from .f_x87_ctl import ctl, x87_flaggy, fown_emit
 from . import fpfacts
 
@@ -44,11 +52,11 @@ def pop(cx, n=1):
     return '' if cx.xm == 's' else ' dyn_pop();' * n
 
 
-def arith(cx, dst, x, y, o):
-    """st(dst) = x o y; x and y are C double expressions ('r' suffix: operands swapped)"""
+def arith(cx, dst, x, y, o, fx, fy):
+    """st(dst) = x o y; x and y are C double expressions ('r' suffix: operands swapped), fx and fy the source operands as carriers (fv): DE is read from them at their own type (rt/fnvl_x87.h fx_de through FXD)"""
     if o.endswith('r'):
-        x, y, o = y, x, o[0]
-    cx.em('{ double x_=(%s), y_=(%s); %s=fv_f64(FXN(x_%sy_,x_,y_)); }' % (x, y, wr(cx, dst), o))
+        x, y, o, fx, fy = y, x, o[0], fy, fx
+    cx.em('{ fv da_=(%s), db_=(%s); double x_=(%s), y_=(%s), r_=FXN(x_%sy_,x_,y_); %s=fv_f64(r_); FXD(da_,db_,r_); }' % (fx, fy, x, y, o, wr(cx, dst)))
 
 
 def control(b0, mr):
@@ -60,17 +68,22 @@ def control(b0, mr):
 
 
 def ptrs(cx, ins):
-    """the x87 last-instruction state (rt/fnvl_x87.h): FIP = address of this instruction (first byte, prefixes included), FDP = offset of its memory operand (no segment base) when it has one.
-    The one place for every non-control x87 instruction, static and dynamic stack alike."""
-    cx.em('c->fip=0x%xu;' % ins.address)
+    """the x87 last-instruction state (rt/fnvl_x87.h): FIP = address of this instruction (first byte, prefixes included), FOP = the 11 bits of the two opcode bytes (first & 7, second), FCS = the CS selector
+    of the model, and when the instruction has a memory operand FDP = its offset (no segment base) and FDS = the selector of the segment the operand uses (an explicit override, else SS for an ebp / esp
+    based address, else DS: SDM Vol 1 3.7.2 default segments). The one place for every non-control x87 instruction, static and dynamic stack alike."""
+    b = bytes(ins.bytes); i = 0
+    while b[i] in (0x66, 0x67, 0xf0, 0xf2, 0xf3, 0x2e, 0x36, 0x3e, 0x26, 0x64, 0x65): i += 1
+    cx.em('c->fip=0x%xu; c->fop=0x%xu; c->fcs=c->sel[SEG_CS];' % (ins.address, ((b[i] & 7) << 8) | b[i + 1]))
     if cx.modrm < 0xc0:
-        a = cx.ea(ins, cx.ops[0])
-        if ins.operands[0].mem.segment == X.X86_REG_FS:                     # the offset, not fs base + offset
+        a = cx.ea(ins, cx.ops[0]); m = ins.operands[0].mem
+        if m.segment == X.X86_REG_FS:                     # the offset, not fs base + offset
             a = '(u32)(0u)' if a == '(u32)(fsb)' else a.replace('(u32)(fsb+', '(u32)(', 1)
-        cx.em('c->fdp=%s;' % a)
+        seg = {X.X86_REG_ES: 'SEG_ES', X.X86_REG_CS: 'SEG_CS', X.X86_REG_SS: 'SEG_SS', X.X86_REG_DS: 'SEG_DS', X.X86_REG_FS: 'SEG_FS', X.X86_REG_GS: 'SEG_GS'}.get(m.segment)
+        if seg is None: seg = 'SEG_SS' if ins.reg_name(m.base) in ('ebp', 'esp') else 'SEG_DS'
+        cx.em('c->fdp=%s; c->fds=c->sel[%s];' % (a, seg))
 
 
-@fallback(lambda cx, ins: 0xd8 <= cx.b0 <= 0xdf)
+@shape_handler(lambda cx, ins: 0xd8 <= cx.b0 <= 0xdf)
 def h_x87(cx, ins):
     cx.kinds.add('x87')
     g = (cx.modrm >> 3) & 7
@@ -94,8 +107,7 @@ def h_fwait(cx, ins):
 
 @op('fnclex')
 def h_fnclex(cx, ins):
-    """FNCLEX (DB E2): clears the x87 exception flags, ES, B and the stack fault (SDM Vol 2). f_int.py registers `fnclex` as a NOP (h_nop): this later registration replaces it, so the
-    instruction reaches the control-instruction table (ctl: FNCLEX, rt/fnvl_x87.h: the x87 sticky set := 0, the SSE set untouched)."""
+    """FNCLEX (DB E2): clears the x87 exception flags, ES, B and the stack fault (SDM Vol 2). The instruction reaches the control-instruction table (ctl: FNCLEX, rt/fnvl_x87.h: the x87 sticky set := 0, the SSE set untouched)."""
     h_x87(cx, ins)
 
 
@@ -103,16 +115,16 @@ def x87_reg(cx, ins, b0, mr, g):
     em, i = cx.em, mr & 7
     R = lambda k: rd(cx, k)
     if b0 == 0xd8 and g in AR:
-        arith(cx, 0, 'fv_d(%s)' % R(0), 'fv_d(%s)' % R(i), AR[g])
+        arith(cx, 0, 'fv_d(%s)' % R(0), 'fv_d(%s)' % R(i), AR[g], R(0), R(i))
     elif b0 in (0xdc, 0xde) and g in ARD:
-        arith(cx, i, 'fv_d(%s)' % R(i), 'fv_d(%s)' % R(0), ARD[g])
+        arith(cx, i, 'fv_d(%s)' % R(i), 'fv_d(%s)' % R(0), ARD[g], R(i), R(0))
         em(pop(cx) if b0 == 0xde else '')
     elif b0 == 0xd8 and g in (2, 3) or b0 == 0xdd and g in (4, 5):                 # fcom fcomp / fucom fucomp st(i)
-        em('FCMP(%s,%s);%s' % (R(0), R(i), pop(cx) if g in (3, 5) else ''))
+        em('FCMP(%s,%s,%du);%s' % (R(0), R(i), b0 == 0xdd, pop(cx) if g in (3, 5) else ''))
     elif mr == 0xd9 and b0 == 0xde or mr == 0xe9 and b0 == 0xda:                  # fcompp / fucompp
-        em('FCMP(%s,%s);%s' % (R(0), R(1), pop(cx, 2)))
+        em('FCMP(%s,%s,%du);%s' % (R(0), R(1), b0 == 0xda, pop(cx, 2)))
     elif b0 in (0xdb, 0xdf) and g in (5, 6):                                       # fucomi fcomi (p)
-        em('FCMPI(%s,%s);%s' % (R(0), R(i), pop(cx) if b0 == 0xdf else ''))
+        em('FCMPI(%s,%s,%du);%s' % (R(0), R(i), g == 5, pop(cx) if b0 == 0xdf else ''))
     elif b0 in (0xda, 0xdb) and g < 4:                                             # fcmovcc st0, sti
         cond = [('cf', 'zf', '(cf|zf)', 'pf'), ('!cf', '!zf', '!(cf|zf)', '!pf')][b0 == 0xdb][g]
         em('if(%s) %s=%s;' % (cond, wr(cx, 0), R(i)))
@@ -127,13 +139,13 @@ def x87_reg(cx, ins, b0, mr, g):
     elif b0 == 0xd9 and mr == 0xe1:
         em('%s=fv_sg(%s,0);' % (wr(cx, 0), R(0)))
     elif b0 == 0xd9 and mr == 0xe4:                                                # ftst
-        em('FCMP(%s,fv_f64(0.0));' % R(0))
+        em('FCMP(%s,fv_f64(0.0),0u);' % R(0))
     elif b0 == 0xd9 and mr == 0xe5:                                                # fxam
         em('FXAM(%s);' % ('c->fx[c->ftop&7]' if cx.xm == 'd' else R(0)))
     elif b0 == 0xd9 and mr in CONST:
         em(push(cx, 'fvmk(FK_F64,%s,0)' % CONST[mr]))
     elif b0 == 0xd9 and mr == 0xfa:                                                # fsqrt
-        em('{ double x_=fv_d(%s); %s=fv_f64(FXN(__builtin_sqrt(x_),x_,x_)); }' % (R(0), wr(cx, 0)))
+        em('{ fv da_=(%s); double x_=fv_d(da_), r_=FXN(__builtin_sqrt(x_),x_,x_); %s=fv_f64(r_); FXD(da_,da_,r_); }' % (R(0), wr(cx, 0)))
     elif b0 == 0xd9 and mr == 0xfc:                                                # frndint
         em('%s=fv_rnd(%s);' % (wr(cx, 0), R(0)))
     elif b0 == 0xd9 and mr in FM:
@@ -157,7 +169,7 @@ def fmath(cx, mr):
     elif nm in ('fprem', 'fprem1'):
         em('FM_PREM(%s,%s,%s,%d);' % (W(0), R(0), R(1), nm == 'fprem1'))
     elif nm == 'fxtract':                                                          # ST0 = exponent, push the significand
-        em('{ u32 f_=0; double e_, s_; fnvl_m_xtract(fv_d(%s),&e_,&s_,&f_); %s=fv_f64(e_); %s FM_FL(f_); }' % (R(0), W(0), push(cx, 'fv_f64(s_)')))
+        em('{ u32 f_=0; double e_, s_; fv sv_=(%s); fnvl_m_xtract(fv_d(sv_),&e_,&s_,&f_); %s=fv_f64(e_); %s FM_FL(f_|fx_de(sv_,sv_,f_&1u)); }' % (R(0), W(0), push(cx, 'fv_f64(s_)')))
     else:                                                                          # fptan fsincos: push only when C2 = 0: data dependent depth
         if cx.xm == 's':
             raise X87Dyn()
@@ -174,10 +186,10 @@ def x87_mem(cx, ins, b0, mr, g):
                0xda: ('(double)(s32)M32(a_)', 'fv_ldi(FK_I32,(s32)M32(a_))'), 0xde: ('(double)(s16)M16(a_)', 'fv_ldi(FK_I16,(s16)M16(a_))')}[b0]
         if g in AR:
             em(a + '')
-            arith(cx, 0, 'fv_d(%s)' % r0(), src[0], AR[g])
+            arith(cx, 0, 'fv_d(%s)' % r0(), src[0], AR[g], r0(), src[1])
             em('}')
         elif g in (2, 3):
-            em(a + 'FCMP(%s,%s); }%s' % (r0(), src[1], pop(cx) if g == 3 else ''))
+            em(a + 'FCMP(%s,%s,0u); }%s' % (r0(), src[1], pop(cx) if g == 3 else ''))
         else:
             raise Unsupported('x87 ' + cx.m)
         return

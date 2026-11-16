@@ -1,0 +1,56 @@
+{
+ "format": "fnvnx-recipe/1",
+ "external": [
+  {
+   "name": "exe",
+   "repo": "fnv-nx-build",
+   "ref": "gamedata/exe",
+   "commit": "0948da1e89ab719dcf8471e45b67bc60575f6b93",
+   "tree_sha256": "ba933b684b5e221e74b8a841a0ebb35ea8599c78a4d582ca0c376ef5a424ef2b",
+   "at": "/ext/exe"
+  }
+ ],
+ "uses": [
+  {
+   "root": "ports/fnv-nx/loader",
+   "output": "KEYS_TSV"
+  }
+ ],
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/lift/tools/universe.py",
+   "args": [
+    "--out",
+    "/out/o",
+    "--exe",
+    "/ext/exe/FalloutNV.exe",
+    "--keys",
+    "/uses/ports/fnv-nx/loader/KEYS_TSV",
+    "--lib",
+    "/in/ports/fnv-nx/lift",
+    "--baddecode",
+    "/out/baddecode_exe.tsv",
+    "--shapes",
+    "/out/shapes_exe.tsv",
+    "--udsail",
+    "/in/ports/fnv-nx/lift/proof/udsail_input.tsv"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/fnvlift",
+    "ports/fnv-nx/lift/proof"
+   ],
+   "outputs": [
+    "baddecode_exe.tsv",
+    "shapes_exe.tsv"
+   ],
+   "dirs": [
+    "o"
+   ]
+  }
+ ],
+ "outputs": {
+  "IMG": "o",
+  "BADDECODE": "baddecode_exe.tsv",
+  "SHAPES": "shapes_exe.tsv"
+ }
+}

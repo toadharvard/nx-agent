@@ -1,0 +1,66 @@
+#!/usr/bin/env python3
+"""imageset: THE image set of the lift proofs, read from the loader's module table (contract/modules.py output `modules.tsv`: every lifted module of the may-load
+closure over the declared system32, with its assigned base) and nothing else. A tool of lift/proof never names an image: it takes the exe path and the table.
+
+    load(modules_tsv)            -> [(name, file name, preferred base, assigned base)] in table order (name = the file name without `.dll`, lower case: the facts directory of the module)
+    find(dirs, file_name)        -> path of the file in the first directory that holds it (names compare ASCII case-insensitively); None if no directory does
+    images(exe_path, modules_tsv, dirs) -> [(name, pe path, facts subdirectory or None)]: the exe first (facts at the top of the facts directory), then the table's modules
+    mapped(path, base)           -> the image as the loader maps it at `base` (tools/pemod.py load: HIGHLOW fixups applied; base None = the exe at its preferred base), the ONE path that gives instruction bytes: never the raw file
+    assigned(modules_tsv)        -> {name: assigned base}
+    reader(M)                    -> read(address, n): bytes of the mapped image, clamped to the section
+A module whose file is in no directory is an error (the table and the gamedata must agree)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..")) # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'tools'))
+
+
+def load(modules_tsv):
+    out = []
+    for ln in open(modules_tsv):
+        if not ln.strip() or ln[0] == '#':
+            continue
+        f = ln.rstrip('\n').split('\t')
+        out.append((f[0][:-4] if f[0].lower().endswith('.dll') else f[0], f[0], int(f[3], 16), int(f[4], 16)))
+    return out
+
+
+def find(dirs, file_name):
+    for d in dirs:
+        for n in sorted(os.listdir(d)):
+            if n.lower() == file_name.lower():
+                return os.path.join(d, n)
+    return None
+
+
+def images(exe_path, modules_tsv, dirs):
+    out = [(os.path.splitext(os.path.basename(exe_path))[0], exe_path, None)]
+    for name, fn, pref, base in load(modules_tsv):
+        p = find(dirs, fn)
+        if p is None:
+            raise SystemExit('imageset: module %s of %s is in none of %s' % (fn, modules_tsv, dirs))
+        out.append((name, p, name))
+    return out
+
+
+def assigned(modules_tsv):
+    return {n: ab for n, _, _, ab in load(modules_tsv)}
+
+
+def mapped(path, base):
+    from fnvnx.lift.tools import pemod
+    return pemod.load(path, base)
+
+
+def reader(M):
+    secs = sorted((s, z, ro) for _, s, z, ro in M.xs)
+
+    def read(a, n):
+        for s, z, ro in secs:
+            if s <= a < s + z:
+                n = min(n, s + z - a)
+                return bytes(M.d[ro + a - s: ro + a - s + n])
+        return b''
+    return read

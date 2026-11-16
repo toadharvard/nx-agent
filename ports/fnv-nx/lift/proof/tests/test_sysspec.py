@@ -1,0 +1,131 @@
+"""sysspec: class (a)/(b) shapes prove against the SDM spec under a record; an undecided row gives `uncertified: <why>`; a conditional fault on a privileged instruction fails.
+The record here is a synthetic fixture of the structure (fnvnx-x86sys/2); no value in it is a claim about the declared machine."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
+import json
+import os
+import sys
+import tempfile
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, '..', '..'))
+sys.path.insert(0, HERE)
+import fnvnx.lift.proof.tests.declared_x86sys as declared_x86sys
+from fnvnx.lift.fnvlift import inputs
+from fnvnx.lift.proof import shape, sysspec, x86sys
+
+
+def key(h):
+    return shape.shape_key(next(iter(shape.decoder().disasm(bytes.fromhex(h), 0))))
+
+
+def row(v): return {'value': v, 'source': 'fixture'}
+
+
+REC = {'format': 'fnvnx-x86sys/2', 'selectors': {'cs': row(0x1b), 'tr': row(0x28)}, 'eflags': {'iopl': row(0)}, 'cr4': {'umip': row(0), 'tsd': row(0), 'pce': {'status': 'undecided', 'why': 'pce blocker'}},
+       'int_ring3': {'vectors': [3, 4, 45], 'other_vectors': {'status': 'undecided', 'why': 'other vectors blocker'}}, 'tss_io_bitmap': row('no port permitted'), 'mov_to_sreg': {'undecided': {'selectors': [27], 'why': 'sreg blocker'}},
+       'sgdt': {'status': 'undecided', 'why': 'gdt blocker'}}
+
+
+def _complete(fixture):
+    """the fixture's rows over a complete record (the tree's): the Forms read fnvlift.x86sys from the same one input and need every row it names; the rows the fixture states replace the tree's, key by key"""
+    with open(declared_x86sys.PATH) as fh: base = json.load(fh)
+    for k, v in fixture.items(): base[k] = dict(base[k], **v) if isinstance(v, dict) and isinstance(base.get(k), dict) else v
+    return base
+
+
+class T(unittest.TestCase):
+    def setUp(self):
+        self.f = tempfile.NamedTemporaryFile('w', suffix='.json', delete=False); json.dump(_complete(REC), self.f); self.f.close()
+        inputs.reset(); inputs.configure(x86sys=self.f.name)       # the one explicit input (no environment variable, no default path)
+
+    def tearDown(self):
+        os.unlink(self.f.name); inputs.reset()
+
+    def test_classes(self):
+        for h in ('fa', 'f4', 'cc', 'ce', 'f1', 'ec', 'ee', 'e4', '6c'):
+            self.assertEqual(sysspec.check(key(h + '00000000'))[0], 'proved', h)
+
+    def test_undecided_rows_are_uncertified_with_the_blocker(self):
+        for h, why in (('cd2e', 'other vectors blocker'), ('8ed8', 'sreg blocker'), ('0f0100', 'gdt blocker'), ('0f33', 'pce blocker'), ):
+            r, n = sysspec.check(key(h + '00000000'))
+            self.assertEqual(r, 'uncertified', h); self.assertIn(why, n, h)
+
+    def test_io_without_the_row_is_uncertified(self):
+        r = dict(REC); del r['tss_io_bitmap']
+        with open(self.f.name, 'w') as fh: json.dump(r, fh)
+        res, n = sysspec.check(key('ec00000000'))
+        self.assertEqual(res, 'uncertified'); self.assertIn('no row tss_io_bitmap', n)
+
+    def test_absent_record_is_uncertified(self):
+        inputs.reset(); inputs.configure(x86sys=self.f.name + '.absent')
+        r, n = sysspec.check(key('fa'))
+        self.assertEqual((r, n.startswith('uncertified: record absent')), ('uncertified', True))
+
+    def test_uncovered_is_not_proved(self):
+        self.assertEqual(sysspec.check(key('90'))[0], 'not-covered')      # NOP: no system spec (IRETD, formerly the example, has a Form builder that names its undecided rows: test_sysspec_legacy)
+
+    def test_reader(self):
+        self.assertEqual(x86sys.cpl(REC), 3)
+        with self.assertRaises(x86sys.Undecided): x86sys.get(REC, 'cr4', 'pce')
+        with self.assertRaises(x86sys.Undecided): x86sys.get(REC, 'nope')
+        self.assertEqual(x86sys.get(REC, 'int_ring3', 'vectors'), [3, 4, 45])
+
+    def test_rdtsc_proved_over_the_declared_function(self):
+        self.assertEqual(sysspec.check(key('0f31'))[0], 'proved')
+
+    def test_rdtsc_with_tsd_set_is_not_covered(self):
+        REC['cr4']['tsd'] = row(1)
+        try: open(self.f.name, 'w').write(json.dumps(_complete(REC))); self.assertEqual(sysspec.check(key('0f31'))[0], 'not-covered')
+        finally: REC['cr4']['tsd'] = row(0)
+
+    def test_cpuid_needs_its_fault_row(self):
+        r, n = sysspec.check(key('0fa2')); self.assertEqual(r, 'uncertified'); self.assertIn('cpuid_faulting', n)
+
+    def test_cpuid_proved_with_the_fault_row(self):
+        REC['cpuid_faulting'] = row(0)
+        try: open(self.f.name, 'w').write(json.dumps(_complete(REC))); self.assertEqual(sysspec.check(key('0fa2'))[0], 'proved')
+        finally: del REC['cpuid_faulting']
+
+    def test_lar_is_decided_by_the_descriptor_rows(self):
+        from fnvnx.lift.fnvlift import x86sys as fx      # the Form builder reads fnvlift.x86sys.REC, loaded once per process: this test hands it the fixture's record
+        REC['lar_lsl'] = {'status': 'undecided', 'why': 'type blocker'}; saved = fx.REC
+        try: open(self.f.name, 'w').write(json.dumps(_complete(REC))); fx.REC = _complete(REC); r, n = sysspec.check(key('0f0302')); self.assertEqual(r, 'uncertified'); self.assertIn('type blocker', n)
+        finally: del REC['lar_lsl']; fx.REC = saved
+
+    def test_str_proved_against_the_cited_sdm_operation(self):
+        self.assertEqual(sysspec.check(key('0f000f'))[0], 'proved')
+
+    def test_str_cites_check_against_the_pinned_sdm(self):
+        sdm = os.environ.get('FNVNX_SDM_TXT', '/tmp/sdmdl/sdm.txt')
+        if not os.path.exists(sdm): self.skipTest('pinned SDM text not present')
+        import subprocess
+        r = subprocess.run([sys.executable, '-I', os.path.join(HERE, '..', 'sdm_cite_check.py'), sdm, os.path.join(HERE, '..', 'sysspec_str.py'), os.path.join(HERE, '..', 'sysspec_pages.tsv')], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout)
+
+    def test_far_call_cites_check_against_the_pinned_sdm(self):
+        sdm = os.environ.get('FNVNX_SDM_TXT', '/tmp/sdmdl/sdm.txt')
+        if not os.path.exists(sdm): self.skipTest('pinned SDM text not present')
+        import subprocess
+        r = subprocess.run([sys.executable, '-I', os.path.join(HERE, '..', 'sdm_cite_check.py'), sdm, os.path.join(HERE, '..', 'sysspec_far.py'), os.path.join(HERE, '..', 'sysspec_far_pages.tsv')], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout)
+
+    def test_far_memory_shape_needs_a_proved_ea_basis(self):
+        from fnvnx.lift.proof import sysspec_far
+        k = 'ff5a00/0.0.2.1'
+        self.assertEqual(sysspec_far.basis_key(k), 'ff7200/0.0.2.1')
+        self.assertEqual(sysspec_far.basis_key('f3ff5a00/0.0.3.1'), 'ff7200/0.0.2.1')
+        sysspec.CERTS = set()
+        try:
+            r, n = sysspec.check(k)
+        finally: sysspec.CERTS = None
+        self.assertEqual((r, n), ('uncertified', 'uncertified: ea-basis ff7200/0.0.2.1 not certified'))
+
+    def test_far_transfer_is_uncertified_while_the_descriptor_rows_are_undecided(self):
+        r, n = sysspec.check(key('9a000000000000'))      # the Form of the far CALL (9A) exists on the lift line with the far Forms; without it the shape is not covered
+        self.assertIn(r, ('uncertified', 'not-covered')); self.assertIn('OutsideDomain' if r == 'uncertified' else 'Form', n)
+
+
+if __name__ == '__main__':
+    unittest.main()

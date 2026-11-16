@@ -10,6 +10,7 @@
    "at": "/ext/certs"
   }
  ],
+ "shapes": "liftpack/shapes.tsv",
  "certs": "certs/certs.tsv",
- "model_sha256": "e436ee6f79856a7ac9543400b7973dd1f0057410426f08b1e456c1d1c43e654a"
+ "instrs": "liftpack/instrs.tsv"
 }

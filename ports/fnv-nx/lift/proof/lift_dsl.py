@@ -1,0 +1,191 @@
+"""Instruction handlers generated from the proven DSL forms (R2: one source for the proof and for the shipped code). Lives in proof/ (the root that holds the Forms; the root graph is
+acyclic, proof above fnvlift): the lifter takes it as a function, core.set_emit(proof.lift_dsl.emit_form).
+
+emit_form(cx, ins) builds the Form of the instruction (proof/forms.py: the same object the SMT proofs are about) and emits its C inline through
+Form.to_c_inline (fnvlift/dsl.py).  core.dispatch calls it first for every instruction when an emitter is set (core.set_emit); it returns SKIP for an instruction the
+forms do not cover (their mnemonics, or a register operand that is not a general register: xmm/mm/segment), which then goes to the hand handlers.
+
+One block per instruction:  `{ snapshots of the pre-state; const temporaries (every load, shared sub-expressions); faults; register writes;
+flag writes; stores; control transfer }`, i.e. the Form's parallel semantics: all expressions read the pre-state, effects commit in the Form's order.
+Mapping of the Form's state to the lifter's:  eax..edi, cf pf af zf sf of df = the C registers / function-local flag values (0 or 1);
+fs_base = `fsb`; flo (the other EFLAGS bits) = c->eflx | IF (EFL_PUSH/EFL_POP keep AC and ID there; user mode has IF set);
+memory = M8/M16/M32 (core's macros).  DEF0: a flag a form declares undefined is assigned 0, and a flag write with `when` w is `w ? v : 0`; DEFPRIOR: a register write with `when` is conditional, so a register the model leaves free keeps its prior value.
+
+Faults (Form.faults) raise through f_flow.raise_site like int3/ud2 and the hand div: code 1 (#DE) is FNVL_DE0, the one row for every #DE; every other kind's runtime code is the same number, a row of fnvlift/faults.json.
+
+Control transfer is derived from the Form's eip node by structure: constant == next address -> falls through; another constant -> `call` pushes
+(the Form's esp/store effects) and uses f_flow.call_xfer, anything else f_flow.jump_to; ite(c, constant T, next) -> `if (c) jump_to(T)` (jcc, jecxz,
+loop*, and the step repeat of rep string forms, whose eip is `ite(more, this address, next)`: a goto to the instruction's own label); any other
+expression (indirect jmp / call, ret) -> f_flow.jmp_indirect / call_xfer / ret_xfer with the C text of the node, the kind chosen by the mnemonic."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
+from fnvnx.lift.fnvlift.core import CC, SKIP, SUB, Unsupported
+from fnvnx.lift.fnvlift import f_flow
+from fnvnx.lift.fnvlift import dsl, faults, prov
+
+from fnvnx.lift.proof import forms, forms_alu, forms_flow, forms_move, forms_simd, forms_ssefp, forms_sys             # noqa: F401  (proof/forms.py: the Form builders; forms_* register their handlers in forms.H)
+
+FAULT = {1: 'DE', 2: 'BP', 3: 'UD', 4: 'BR'}
+STATE = {'df': 'df', 'fs_base': 'fsb', 'flo': '(c->eflx|0x200u)'}      # Form pre-state variables besides the registers and the five flags
+# the x87 / MMX / SSE pre-state (dsl.XW) as C expressions over struct cpu (rt/fnvl_x87.h fx_dsl_*); c0 c2 c3 are the lifted function's own condition-code locals
+XSTATE = {**{'fr%d' % i: 'fx_dsl_fr(%d)' % i for i in range(8)}, 'ftop': 'c->ftop', 'ftag': 'fx_dsl_ftag()', 'fcw': '(c->fcw & 0xffffu)', 'fsw': 'fx_dsl_fsw(c0, c2, c3)',
+          'fip': 'c->fip', 'fdp': 'c->fdp', 'fop': 'fx_fop()', 'fcs': '(c->fcs & 0xffffu)', 'fds': '(c->fds & 0xffffu)',
+          **{'xmm%d' % i: 'fx_dsl_xmm(%d)' % i for i in range(8)}, 'mxcsr': 'fx_dsl_mxcsr()'}
+assert set(XSTATE) == set(dsl.XW)
+SIXFLAGS = ('cf', 'pf', 'af', 'zf', 'sf', 'of')
+
+
+def supported(ins):
+    """the Form builder has a handler for the mnemonic (forms.build's own lookup: forms.H, then the jcc / setcc / cmovcc families) and every register
+    operand is a general register (the string forms' mnemonics movsd/cmpsd are also SSE2 instructions)"""
+    m = ins.mnemonic.split()[-1]
+    ok = m in forms.H or (m[0] == 'j' and m[1:] in CC) or (m.startswith('set') and m[3:] in CC) or (m.startswith('cmov') and m[4:] in CC)
+    return ok and all(ins.reg_name(o.reg) in SUB or ins.reg_name(o.reg) in dsl.SEGS or ins.reg_name(o.reg)[:2] in ('cr', 'dr') or forms.isvec(forms.Op(ins, o)) for o in ins.operands if o.type == forms.X.X86_OP_REG)
+
+
+def varc(cx):
+    def v(name):
+        if name == 'gs_base':      # the GS base is a function of the CURRENT GS selector (core.Ctx.ea); the null / code-selector #GP is the guard core.gs_guard emits before the instruction
+            return 'FNVL_GS_BASE()'
+        if name == 'fs_base':
+            cx.usesfs = True
+        if name in XSTATE:
+            return XSTATE[name]
+        if name in dsl.XIN and name.startswith('sel_'):      # the segment register state: fnvl_seg_get (rt/fnvl.h), c->sel[SEG_*]
+            return 'fnvl_seg_get(c,%d)' % dsl.SEGS.index(name[4:])
+        if name in dsl.REGS or name in SIXFLAGS or name in STATE:
+            return STATE.get(name, name)
+        raise Unsupported('form variable ' + name)
+    return v
+
+
+def de_code(n, ref):
+    """C expression of the hardware code of a #DE: the one row FNVL_DE0 (Wine 9.0 fpe_handler TRAP_x86_DIVIDE reports every #DE, the quotient overflow too, as STATUS_INTEGER_DIVIDE_BY_ZERO)"""
+    return 'FNVL_DE0'
+
+
+# The fault map: every fault code a Form can raise (dsl.FAULTS, the enum) -> (runtime code of rt/fnvl.h, the address the runtime is given relative to the instruction, trap).
+# Each row follows the runtime's own statement in rt/fnvl.h (the status, fault or trap, ExceptionAddress / Context.Eip) and Wine 9.0 dlls/ntdll/signal_i386.c
+# (segv_handler / trap handlers: TRAP_x86_DIVIDE -> STATUS_INTEGER_DIVIDE_BY_ZERO, TRAP_x86_BPTFLT -> STATUS_BREAKPOINT, TRAP_x86_OPNOEXT/ILLEGAL -> STATUS_ILLEGAL_INSTRUCTION,
+# TRAP_x86_BOUND -> STATUS_ARRAY_BOUNDS_EXCEEDED, TRAP_x86_OFLOW -> STATUS_INTEGER_OVERFLOW, privileged instruction (#GP from CLI/HLT/...) -> STATUS_PRIVILEGED_INSTRUCTION,
+# TRAP_x86_PROTFLT -> STATUS_ACCESS_VIOLATION, TRAP_x86_TRCTRAP -> STATUS_SINGLE_STEP). at: 'a' the instruction, 'nxt' the next instruction, 'a+1' the imm8 byte of a 2-byte int.
+FAULT_MAP = faults.fault_map()      # generated from the one fault table (fnvlift/faults.json): kind -> (FNVL_* name or AV, at, trap)
+DE = 1        # #DE: the status (divide by zero or overflow) is chosen by the condition (de_code), a fault
+assert set(FAULT_MAP) | {DE} == set(dsl.FAULTS), 'a fault code of dsl.FAULTS has no row in FAULT_MAP: %s' % sorted(set(dsl.FAULTS) - set(FAULT_MAP) - {DE})
+
+
+def fault_fn(cx):
+    def f(code, n, ref):
+        if code == DE:
+            c, at, trap, av = de_code(n, ref), None, False, False
+        else:
+            c, w, trap = FAULT_MAP[code]; av = c == 'AV'; at = {'a': cx.a, 'nxt': cx.nxt, 'a+1': cx.a + 1}[w]
+        st = f_flow.raise_site(cx, c, trap=trap, at=at, av=av)
+        if n.op == 'const' and n.x == 1:
+            cx.term = True
+            return st
+        return 'if (%s) { %s }' % (ref(n), st)
+    return f
+
+
+def flo_fn(v):
+    return 'c->eflx = %s & ~0x200u;' % v
+
+
+def transfer(cx, ins, F):
+    """-> (nodes whose value is needed after the writes, function(ref) -> list of C lines); sets cx.term"""
+    n, nxt, m = F.eip, cx.nxt, ins.mnemonic.split()[-1]      # the bare mnemonic (cx.m keeps `repz ret`)
+    if n.op == 'const':
+        if m in ('call', 'lcall'):
+            return [], lambda ref: [f_flow.call_xfer(cx, cx.ops[0], n.x)]
+        if n.x == nxt:
+            return [], lambda ref: []
+        cx.term = True
+        return [], lambda ref: [f_flow.jump_to(cx, n.x)]
+    if n.op == 'ite' and n.a[1].op == 'const' and n.a[2].op == 'const' and n.a[2].x == nxt and m not in ('call', 'lcall'):
+        t = n.a[1].x
+
+        def cond(ref):
+            st = f_flow.jump_to(cx, t)
+            return ['if (%s)%s' % (ref(n.a[0]), st if st[0] == '{' else ' ' + st)]
+        return [n.a[0]], cond
+    if m in ('call', 'lcall'):
+        return [n], lambda ref: [f_flow.call_xfer(cx, cx.ops[0], ref(n))]
+    if m == 'ret':
+        cx.term = True
+        return [n], lambda ref: [f_flow.ret_xfer(cx, ref(n))]
+    if m in ('jmp', 'ljmp'):
+        cx.term = True
+        return [n], lambda ref: f_flow.jmp_indirect(cx, cx.ops[0], ref(n))
+    raise Unsupported('eip form of ' + m)
+
+
+_DEAD = {}
+
+
+def _arm_dead(sg, cond, sels):
+    """z3: under the domain `sel_<sg> in sels` (the segment register holds one of the selectors of the image's SEGWRITES fact) the code-selector condition `cond` is unsatisfiable"""
+    import z3
+    key = (sg, dsl.skey(cond), tuple(sels))
+    r = _DEAD.get(key)
+    if r is None:
+        v = z3.BitVec('sel_' + sg, 16); sv = z3.Solver()
+        sv.add(z3.Or(*[v == z3.BitVecVal(x, 16) for x in sels]) if sels else z3.BoolVal(False)); sv.add(dsl.to_smt(cond) == 1)
+        r = _DEAD[key] = sv.check() == z3.unsat
+    return r
+
+
+def specialise(F):
+    """the Form of a store through a segment register whose selector set the facts bound (core.sel_set): the code-selector arm of a store (proof/forms.code_store_fault) whose condition is unsatisfiable under
+    `sel_<sg> in set` is dead and is dropped, by a z3 proof per (condition, set).  An unbounded register (no set) and a cs-override keep the arm.  The Form is not modified (a copy)."""
+    arms = getattr(F, 'cstore', None)
+    if not arms: return F
+    import copy
+    from fnvnx.lift.fnvlift import core
+    dead = []
+    for sg, cond, full in arms:
+        sels = core.sel_set(sg)
+        if sels is not None and _arm_dead(sg, cond, sels): dead.append(full)
+    if not dead: return F
+    g = copy.copy(F); g.faults = [(k, c) for k, c in F.faults if not any(c is d for d in dead)]; g.cstore = [a for a in arms if a[2] not in dead]
+    return g
+
+
+def emit_form(cx, ins):
+    """emit the C of one instruction from its Form -> None, or SKIP when the forms do not cover it. A build error propagates."""
+    if not supported(ins):
+        return SKIP
+    try: F = forms.build(ins, cx.a)
+    except dsl.UndecidedRow as e: raise Unsupported(str(e)) from None      # a row of the record is undecided: no body (the same class as every other undecided row)
+    F = specialise(F)
+    if any(k == 'sel' and i == dsl.SEGS.index('fs') for k, i, _ in F.xs): cx.usesfs = True      # fnvl_seg_set(FS) re-bases the cached `fsb`
+    force, xfer = transfer(cx, ins, F)
+    S = [] if prov.ON else None      # provenance measurement (fnvlift/prov.py): the Form section of each line; the emitted lines are the same
+    L, ref = F.to_c_inline(varc(cx), fault_fn(cx), flo_fn, force, cx.macc, S)
+    nF = len(L)
+    L += xfer(ref)
+    if L:
+        if S is not None:
+            cx.tag = 'form: block braces'
+        cx.em('{')
+        for i, l in enumerate(L):
+            if S is not None:
+                cx.tag = S[i] if i < nF else 'form: control transfer (f_flow)'
+            cx.em(l)
+        if S is not None:
+            cx.tag = 'form: block braces'
+        cx.em('}')
+        cx.tag = None
+
+
+def covers(ins):
+    """is this instruction emitted from its Form (emit_form does not SKIP it)? core.gs_guard asks: the Form carries the null-selector fault of forms.NULL_CHECKED and every code-segment store fault"""
+    return supported(ins)
+
+
+def carried_null():
+    """the state indexes (dsl.SEGS) of the segment registers whose null-selector access fault the Form carries"""
+    return frozenset(dsl.SEGS.index(n) for n in forms.NULL_CHECKED)
+
+
+emit_form.covers, emit_form.carried_null = covers, carried_null

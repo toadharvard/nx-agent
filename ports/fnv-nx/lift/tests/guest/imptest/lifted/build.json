@@ -1,0 +1,127 @@
+{
+ "format": "fnvnx-recipe/1",
+ "profile": "guest",
+ "flags": {
+  "c": [
+   "-O2",
+   "-Werror=attributes"
+  ],
+  "cxx": [
+   "-std=gnu++17",
+   "-O2",
+   "-Werror=attributes"
+  ],
+  "asm": []
+ },
+ "include": [
+  "ports/fnv-nx/lift/tests/guest/imptest/lifted/inc",
+  "ports/fnv-nx/shim/include",
+  "ports/fnv-nx/platform/include"
+ ],
+ "units": "all",
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/lift/tools/guestgen_imptest.py",
+   "args": [
+    "/out/gen",
+    "/in/ports/fnv-nx/lift",
+    "--x86sys",
+    "/uses/ports/fnv-nx/platform/X86SYS",
+    "--sdmrows",
+    "/uses/ports/fnv-nx/lift/sdmrows/SDMROWS",
+    "--cpumodel",
+    "/in/ports/fnv-nx/verify/cpuid_model.json",
+    "--rcptab",
+    "/in/ports/fnv-nx/lift/rt/rcptab.c",
+    "--rcpcert",
+    "/in/ports/fnv-nx/lift/rt/rcptab.cert.json"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/fnvlift",
+    "ports/fnv-nx/verify/cpuid_model.json",
+    "ports/fnv-nx/lift/proof",
+    "ports/fnv-nx/lift/rt/rcptab.c",
+    "ports/fnv-nx/lift/rt/rcptab.cert.json"
+   ],
+   "outputs": [
+    "gen/guest.cc",
+    "gen/imp.cc",
+    "gen/tab.cc",
+    "gen/image.inc",
+    "gen/labels.txt"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/packstage.py",
+   "args": [
+    "inc",
+    "fnvl_prelude.h",
+    "/out/inc/fnvl_prelude.h",
+    "/in/ports/fnv-nx/lift/rt",
+    "/in/ports/fnv-nx/platform/include",
+    "/uses/ports/fnv-nx/lift/rt/GEN"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/rt/fmath.h",
+    "ports/fnv-nx/lift/rt/fnvl.h",
+    "ports/fnv-nx/lift/rt/fnvl_abi.h",
+    "ports/fnv-nx/lift/rt/fnvl_fpc.h",
+    "ports/fnv-nx/lift/rt/fnvl_x87.h",
+    "ports/fnv-nx/lift/rt/x87.h",
+    "ports/fnv-nx/platform/include/fnvl_host.h"
+   ],
+   "outputs": [
+    "inc/fnvl_prelude.h"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/packstage.py",
+   "args": [
+    "inc",
+    "imp.h",
+    "/out/inc/imp.h",
+    "/in/ports/fnv-nx/lift/rt",
+    "/in/ports/fnv-nx/platform/include",
+    "/uses/ports/fnv-nx/lift/rt/GEN"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/rt/imp.h"
+   ],
+   "outputs": [
+    "inc/imp.h"
+   ]
+  }
+ ],
+ "outputs": {
+  "GEN": "gen"
+ },
+ "external": [],
+ "uses": [
+  {
+   "root": "ports/fnv-nx/lift/rt",
+   "output": "GEN"
+  },
+  {
+   "root": "ports/fnv-nx/shim",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/lift/sdmrows",
+   "output": "SDMROWS"
+  },
+  {
+   "root": "ports/fnv-nx/platform",
+   "output": "X86SYS"
+  },
+  {
+   "root": "ports/fnv-nx/platform",
+   "output": "INCLUDE"
+  }
+ ],
+ "include_uses": [
+  {
+   "root": "ports/fnv-nx/lift/rt",
+   "output": "GEN"
+  }
+ ]
+}

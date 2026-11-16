@@ -1,0 +1,80 @@
+{
+ "format": "fnvnx-recipe/1",
+ "compiler": {
+  "cc": "x86_64-linux-gnu-gcc-13",
+  "cxx": "x86_64-linux-gnu-g++-13"
+ },
+ "flags": {
+  "c": [
+   "-O2",
+   "-msse2",
+   "-pthread"
+  ],
+  "cxx": [
+   "-O2",
+   "-msse2",
+   "-pthread"
+  ],
+  "asm": []
+ },
+ "include": [
+  "ports/fnv-nx/platform/include"
+ ],
+ "units": "all",
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/lift/rcpcert/gen_sources.py",
+   "args": [
+    "/out/gen/sources.txt"
+   ],
+   "inputs": [],
+   "outputs": [
+    "gen/sources.txt"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/rcpcert/hdrsha.py",
+   "args": [
+    "/uses/ports/fnv-nx/lift/rt/GEN/rcpref.h",
+    "/out/hdr.sha256"
+   ],
+   "inputs": [],
+   "outputs": [
+    "hdr.sha256"
+   ]
+  }
+ ],
+ "sources": "gen/sources.txt",
+ "uses": [
+  {
+   "root": "ports/fnv-nx/lift/rt",
+   "output": "GEN"
+  },
+  {
+   "root": "ports/fnv-nx/platform",
+   "output": "INCLUDE"
+  }
+ ],
+ "include_uses": [
+  {
+   "root": "ports/fnv-nx/lift/rt",
+   "output": "GEN"
+  }
+ ],
+ "link": {
+  "output": "rcpcert.exe",
+  "kind": "exe",
+  "flags": [
+   "-m",
+   "elf_x86_64"
+  ],
+  "libs": {
+   "system": [
+    "/lib/x86_64-linux-gnu/libc.so.6"
+   ]
+  }
+ },
+ "outputs": {
+  "HDR_SHA256": "hdr.sha256"
+ }
+}

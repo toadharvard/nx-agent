@@ -16,20 +16,22 @@ addr + size when relative); a decoder whose value fits none of them raises Field
 derivation is a hypothesis about capstone; its soundness for every instruction of the exe is established exhaustively by symcheck.py.
 Builders may only compute with the field (DSL nodes).  A builder that BRANCHES on it (compares, truth value, int()) raises SymbolicBranch(file:line):
 that builder cannot be made symbolic by substitution (class `builder-branches-on-field`)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, sys, traceback
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import hashlib
-from fnvlift import dsl
-from fnvlift.dsl import N, mk, C, V, F, mask
+from fnvnx.lift.fnvlift import dsl
+from fnvnx.lift.fnvlift.dsl import N, mk, C, V, F, mask
 from capstone import x86 as X
-from proof import forms, shape as shp
-from proof.detrand import Rng
+from fnvnx.lift.proof import forms, shape as shp
+from fnvnx.lift.proof.detrand import Rng
 
 M32 = 0xffffffff
 def eip(): return V('eip', 32)
 
 class FieldDecodeError(Exception): pass
-class SymbolicBranch(Exception): pass
+SymbolicBranch = dsl.SymbolicBranch
 
 # ------------------------------------------------------------------------------------------------ key
 def parse_key(key):
@@ -51,7 +53,7 @@ class SV:
     """a 32-bit DSL node posing as the Python integer value of an operand: arithmetic builds nodes, every Python-level decision raises SymbolicBranch"""
     def __init__(s, node, what): s._node = node; s._what = what
     def _b(s, *a): raise SymbolicBranch(s._what)
-    __eq__ = __ne__ = __lt__ = __le__ = __gt__ = __ge__ = __bool__ = __int__ = __index__ = __hash__ = _b
+    __eq__ = __ne__ = __lt__ = __le__ = __gt__ = __ge__ = __bool__ = __int__ = __index__ = __hash__ = __contains__ = __iter__ = __len__ = _b
     def __and__(s, o): return s._node & o
     __rand__ = __and__
     def __or__(s, o): return s._node | o
@@ -107,16 +109,22 @@ class SymOp:
     def imm(s): return s._imm if s._imm is not None else s._o.imm
 class SymIns:
     """a capstone instruction with symbolic operands; the other members forms*.py reads (bytes, size, mnemonic, reg_name) are the decoder's"""
-    def __init__(s, ins, ops): s._i, s.operands = ins, ops
+    def __init__(s, ins, ops, mnemonic=None): s._i, s.operands, s._m = ins, ops, mnemonic
     @property
     def bytes(s): return s._i.bytes
     @property
     def size(s): return s._i.size
     @property
-    def mnemonic(s): return s._i.mnemonic
+    def mnemonic(s): return s._m or s._i.mnemonic
     def reg_name(s, r): return s._i.reg_name(r)
 
 # ------------------------------------------------------------------------------------------------ derivation of the adapter from the decoder
+class PredImm:
+    """the imm8 operand that the decoder folds into the mnemonic: capstone prints CMPPS/CMPPD/CMPSS/CMPSD with imm8 0..7 as cmp<predicate><ps|pd|ss|sd> with no immediate operand
+    (the predicate of SDM Vol 2 CMPPS table).  A shape over that imm8 is the generic mnemonic with the immediate field as its third operand."""
+    type, size, reg = X.X86_OP_IMM, 1, None
+    def __init__(s, imm): s.imm = imm
+_CMPALIAS = {'cmp' + p + sx: 'cmp' + sx for p in dsl.CMPPRED for sx in ('ps', 'pd', 'ss', 'sd')}
 _md = shp.decoder()
 def decode(raw, addr):
     l = list(_md.disasm(raw, addr))
@@ -175,17 +183,28 @@ def derive(rep, fields):
     if fields['disp'] and not disp: raise FieldDecodeError('no memory operand depends on the displacement bytes (%s)' % ins.mnemonic)
     return imm, disp
 
-def symbuild(key):
-    """SymForm of a shape.  Raises KeyError (no DSL builder for the mnemonic), FieldDecodeError, SymbolicBranch, AssertionError (builder precondition)"""
+def symins(key):
+    """the ADAPTER instruction of a shape (symbuild's input) and its field data: -> (SymIns, fields, widths, imm, disp).  One function: symbuild builds the Form from it,
+    and a spec checker (simdcheck.py) reads the operands' effective addresses from the same operands."""
     rep, fields = parse_key(key); ins = decode(rep, 0)
-    imm, disp = derive(rep, fields); size = ins.size; widths = {n: 8 * f[1] for n, f in fields.items() if f}
+    alias = _CMPALIAS.get(ins.mnemonic) if fields['imm'] and not any(o.type == X.X86_OP_IMM for o in ins.operands) else None
+    imm, disp = ({}, derive(rep, dict(fields, imm=None))[1]) if alias else derive(rep, fields)
+    size = ins.size; widths = {n: 8 * f[1] for n, f in fields.items() if f}
     ops = []
     for j, o in enumerate(ins.operands):
         so = SymOp(o)
         if j in imm: so = SymOp(o, imm=SV(imm[j].node(widths['imm'], size), '%s operand %d (imm)' % (ins.mnemonic, j)))
         if j in disp: so = SymOp(o, mem=SymMem(o.mem, SV(disp[j].node(widths['disp'], size), '%s operand %d (disp)' % (ins.mnemonic, j))))
         ops.append(so)
-    sins = SymIns(ins, ops)
+    if alias:
+        assert fields['imm'][1] == 1, 'cmp imm8 field is not one byte'
+        ops.append(PredImm(SV(dsl.zext(F('imm', 8), 32), '%s operand 2 (imm)' % alias)))
+    return SymIns(ins, ops, alias), fields, widths, imm, disp, ins
+
+
+def symbuild(key):
+    """SymForm of a shape.  Raises KeyError (no DSL builder for the mnemonic), FieldDecodeError, SymbolicBranch, AssertionError (builder precondition)"""
+    sins, fields, widths, imm, disp, ins = symins(key)
     try: f = forms.build(sins, eip())
     except SymbolicBranch as e:
         tb = [t for t in traceback.extract_tb(sys.exc_info()[2]) if os.path.basename(t.filename).startswith('forms')]
@@ -200,7 +219,7 @@ def shape_sha(key):
 def eip_dependence(sf):
     """'none' | 'target' (the eip effect is not eip + constant: a relative transfer) | 'data' (eip is read by a register / flag / store / fault effect: a
     return address).  By the structure of the Form, not by mnemonic."""
-    f = sf.form; data = [v for _, v, _ in f.regs] + [w for _, _, w in f.regs if w is not None] + [v for _, v, _ in f.flags] + [x for st in f.stores for x in st] + \
+    f = sf.form; data = [v for _, v, _ in f.regs] + [w for _, _, w in f.regs if w is not None] + [v for _, v, _ in f.flags] + [x for st in f.stores for x in st] + [f.swhen[i] for i in sorted(f.swhen)] + \
         [c for _, c in f.faults] + ([f.flo] if f.flo is not None else [])
     def reach(roots):
         seen, st = set(), list(roots)
@@ -254,7 +273,8 @@ class Subst:
         elif n.op in ('const', 'var', 'fld'): r = n
         else:
             a = [s(c) for c in n.a]
-            r = C(_ev(n, [c.x for c in a]), n.w) if n.op != 'load' and all(c.op == 'const' for c in a) else mk(n.op, n.w, a, n.x)
+            if n.op == 'ite' and a[0].op == 'const': r = a[1] if a[0].x else a[2]      # a selector (the symbolic immediate bits of a shape) that is a constant picks its arm: the DSL's own ite semantics
+            else: r = C(_ev(n, [c.x for c in a]), n.w) if n.op != 'load' and all(c.op == 'const' for c in a) else mk(n.op, n.w, a, n.x)
         s.memo[n.u] = r; return r
 
 def normalize(form, env=None):
@@ -264,18 +284,25 @@ def normalize(form, env=None):
     for k, v in (env or {}).items(): e[('var' if k == 'eip' else 'fld', k)] = v
     S = Subst(e); g = copy.copy(form)
     g.regs = [(r, S(v), None if w is None else S(w)) for r, v, w in form.regs]; g.flags = [(f, S(v), None if w is None else S(w)) for f, v, w in form.flags]
-    g.stores = [(S(a), S(v)) for a, v in form.stores]; g.faults = [(k, S(c)) for k, c in form.faults]; g.undef = dict(form.undef)
+    g.stores = [(S(a), S(v)) for a, v in form.stores]; g.swhen = {i: S(w) for i, w in form.swhen.items()}; g.faults = [(k, c) for k, c in ((k, S(c)) for k, c in form.faults) if not (c.op == 'const' and not c.x)];      # a fault row whose condition folded to 0 never fires (a vector row of a shape at another vector)
+    g.domain = [c for c in (S(c) for c in form.domain) if not (c.op == 'const' and c.x)]      # a condition that folded to true holds at this instance and is not part of its Form
+    g.undef = dict(form.undef); g.uwhen = {f: S(w) for f, w in form.uwhen.items()}      # the `when` of an undefined flag (DEF0) and the x87 / SIMD effects hold nodes too
+    g.xs = [(k, i, tuple(S(x) for x in e) if k == 'fptr' else S(e)) for k, i, e in form.xs]; g.mmw = []
     g.eip = S(form.eip); g.flo = None if form.flo is None else S(form.flo); g.pend = {}
     if isinstance(form.addr, N):
         a = S(form.addr); g.addr = a.x if a.op == 'const' else a
     return g
+
+class OutsideDomain(AssertionError): pass
 
 def canon(form): return normalize(form).serialize()
 
 def instantiate(sf, raw, addr):
     """the symbolic Form with the field bytes of the instruction `raw` and its address substituted"""
     env = dict(field_values(raw, sf.fields)); env['eip'] = addr
-    return normalize(sf.form, env)
+    g = normalize(sf.form, env)
+    if any(c.op == 'const' for c in g.domain): raise OutsideDomain('%s: the field values of %s are outside the domain of the shape (the concrete builder has no Form there)' % (sf.key, raw.hex() if isinstance(raw, (bytes, bytearray)) else raw))
+    return g
 
 def link_ok(sf, raw, addr):
     """the certificate's link for ONE instruction: canon(forms.build(i, addr)) == canon(symbuild(shape(i))[fields := i, eip := addr]).  -> (equal, why)"""

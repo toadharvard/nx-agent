@@ -1,0 +1,7 @@
+# Expected values of test_dsl_int_classes.py, written from the Intel SDM (not computed by the code under test).
+# kind=stack: columns `stack`, encoding hex, SDM citation, esp delta (signed decimal). 66-prefixed PUSH/POP r16 move the stack pointer by 2, PUSH/POP r32 by 4 (SDM vol. 2 PUSH "Operation": StackAddrSize = 32, OperandSize 16 -> ESP - 2; POP likewise + 2).
+stack	6659	SDM v2 POP r16 (66 58+rw), stack size 32: ESP + 2	2
+stack	665d	SDM v2 POP r16 (66 58+rw), stack size 32: ESP + 2	2
+stack	6651	SDM v2 PUSH r16 (66 50+rw), stack size 32: ESP - 2	-2
+stack	59	SDM v2 POP r32 (58+rd): ESP + 4	4
+stack	51	SDM v2 PUSH r32 (50+rd): ESP - 4	-4

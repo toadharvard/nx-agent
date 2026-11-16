@@ -1,19 +1,19 @@
 """x87, part 2: the stack-depth pre-pass, the per-site stack sync of the static path, and the control/status instructions.
 
 Two stack models (R8). STATIC: the pre-pass proves a depth 0..8 at every instruction (entry 0; a call changes it by the callee's net return depth from
-/home/user/l3facts/fpmodes/depth.tsv, tools/fpmodes.py: columns addr, status, max, min, ret=, conf=, ind=; override with FNVNX_FPDEPTH); each stack slot is a
+the explicit input `fpdepth` of fnvlift/inputs.py (tools/fpmodes.py depth.tsv: columns addr, status, max, min, ret=, conf=, ind=; an empty file = no depth facts, so every callee has no usable row)); each stack slot is a
 C local s<j> (j = 0 is the bottom of the function's own stack, so st(i) at depth d is s<d-1-i>; GCC keeps them in registers); c->fx[] / c->ftop are touched
 only at calls, tail jumps, returns and non-local exits (store the live slots) and after a call or at a non-local re-entry (reload). ft0 is the physical
 register that the function's bottom slot sits above: slot j lives in c->fx[(ft0-1-j)&7], TOP = (ft0-depth)&7. DYNAMIC: everything goes through c->fx / c->ftop
 (fnvl_x87.h dyn_*), with tags (k==0 is empty) and the stack fault. A function is dynamic when the proof fails: a join conflict, a depth outside 0..8, a callee
-with a conflict or without a usable row (no file, or an address outside the image), an indirect call (result class unknown), or an instruction the static path
+with a conflict or without a usable row (no facts, or an address outside the image), an indirect call (result class unknown), or an instruction the static path
 does not model (ffree, fincstp, fdecstp: X87Dyn from the handlers)."""
 import os
 from capstone import x86 as X
 from .core import X87Dyn, Unsupported
+from . import sites, inputs, prov
 
 TAB = None
-DEFAULT = '/home/user/l3facts/fpmodes/depth.tsv'
 
 
 def table():
@@ -21,13 +21,10 @@ def table():
     global TAB
     if TAB is None:
         TAB = {}
-        try:
-            for l in open(os.environ.get('FNVNX_FPDEPTH', DEFAULT)):
-                f = l.rstrip('\n').split('\t')
-                kv = dict(x.split('=') for x in f[2:] if '=' in x)
-                TAB[int(f[0], 16)] = (f[1], int(kv['ret']))
-        except (OSError, ValueError, KeyError):
-            TAB = False
+        for l in open(inputs.get('fpdepth')):      # a missing file is an error; no depth facts is an empty depth.tsv, read by this same code
+            f = l.rstrip('\n').split('\t')
+            kv = dict(x.split('=') for x in f[2:] if '=' in x)
+            TAB[int(f[0], 16)] = (f[1], int(kv['ret']))
     return TAB
 
 
@@ -291,6 +288,8 @@ def fix_lines(cx, a, n0):
             t = t.replace('SYNC_IN;', 'SYNC_IN;' + load(da))
         elif 'goto nonlocal;' in t and 'SYNC_IN;' not in t:
             t = t.replace('goto nonlocal;', store(cx, d) + 'goto nonlocal;')
+        if prov.ON and len(t) != len(L[i]):
+            cx.PX.append((i, ('f_x87_ctl.fix_lines', 'fix_lines: x87 static stack traffic at SYNC_OUT / SYNC_IN / goto nonlocal'), len(t) - len(L[i])))
         L[i] = t
 
 
@@ -304,7 +303,7 @@ def env(cx, ins, b0, g):
     recomputed from its contents by every store, SDM 8.1.7, so 00/01/10 carry no state); frstor also loads ST(0..7) as 80-bit images into M80 carriers; FIP and FDP are loaded into
     c->fip / c->fdp.
     STORES (fnstenv, fnsave): FCW, FSW (FSWV: TOP, C0..C3, C1, sticky bits), FTW from the register contents, FIP, FCS | FOP << 16, FDP, FDS from the last-instruction state (c->fip, c->fdp:
-    rt/fnvl_x87.h, SDM 8.1.8, assumptions ASM-212 ASM-213 ASM-214 ASM-215 there); fnsave then writes ST(0..7) and performs FNINIT; fnstenv then masks all exceptions (FCW |= 3F via FLDCW).
+    rt/fnvl_x87.h, SDM 8.1.8, assumptions ASM-212 ASM-215 there; FOP/FCS/FDS are stored state, fnvl_x87.h); fnsave then writes ST(0..7) and performs FNINIT; fnstenv then masks all exceptions (FCW |= 3F via FLDCW).
     Assumptions: ASM-210 a register that the image marks non-empty but whose carrier is empty holds the real indefinite (the value the tree gives every read of an empty register:
     dyn_rd; an empty register keeps the 80-bit image it last held, fv_free, which an MMX read sees, but every x87 read of it gives the indefinite; fnsave writes the indefinite for an empty register too); ASM-211 the FSW bits ES (7) and B (15) are not kept, no x87 exception is ever pending
     in the model (invariant ASM-204, fnvlift/fpfacts.py: all exceptions masked, FSWV never reports them)."""
@@ -313,7 +312,7 @@ def env(cx, ins, b0, g):
     d32 = 0 if ins.prefix[2] == 0x66 else 1
     a = cx.ea(ins, cx.ops[0])
     if g == 6:
-        cx.em(('FNSTENV(%s,%d,FSWV(c->ftop));' if b0 == 0xd9 else 'FNSAVE(%s,%d,FSWV(c->ftop));') % (a, d32))
+        cx.em(('FNSTENV(%s,%d,FSWV(c->ftop),0x%xu);' if b0 == 0xd9 else 'FNSAVE(%s,%d,FSWV(c->ftop),0x%xu);') % (a, d32, cx.a))
     else:
         cx.em(('FLDENV(%s,%d);' if b0 == 0xd9 else 'FRSTOR(%s,%d);') % (a, d32))
 
@@ -327,15 +326,16 @@ def ctl(cx, ins, b0, mr, g):
             em('FLDCW(M16(%s));' % cx.ea(ins, cx.ops[0]))
         elif b0 == 0xd9 and g == 7:
             em('M16(%s)=c->fcw;' % cx.ea(ins, cx.ops[0]))
-        elif b0 == 0xdd and g == 7:
-            em('M16(%s)=FSWV(%s);' % (cx.ea(ins, cx.ops[0]), top))
-        elif b0 in (0xd9, 0xdd) and g in (4, 6):
+        elif sites.fsw_form(b0, mr) == 'mem' and g == 7:       # FSTSW m16 (the site predicate is fnvlift/sites.py, shared with the `sites` facts)
+            k = cx.static_ea(ins, cx.ops[0])
+            em('FSW_STK16(0x%xu,FSWV(%s),0x%xu);' % (k, top, cx.a) if k is not None else 'FSW_ST16(%s,FSWV(%s),0x%xu);' % (cx.ea(ins, cx.ops[0]), top, cx.a))
+        elif b0 in (0xd9, 0xdd) and g in (4, 6):            # FLDENV FRSTOR FNSTENV FNSAVE (g 6: sites.fsw_form 'mem')
             env(cx, ins, b0, g)
         else:
             return False
         return True
-    if b0 == 0xdf and mr == 0xe0:
-        em('eax=(eax&0xffff0000u)|FSWV(%s);' % top)
+    if sites.fsw_form(b0, mr) == 'ax':
+        em('FSW_AX(FSWV(%s),0x%xu);' % (top, cx.a))
     elif b0 == 0xdb and mr == 0xe2:
         em('FNCLEX();')
     elif b0 == 0xdb and mr == 0xe3:

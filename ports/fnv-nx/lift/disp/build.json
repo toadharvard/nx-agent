@@ -1,0 +1,48 @@
+{
+ "format": "fnvnx-recipe/1",
+ "profile": "guest",
+ "flags": {
+  "c": [
+   "-O2",
+   "-Werror=attributes"
+  ],
+  "cxx": [
+   "-std=gnu++17",
+   "-O2",
+   "-DFNVNX_SDD=1",
+   "-Werror=attributes"
+  ],
+  "asm": []
+ },
+ "include": [],
+ "units": "all",
+ "link": null,
+ "external": [],
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/lift/tools/dispgen.py",
+   "args": [
+    "--prefix",
+    "fnvnx_native",
+    "--rows",
+    "/out/native_disp_rows.tsv",
+    "/uses/ports/fnv-nx/contract/facts/native",
+    "/out/native_disp.cc"
+   ],
+   "inputs": [],
+   "outputs": [
+    "native_disp.cc",
+    "native_disp_rows.tsv"
+   ]
+  }
+ ],
+ "uses": [
+  {
+   "root": "ports/fnv-nx/contract/facts",
+   "output": "native"
+  }
+ ],
+ "outputs": {
+  "NATIVE_DISP_ROWS": "native_disp_rows.tsv"
+ }
+}

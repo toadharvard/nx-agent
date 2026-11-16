@@ -1,0 +1,491 @@
+{
+ "format": "fnvnx-recipe/1",
+ "compiler": {
+  "cc": "x86_64-linux-gnu-gcc-13",
+  "cxx": "x86_64-linux-gnu-g++-13"
+ },
+ "flags": {
+  "c": [],
+  "cxx": [],
+  "asm": []
+ },
+ "include": [],
+ "units": "all",
+ "external": [
+  {
+   "name": "sail",
+   "repo": "fnv-nx-build",
+   "ref": "tools/sail-mirror",
+   "commit": "b4cf9ee3a15f99037e7a28a91e0494d1a8cb7fc2",
+   "tree_sha256": "1ba45588e2824da0cca9d9ec3e04ec9b4e1fa06a3a20db04e22bdc4966991631",
+   "at": "/ext/sail"
+  },
+  {
+   "name": "pywheels",
+   "repo": "fnv-nx-build",
+   "ref": "tools/pywheels-prover",
+   "commit": "9871210a0cc1f8972181dd92bded30464122e49f",
+   "tree_sha256": "a2666a9ad6d874c82a0a991d75b7f53e7ec7a1b5e1e77913b7851b92d2c14603",
+   "at": "/ext/pywheels"
+  },
+  {
+   "name": "shards",
+   "repo": "fnv-nx-build",
+   "ref": "l3b-lift/reprove-inputs/7c3074644653",
+   "commit": "852184d21612d335bc3d0ac8c99340246eb95c17",
+   "tree_sha256": "8262b64eb827e9f40cc2cec927ec325a0427d5f3ce957072bb39888dc96f04a2",
+   "at": "/ext/shards"
+  }
+ ],
+ "uses": [
+  {
+   "root": "ports/fnv-nx/lift/factsimg/exe",
+   "output": "SHAPES"
+  },
+  {
+   "root": "ports/fnv-nx/lift/factsimg/atimgpud",
+   "output": "SHAPES"
+  },
+  {
+   "root": "ports/fnv-nx/lift/factsimg/binkw32",
+   "output": "SHAPES"
+  },
+  {
+   "root": "ports/fnv-nx/lift/factsimg/d3dx9_31",
+   "output": "SHAPES"
+  },
+  {
+   "root": "ports/fnv-nx/lift/factsimg/d3dx9_38",
+   "output": "SHAPES"
+  },
+  {
+   "root": "ports/fnv-nx/lift/factsimg/gdffalloutnv",
+   "output": "SHAPES"
+  },
+  {
+   "root": "ports/fnv-nx/lift/factsimg/libvorbis",
+   "output": "SHAPES"
+  },
+  {
+   "root": "ports/fnv-nx/lift/factsimg/libvorbisfile",
+   "output": "SHAPES"
+  },
+  {
+   "root": "ports/fnv-nx/lift/proof/isla",
+   "output": "ISLA"
+  },
+  {
+   "root": "ports/fnv-nx/lift/proof/isla",
+   "output": "Z3LIB"
+  },
+  {
+   "root": "ports/fnv-nx/lift/proof/sailmodel",
+   "output": "MODEL"
+  },
+  {
+   "root": "ports/fnv-nx/platform",
+   "output": "X86SYS"
+  },
+  {
+   "root": "ports/fnv-nx/lift/proof/isla",
+   "output": "ISLACFG"
+  }
+ ],
+ "run": [
+  {
+   "name": "closure",
+   "exec": "/usr/bin/python3.12",
+   "args": [
+    "-I",
+    "/in/1",
+    "/in/2",
+    "/in/3",
+    "/in/4",
+    "/in/5",
+    "/in/6",
+    "/out/closure"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/proof/mkclosure.py",
+    "ports/fnv-nx/lift/proof",
+    "ports/fnv-nx/lift/fnvlift",
+    "ports/fnv-nx/verify",
+    "ports/fnv-nx/contract",
+    "ports/fnv-nx/link"
+   ],
+   "debs": {
+    "closure": [
+     "python3"
+    ]
+   },
+   "outputs": [],
+   "scratch": [
+    "/scratch"
+   ],
+   "env": {
+    "TMPDIR": "/scratch"
+   },
+   "dirs": [
+    "closure"
+   ]
+  },
+  {
+   "name": "queue",
+   "exec": "/usr/bin/python3.12",
+   "args": [
+    "-I",
+    "/in/1",
+    "--closure",
+    "/in/2",
+    "--script",
+    "/in/3",
+    "--wheel",
+    "/in/4",
+    "--wheel",
+    "/in/5",
+    "--wheel",
+    "/in/6",
+    "--",
+    "--universe",
+    "/in/11",
+    "/in/12",
+    "/in/13",
+    "/in/14",
+    "/in/15",
+    "/in/16",
+    "/in/17",
+    "/in/18",
+    "--old",
+    "/in/9",
+    "--new",
+    "/in/10",
+    "--out",
+    "/out/queue.tsv",
+    "--info",
+    "/out/queue.info",
+    "--sail-work",
+    "/scratch/work",
+    "--sail-ir",
+    "/in/7",
+    "--isla",
+    "/bin/true",
+    "--isla-cfg",
+    "/in/19",
+    "--x86sys",
+    "/in/8",
+    "--cpumodel",
+    "/in/20",
+    "--rcptab",
+    "/in/21",
+    "--rcpcert",
+    "/in/22"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/proof/stage.py",
+    {
+     "stage": "ports/fnv-nx/lift/proof/shapeprove:run:closure",
+     "path": "closure"
+    },
+    "ports/fnv-nx/lift/proof/reprove_queue.py",
+    {
+     "external": "pywheels",
+     "path": "capstone-5.0.9-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"
+    },
+    {
+     "external": "pywheels",
+     "path": "keystone_engine-0.9.2-py2.py3-none-manylinux1_x86_64.whl"
+    },
+    {
+     "external": "sail",
+     "path": "z3_solver-5.4.0.0-py3-none-manylinux_2_27_x86_64.whl"
+    },
+    {
+     "external_of": "ports/fnv-nx/lift/proof/sailmodel",
+     "name": "x86ir",
+     "path": "ir/x86_proof.ir"
+    },
+    {
+     "stage": "ports/fnv-nx/platform:gen:21",
+     "path": "declared/x86sys.export.json"
+    },
+    {
+     "external": "shards",
+     "path": "old"
+    },
+    {
+     "external": "shards",
+     "path": "new"
+    },
+    {
+     "stage": "ports/fnv-nx/lift/factsimg/exe:gen:0",
+     "path": "shapes_exe.tsv"
+    },
+    {
+     "stage": "ports/fnv-nx/lift/factsimg/atimgpud:gen:0",
+     "path": "shapes_atimgpud.tsv"
+    },
+    {
+     "stage": "ports/fnv-nx/lift/factsimg/binkw32:gen:0",
+     "path": "shapes_binkw32.tsv"
+    },
+    {
+     "stage": "ports/fnv-nx/lift/factsimg/d3dx9_31:gen:0",
+     "path": "shapes_d3dx9_31.tsv"
+    },
+    {
+     "stage": "ports/fnv-nx/lift/factsimg/d3dx9_38:gen:0",
+     "path": "shapes_d3dx9_38.tsv"
+    },
+    {
+     "stage": "ports/fnv-nx/lift/factsimg/gdffalloutnv:gen:0",
+     "path": "shapes_gdffalloutnv.tsv"
+    },
+    {
+     "stage": "ports/fnv-nx/lift/factsimg/libvorbis:gen:0",
+     "path": "shapes_libvorbis.tsv"
+    },
+    {
+     "stage": "ports/fnv-nx/lift/factsimg/libvorbisfile:gen:0",
+     "path": "shapes_libvorbisfile.tsv"
+    },
+    {
+     "stage": "ports/fnv-nx/lift/proof/isla:run:isla",
+     "path": "x86.toml"
+    },
+    "ports/fnv-nx/verify/cpuid_model.json",
+    "ports/fnv-nx/lift/rt/rcptab.c",
+    "ports/fnv-nx/lift/rt/rcptab.cert.json"
+   ],
+   "debs": {
+    "closure": [
+     "python3"
+    ]
+   },
+   "outputs": [
+    "queue.tsv",
+    "queue.info"
+   ],
+   "scratch": [
+    "/scratch"
+   ],
+   "env": {
+    "TMPDIR": "/scratch"
+   }
+  },
+  {
+   "name": "prove",
+   "exec": "/usr/bin/python3.12",
+   "args": [
+    "-I",
+    "/in/1",
+    "--closure",
+    "/in/2",
+    "--script",
+    "/in/3",
+    "--wheel",
+    "/in/4",
+    "--wheel",
+    "/in/5",
+    "--wheel",
+    "/in/6",
+    "--exec-copy",
+    "/in/7:/scratch/bin/isla",
+    "--",
+    "--one",
+    "{shape}",
+    "--shape-sha",
+    "{shape_sha}",
+    "--record",
+    "/out/rec/{name}.json",
+    "--sail-work",
+    "/scratch/work",
+    "--sail-ir",
+    "/in/9",
+    "--isla",
+    "/scratch/bin/isla",
+    "--isla-cfg",
+    "/in/11",
+    "--z3lib",
+    "/in/8",
+    "--x86sys",
+    "/in/10",
+    "--cpumodel",
+    "/in/12",
+    "--rcptab",
+    "/in/13",
+    "--rcpcert",
+    "/in/14"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/proof/stage.py",
+    {
+     "stage": "ports/fnv-nx/lift/proof/shapeprove:run:closure",
+     "path": "closure"
+    },
+    "ports/fnv-nx/lift/proof/shapeprove.py",
+    {
+     "external": "pywheels",
+     "path": "capstone-5.0.9-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"
+    },
+    {
+     "external": "pywheels",
+     "path": "keystone_engine-0.9.2-py2.py3-none-manylinux1_x86_64.whl"
+    },
+    {
+     "external": "sail",
+     "path": "z3_solver-5.4.0.0-py3-none-manylinux_2_27_x86_64.whl"
+    },
+    {
+     "stage": "ports/fnv-nx/lift/proof/isla:run:isla",
+     "path": "isla-execute-function"
+    },
+    {
+     "stage": "ports/fnv-nx/lift/proof/isla:run:isla",
+     "path": "z3lib"
+    },
+    {
+     "external_of": "ports/fnv-nx/lift/proof/sailmodel",
+     "name": "x86ir",
+     "path": "ir/x86_proof.ir"
+    },
+    {
+     "stage": "ports/fnv-nx/platform:gen:21",
+     "path": "declared/x86sys.export.json"
+    },
+    {
+     "stage": "ports/fnv-nx/lift/proof/isla:run:isla",
+     "path": "x86.toml"
+    },
+    "ports/fnv-nx/verify/cpuid_model.json",
+    "ports/fnv-nx/lift/rt/rcptab.c",
+    "ports/fnv-nx/lift/rt/rcptab.cert.json"
+   ],
+   "debs": {
+    "closure": [
+     "python3"
+    ]
+   },
+   "outputs": [
+    "rec/{name}.json"
+   ],
+   "scratch": [
+    "/scratch"
+   ],
+   "env": {
+    "TMPDIR": "/scratch"
+   },
+   "foreach": {
+    "table": {
+     "stage": "ports/fnv-nx/lift/proof/shapeprove:run:queue",
+     "path": "queue.tsv"
+    },
+    "key": "name",
+    "into": "rec"
+   }
+  },
+  {
+   "name": "certs",
+   "exec": "/usr/bin/python3.12",
+   "args": [
+    "-I",
+    "/in/1",
+    "--closure",
+    "/in/2",
+    "--script",
+    "/in/3",
+    "--wheel",
+    "/in/4",
+    "--wheel",
+    "/in/5",
+    "--wheel",
+    "/in/6",
+    "--",
+    "--queue",
+    "/in/10",
+    "--rows",
+    "/in/11",
+    "--out",
+    "/out/certs",
+    "--sail-work",
+    "/scratch/work",
+    "--sail-ir",
+    "/in/7",
+    "--isla",
+    "/bin/true",
+    "--isla-cfg",
+    "/in/11",
+    "--x86sys",
+    "/in/8",
+    "--cpumodel",
+    "/in/12",
+    "--rcptab",
+    "/in/13",
+    "--rcpcert",
+    "/in/14"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/proof/stage.py",
+    {
+     "stage": "ports/fnv-nx/lift/proof/shapeprove:run:closure",
+     "path": "closure"
+    },
+    "ports/fnv-nx/lift/proof/certs_stage.py",
+    {
+     "external": "pywheels",
+     "path": "capstone-5.0.9-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"
+    },
+    {
+     "external": "pywheels",
+     "path": "keystone_engine-0.9.2-py2.py3-none-manylinux1_x86_64.whl"
+    },
+    {
+     "external": "sail",
+     "path": "z3_solver-5.4.0.0-py3-none-manylinux_2_27_x86_64.whl"
+    },
+    {
+     "external_of": "ports/fnv-nx/lift/proof/sailmodel",
+     "name": "x86ir",
+     "path": "ir/x86_proof.ir"
+    },
+    {
+     "stage": "ports/fnv-nx/platform:gen:21",
+     "path": "declared/x86sys.export.json"
+    },
+    {
+     "stage": "ports/fnv-nx/lift/proof/shapeprove:run:queue",
+     "path": "queue.tsv"
+    },
+    {
+     "stage": "ports/fnv-nx/lift/proof/shapeprove:run:prove",
+     "path": "rec"
+    },
+    {
+     "stage": "ports/fnv-nx/lift/proof/isla:run:isla",
+     "path": "x86.toml"
+    },
+    "ports/fnv-nx/verify/cpuid_model.json",
+    "ports/fnv-nx/lift/rt/rcptab.c",
+    "ports/fnv-nx/lift/rt/rcptab.cert.json"
+   ],
+   "debs": {
+    "closure": [
+     "python3"
+    ]
+   },
+   "outputs": [],
+   "scratch": [
+    "/scratch"
+   ],
+   "env": {
+    "TMPDIR": "/scratch"
+   },
+   "dirs": [
+    "certs"
+   ]
+  }
+ ],
+ "outputs": {
+  "QUEUE": "queue.tsv",
+  "CERTS": "certs"
+ }
+}

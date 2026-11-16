@@ -5,16 +5,21 @@ Families: forms_alu.py (arithmetic, shifts, bit ops, mul/div), forms_move.py (mo
 Form-level conventions: fault(code, cond) = the instruction raises DE/BP/UD when cond holds (state unchanged, eip = its address);
 `when` on a register/flag write = the SDM defines the value only when `when` holds; df / flo (other EFLAGS bits) are state the
 model driver does not expose, so a form that writes them can only be certified on its observable fields."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, sys
-sys.path.insert(0, os.environ.get('FNVLIFT_ROOT') or os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-from fnvlift.dsl import C, Form, V, bit, concat, eq, extract, load, msb, trunc
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+from fnvnx.lift.fnvlift.dsl import C, Form, V, bit, concat, eq, extract, load, mm, msb, trunc, xmm, zext
 from capstone import x86 as X
+from fnvnx.lift.fnvlift import faults, dsl
 
 R8 = ['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh']; R16 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di']
-PFX = {0x66, 0x67, 0xf0, 0xf2, 0xf3, 0x2e, 0x36, 0x3e, 0x26, 0x64, 0x65}
+SEGPFX = {0x64: 'fs', 0x65: 'gs', 0x2e: 'cs', 0x26: 'es', 0x36: 'ss', 0x3e: 'ds'}      # the segment each override byte names (SDM Vol. 2 2.1.1); es/ss/ds are flat while the selector is a flat one
+from fnvnx.lift.proof.shape import PFX      # the legacy prefix set (SDM vol. 2 2.1.1): one table, shape.py
 SEGS = {'cs', 'ds', 'es', 'ss', 'fs', 'gs'}
+from fnvnx.lift.fnvlift.formkey import is_far_raw
 def form_key(ins):
-    """same as form_key in test/instest.py (prove.py checks the two agree when instest imports)"""
+    """same as form_key in the retired one-instruction harness (prove.py checks the two agree when the retired one-instruction harness imports)"""
     raw = bytes(ins.bytes); i = 0
     while i < len(raw) and raw[i] in PFX: i += 1
     opc = raw[i:i + (3 if raw[i] == 0x0f and raw[i + 1] in (0x38, 0x3a) else 2 if raw[i] == 0x0f else 1)]
@@ -26,9 +31,10 @@ def form_key(ins):
                       else 'r8' if n in R8 else 'r16' if n in R16 else 'r32' if n in ['eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi'] else n)
         elif o.type == X.X86_OP_IMM: ks.append('imm')
         else: ks.append('m%d' % (o.size * 8) + {X.X86_REG_FS: ':fs', X.X86_REG_GS: ':gs'}.get(o.mem.segment, ''))
-    return '%s|%s|%s' % (ins.mnemonic, ','.join(ks), opc.hex())
+    return '%s|%s|%s' % (ins.mnemonic, ','.join(ks), opc.hex() + ('/far' if is_far_raw(raw[i:]) else ''))
 
 class Op:
+    a16 = False                      # address-size attribute 16 (set by build() from the 0x67 prefix)
     def __init__(s, ins, o):
         s.w = o.size * 8
         if o.type == X.X86_OP_REG: s.k, s.name = 'r', ins.reg_name(o.reg)
@@ -36,7 +42,7 @@ class Op:
         else:
             m = o.mem; s.k = 'm'; s.base = ins.reg_name(m.base) if m.base else None
             s.index = ins.reg_name(m.index) if m.index else None; s.scale, s.disp = m.scale, m.disp
-            s.seg = {X.X86_REG_FS: 'fs', X.X86_REG_GS: 'gs'}.get(m.segment)
+            s.cseg = m.segment; s.seg = {X.X86_REG_FS: 'fs', X.X86_REG_GS: 'gs'}.get(m.segment)      # build() replaces seg by the one the decoded prefixes give
     @staticmethod
     def reg(name, w): o = Op.__new__(Op); o.k, o.name, o.w = 'r', name, w; return o
     def full(s):                     # (32-bit register, bit position) of a register operand
@@ -44,28 +50,115 @@ class Op:
         if s.w == 32: return n, 0
         if s.w == 16: return 'e' + n, 0
         return 'e' + n[0] + 'x', (8 if n[1] == 'h' else 0)
-def ea(op, esp=None):
+NULL_CHECKED = ('gs',)      # the segment registers whose null-selector access fault (the record's null_seg_access row) the Form carries; core.gs_guard keeps the others for the hand path
+ACCW = set()     # (segment, when-serial) of the code-segment store faults this build has added
+ACC = set()      # the address KINDS this build made (ea explicit, ssa stack, esa es, dsa ds, areg address-size register): which prefixes the Form consumed; build() resets it and gives it to the Form as .access
+_OK = set()      # the u-serials of the address nodes made by the address functions below (the registry mload / mstore check)
+SEGOF = {}       # u-serial of an address node -> the segment register it goes through (ea: override or default; ssa ss; esa es; dsa ds/override)
+def tag(n, seg=None):
+    _OK.add(n.u)
+    if seg: SEGOF[n.u] = seg
+    return n
+def eseg(op):
+    """the effective segment register of an explicit memory operand: the last override prefix, else ES for a string destination, else SS for an ESP/EBP-based address, else DS (SDM Vol. 3A 3.7.4 / Vol. 1 3.7.4)"""
+    if op.seg: return op.seg
+    if getattr(op, 'cseg', None) == X.X86_REG_ES: return 'es'
+    return 'ss' if op.base in ('esp', 'ebp', 'sp', 'bp') else 'ds'
+def ea(op, esp=None, seg=True, off=0):
+    """effective address of a memory operand.  Address-size attribute 16 (prefix 0x67 in a 32-bit code segment, SDM Vol. 2 2.1.5 / Table 2-1, Vol. 1 3.7.5):
+    the offset is base16 + index16 + disp, computed modulo 2^16 and zero-extended to 32 bits; the segment base is added after.  Capstone names the 16-bit
+    registers (bx, bp, si, di): their values are the low words of ebx, ebp, esi, edi, so the sum of the 32-bit registers has the same low 16 bits."""
+    ACC.add('explicit')
+    if op.a16:
+        sub16 = lambda n: V('e' + n, 32)
+        a = (C(op.disp, 32) + C(off, 32) if off else C(op.disp, 32))
+        if op.base: a = a + sub16(op.base)
+        if op.index: a = a + sub16(op.index) * op.scale
+        a = zext(trunc(a, 16), 32)
+        if seg and op.seg in ('fs', 'gs'): a = a + V(op.seg + '_base', 32)
+        return tag(a, eseg(op) if seg else None)
     sub = lambda n: esp if (n == 'esp' and esp is not None) else V(n, 32)
-    a = C(op.disp, 32)
+    a = (C(op.disp, 32) + C(off, 32) if off else C(op.disp, 32))
     if op.base: a = a + sub(op.base)
     if op.index: a = a + sub(op.index) * op.scale
-    if op.seg: a = a + V(op.seg + '_base', 32)
-    return a
+    if seg and op.seg in ('fs', 'gs'): a = a + V(op.seg + '_base', 32)
+    return tag(a, eseg(op) if seg else None)
+def addoff(a, d):
+    """a tagged address plus a displacement (the bit-string word offset of BT mem,reg)"""
+    assert a.u in _OK, 'address not made by an address function'
+    return tag(a + d, SEGOF.get(a.u))
+def ssa(a):
+    """an implicit stack address (SS: flat, no base variable; ESP / EBP based) -- the stack of PUSH, POP, CALL, RET, ENTER, LEAVE, PUSHA, POPA, PUSHF, POPF"""
+    ACC.add('stack'); return tag(a, 'ss')
+def esa(a):
+    """the implicit string destination ES:(E)DI (ES is flat whatever the override, SDM Vol. 2 MOVS, STOS, SCAS, CMPS)"""
+    ACC.add('es'); return tag(a, 'es')
+def dsa(c, a):
+    """an implicit DS-default operand (string source (E)SI, XLAT [(E)BX + AL]): the effective segment is the LAST override prefix (c.dseg); FS and GS have a base, the flat segments none"""
+    ACC.add('ds'); return tag(a + V(c.dseg + '_base', 32) if c.dseg in ('fs', 'gs') else a, c.dseg or 'ds')
+def mload(a, w):
+    """the one load of the Form builders: the address must come from an address function (ea / addoff / ssa / esa / dsa); tests/test_forms_mem.py also checks that no builder calls dsl.load"""
+    assert a.u in _OK, 'load through an address not made by an address function'
+    if SEGOF.get(a.u) in NULL_CHECKED: ACC.add(SEGOF[a.u])
+    return load(a, w)
+def code_store_fault(F, sg, when):
+    """a store through segment register `sg` whose selector names a code descriptor is #GP(0), reported as AV (SDM Vol. 3A 3.4.5.1 / 5.5: a code segment is not writable): the set of code indexes
+    comes from the record (x86sys.code_indices: ss holds none, cs holds only code), so no register is special-cased.  Under a store's own `when` the fault is conditional as the store is."""
+    from fnvnx.lift.fnvlift import x86sys
+    idx = x86sys.code_indices(sg)
+    if not idx or (sg, when.u if when is not None else None) in ACCW: return
+    ACCW.add((sg, when.u if when is not None else None)); ACC.add('codestore:' + sg)
+    cond = None
+    for i in idx:
+        t = eq(extract(V('sel_' + sg, 16), 15, 3), C(i, 13)); cond = t if cond is None else cond | t
+    full = cond if when is None else cond & when
+    F.fault(faults.BYNAME['AV']['code'], full)
+    if not hasattr(F, 'cstore'): F.cstore = []
+    F.cstore.append((sg, cond, full))      # the code-selector arm of `sg` and its fault node: the lifter drops it only under a proved selector set of `sg` (lift_dsl.specialise)
+def mstore(F, a, v, when=None, fwhen=None):
+    """fwhen: the store is written unconditionally (an inactive REP step rewrites the old value) but is a store only while fwhen holds: it guards the code-segment fault alone"""
+    assert a.u in _OK, 'store through an address not made by an address function'
+    sg = SEGOF.get(a.u)
+    if sg in NULL_CHECKED: ACC.add(sg)
+    if sg: code_store_fault(F, sg, when if when is not None else fwhen)
+    F.store(a, v, when)
+def sload(a, w): return mload(ssa(a), w)
+def sstore(F, a, v): mstore(F, ssa(a), v)
+def isvec(op): return op.k == 'r' and (op.name.startswith('xmm') or (op.name.startswith('mm') and op.name[2:].isdigit()))
+def mload128(op):
+    """the 128-bit load of an SSE memory operand: two 64-bit loads, low half first (little endian)"""
+    a = ea(op); return concat(mload(addoff(a, C(8, 32)), 64), mload(a, 64))
 def rd(op, w=None):
     w = w or op.w
     if op.k == 'i': return C(op.val, w)
-    if op.k == 'm': return load(ea(op), w)
+    if isvec(op):
+        assert w <= op.w, (op.name, w)
+        v = xmm(int(op.name[3:])) if op.name.startswith('xmm') else mm(int(op.name[2:]))
+        return v if w == op.w else extract(v, w - 1, 0)
+    if op.k == 'm' and w == 128: return mload128(op)
+    if op.k == 'm': return mload(ea(op), w)
     r, lo = op.full(); return extract(V(r, 32), lo + op.w - 1, lo)
+def store_op(F, op, addr, v, when=None):
+    """the one store of a memory operand.  SDM Vol. 3, 5.6 (data-segment write rule) and 3.4.5.1: a code segment is not writable, so a store whose effective segment is CS
+    (the 0x2e override, last prefix wins) raises #GP(0) -- Windows reports STATUS_ACCESS_VIOLATION -- before anything is written: fault code 7 (dsl.FAULTS AV), always."""
+    mstore(F, addr, v, when)
 def wr(F, op, v, when=None):
-    if op.k == 'm': return F.store(ea(op), v)
+    if isvec(op):
+        assert when is None and v.w == op.w, (op.name, v.w)
+        if op.name.startswith('xmm'): F.xmm(int(op.name[3:]), v)
+        else: F.mmw.append((int(op.name[2:]), v))        # an MMX register write: build() hands them to Form.mmx, the one MMX rule
+        return
+    if op.k == 'm' and op.w == 128:
+        a = ea(op); store_op(F, op, a, extract(v, 63, 0), when); store_op(F, op, addoff(a, C(8, 32)), extract(v, 127, 64), when); return
+    if op.k == 'm': return store_op(F, op, ea(op), v, when)
     r, lo = op.full(); old = F.cur(r)
     if op.w == 32: F.reg(r, v, when)
     elif lo == 0: F.reg(r, concat(extract(old, 31, op.w), v), when)
     else: F.reg(r, concat(concat(extract(old, 31, 16), v), extract(old, 7, 0)), when)
 
-def pzs(F, r, g=lambda f, v: v):
+def pzs(F, r, g=lambda f, v: v, when=None):
     x = trunc(r, 8); x = x ^ (x >> 4); x = x ^ (x >> 2); x = x ^ (x >> 1)
-    F.flag('pf', g('pf', bit(x, 0) ^ 1)); F.flag('zf', g('zf', eq(r, 0))); F.flag('sf', g('sf', msb(r)))
+    F.flag('pf', g('pf', bit(x, 0) ^ 1), when=when); F.flag('zf', g('zf', eq(r, 0)), when=when); F.flag('sf', g('sf', msb(r)), when=when)
 def af(F, a, b, r): F.flag('af', bit(a ^ b ^ r, 4))
 def cond(cc):                        # condition code 0..15 as a 1-bit node over the pre-state flags
     f = {n: V(n, 1) for n in ('cf', 'pf', 'zf', 'sf', 'of')}
@@ -73,6 +166,16 @@ def cond(cc):                        # condition code 0..15 as a 1-bit node over
     return c ^ 1 if cc & 1 else c
 def undef(F, names, sdm):
     for f in names: F.undefined(f, sdm)
+
+class AReg:
+    """an address-size register of the string / loop / xlat instructions (ESI, EDI, ECX / SI, DI, CX under the 0x67 prefix, SDM Vol. 2 MOVS, LODS, STOS, CMPS,
+    SCAS, LOOP, JCXZ).  .val = the register as an unsigned 32-bit value (zero-extended CX/SI/DI under a16); .put(F, v, when) writes v to it: the low
+    word only under a16 (the upper half of the 32-bit register is kept: SDM 'the 16-bit register is written, bits 31:16 are not modified')."""
+    def __init__(s, c, name):
+        ACC.add('areg'); s.name, s.a16 = name, c.a16; s.cur = V(name, 32)
+        s.val = zext(trunc(s.cur, 16), 32) if s.a16 else s.cur
+    def put(s, F, v, when=None):
+        F.reg(s.name, concat(extract(s.cur, 31, 16), trunc(v, 16)) if s.a16 else v, when)
 
 class Ctx:
     pass
@@ -83,19 +186,55 @@ def handler(*names):
         return fn
     return d
 
+def null_seg_fault(c, sg):
+    """an access through GS while the selector is null: the record's null_seg_access row (x86sys.NULL_SEG, owner L5), a fault at the instruction before any effect.  PRIV or AV by the row's own
+    privileged_check_first over the instruction bytes (f_sys.row_privileged).  The row is read, never restated; a record without it leaves the Form undecided."""
+    from fnvnx.lift.fnvlift import x86sys, f_sys
+    r = getattr(x86sys, 'NULL_SEG', None)
+    if not r: raise dsl.UndecidedRow('null_seg_access: no row in the declared x86sys record')
+    name = 'PRIV' if f_sys.row_privileged(c.ins.bytes, r) else 'AV'
+    assert name == 'PRIV' or (r['exception_code'] == 0xC0000005 and r['parameters'] == [0, 0xffffffff] and r['flags'] == 0 and r['eip_advance'] == 0), 'null_seg_access row is not the access violation the runtime raises'
+    c.F.faults.insert(0, (faults.BYNAME[name]['code'], eq(extract(V('sel_' + sg, 16), 15, 2), 0)))
+
 def build(ins, addr):
     """Form for a decoded instruction at addr; key = form_key(ins).  Raises KeyError for mnemonics outside the covered set."""
-    from proof import forms_alu, forms_move, forms_flow      # noqa: F401  (register their handlers)
-    c = Ctx(); c.ins, c.addr = ins, addr; c.F = Form(form_key(ins), addr, ins.size)
+    from fnvnx.lift.proof import forms_alu, forms_move, forms_flow, forms_sys, forms_legacy, forms_simd, forms_ssefp      # noqa: F401  (register their handlers)
+    ACC.clear(); ACCW.clear(); c = Ctx(); c.ins, c.addr = ins, addr; c.F = Form(form_key(ins), addr, ins.size)
     words = ins.mnemonic.split(); c.rep = words[0] if len(words) > 1 else ''; c.m = words[-1]
     c.ops = [Op(ins, o) for o in ins.operands]
-    raw = bytes(ins.bytes); i = 0; c.o16 = False
-    while raw[i] in PFX: c.o16 |= raw[i] == 0x66; i += 1
-    c.opc = raw[i + 1] if raw[i] == 0x0f else raw[i]; c.raw = raw
+    raw = bytes(ins.bytes); i = 0; c.o16 = False; c.a16 = False
+    sp = None                        # effective segment override: the LAST segment-override prefix byte wins (model: prefixes[seg] is overwritten by each one, SDM Vol. 2 2.1.1); 26 / 36 / 3e are flat like the default
+    while raw[i] in PFX:
+        c.o16 |= raw[i] == 0x66; c.a16 |= raw[i] == 0x67
+        if raw[i] in SEGPFX: sp = SEGPFX[raw[i]]
+        i += 1
+    for o in c.ops:
+        o.a16 = c.a16
+        if o.k == 'm': o.seg = None if o.cseg == X.X86_REG_ES else sp      # the string destination is ES:EDI whatever the override (SDM Vol. 2, MOVS / STOS / SCAS / CMPS)
+    c.dseg = sp                      # the effective segment of the implicit DS-default operands (string source, XLAT): the last override prefix
+    c.opc = raw[i + 1] if raw[i] == 0x0f else raw[i]; c.raw = raw; c.nprefix = i
+    from fnvnx.lift.proof import intud, forms_legacy, forms_cpufeat, x87form
     fn = H.get(c.m)
+    if raw[i] != 0x0f and i + 1 < len(raw) and (raw[i], (raw[i + 1] >> 3) & 7) in intud.CLEARED_UD:      # no cell in the SDM opcode map: by encoding, whatever mnemonic the decoder gives
+        c.F.fault(forms_legacy.K_UD, C(1, 1)); c.F.access = frozenset(); return c.F.check_state()
+    cf = forms_cpufeat.decide(ins, raw, i)      # a feature the declared CPU clears: #UD, or the SDM's NOP (forms_cpufeat.py)
+    if cf:
+        if cf == 'ud': c.F.fault(forms_legacy.K_UD, C(1, 1))
+        c.F.access = frozenset(); return c.F.check_state()
+    xerr = None
+    try: xf = x87form.build(c)            # the x87 classes (proof/x87class.py): the Form generated from proof/x87spec.py; a class outside what it generates keeps the handler path (KeyError below)
+    except x87form.Unsupported as xe: xf = None; xerr = xe
+    if xf is not None:
+        for sg in NULL_CHECKED:
+            if sg in ACC: null_seg_fault(c, sg)
+        c.F.access = frozenset(ACC); return c.F.check_state()
     if fn is None and c.m[0] == 'j': fn = H['jcc']
     if fn is None and c.m.startswith('set'): fn = H['setcc']
     if fn is None and c.m.startswith('cmov'): fn = H['cmovcc']
-    if fn is None: raise KeyError(c.m)
+    if fn is None: raise KeyError(c.m) from xerr
     fn(c)
-    return c.F
+    if c.F.mmw or any(isvec(o) and o.name.startswith('mm') for o in c.ops): c.F.mmx(c.F.mmw)      # every MMX instruction but EMMS: SDM Vol 1 9.5.1 (the handler of emms calls F.mmx(emms=True) itself)
+    for sg in NULL_CHECKED:
+        if sg in ACC: null_seg_fault(c, sg)
+    c.F.access = frozenset(ACC)        # the address kinds the builder used: what claims a prefix (sysspec_gap.unclaimed_prefix)
+    return c.F.check_state()

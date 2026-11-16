@@ -1,0 +1,89 @@
+{
+ "format": "fnvnx-selftest-inputs/1",
+ "tests": {
+  "test_universe_r3_check.py": [
+   "exe",
+   "facts",
+   {
+    "root": "ports/fnv-nx/lift/sdmrows",
+    "output": "SDMROWS"
+   },
+   {
+    "root": "ports/fnv-nx/lift/fpfacts",
+    "output": "FPSTATE"
+   },
+   {
+    "root": "ports/fnv-nx/lift/fpfacts",
+    "output": "FPDEPTH"
+   },
+   {
+    "root": "ports/fnv-nx/lift/facts",
+    "output": "SEGWRITES"
+   }
+  ],
+  "test_lifted_vs_shapes.py": [
+   "exe",
+   "facts",
+   {
+    "root": "ports/fnv-nx/lift/sdmrows",
+    "output": "SDMROWS"
+   },
+   {
+    "root": "ports/fnv-nx/lift/fpfacts",
+    "output": "FPSTATE"
+   },
+   {
+    "root": "ports/fnv-nx/lift/fpfacts",
+    "output": "FPDEPTH"
+   },
+   {
+    "root": "ports/fnv-nx/lift/facts",
+    "output": "SEGWRITES"
+   }
+  ],
+  "test_lock_only.py": [
+   {
+    "root": "ports/fnv-nx/lift/sdmrows",
+    "output": "SDMROWS"
+   },
+   {
+    "root": "ports/fnv-nx/lift/rt",
+    "output": "GEN"
+   }
+  ],
+  "test_ranges.py": [
+   {
+    "root": "ports/fnv-nx/lift/rt",
+    "output": "GEN"
+   }
+  ],
+  "test_modules_check.py": [
+   "exe",
+   "redist",
+   {
+    "root": "ports/fnv-nx/lift/facts",
+    "output": "FACTS"
+   },
+   {
+    "root": "ports/fnv-nx/loader",
+    "output": "MODULES_TSV"
+   },
+   {
+    "root": "ports/fnv-nx/lift/sdmrows",
+    "output": "SDMROWS"
+   },
+   {
+    "root": "ports/fnv-nx/lift/fpfacts",
+    "output": "FPSTATE"
+   },
+   {
+    "root": "ports/fnv-nx/lift/fpfacts",
+    "output": "FPDEPTH"
+   },
+   {
+    "root": "ports/fnv-nx/lift/facts",
+    "output": "SEGWRITES"
+   }
+  ]
+ }
+}

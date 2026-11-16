@@ -1,28 +1,248 @@
 {
  "format": "fnvnx-oracle/1",
  "tests": {
-  "test_formgate_real.py": {
+  "test_bsfbsr_closed_form.py": {
+   "references": [
+    {
+     "anchor": "## Pinned IR 7c307464: hunks",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/CERTS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/sail_patches/bump/bit_bsf_bsr.sail"
+   ]
+  },
+  "test_census.py": {
+   "references": [
+    {
+     "anchor": "L3-L4",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/tools/CODEMAP.md"
+    },
+    {
+     "anchor": "# data-reloc",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/tools/CODEMAP.md"
+    },
+    {
+     "anchor": "# padding",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/tools/CODEMAP.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/census.py"
+   ]
+  },
+  "test_certs_build.py": {
+   "references": [
+    {
+     "anchor": "## Certificate key rule (the validity of a record)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/CERTS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/certs_build.py"
+   ]
+  },
+  "test_codeuniverse.py": {
+   "references": [
+    {
+     "anchor": "L4-L13",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/tests/sdm_shape_rows.tsv"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/codeuniverse.py"
+   ]
+  },
+  "test_declared_gen.py": {
+   "references": [
+    {
+     "anchor": "L31-L31",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/rt/cpumodel.c"
+    },
+    {
+     "anchor": "L51-L51",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/rt/cpumodel.c"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/declared_gen.py"
+   ]
+  },
+  "test_defectspec.py": {
+   "references": [
+    {
+     "anchor": "L158-L158",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/CERTS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/defects.py",
+    "ports/fnv-nx/lift/proof/defectspec.py"
+   ]
+  },
+  "test_dsl_int_classes.py": {
+   "references": [
+    {
+     "anchor": "L3-L7",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/tests/sdm_int_rows.tsv"
+    },
+    {
+     "anchor": "L3-L43",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/tests/sdm_ea16_rows.tsv"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/lift_dsl.py",
+    "ports/fnv-nx/lift/proof/forms.py",
+    "ports/fnv-nx/lift/proof/sdm_rows.py"
+   ]
+  },
+  "test_dsl_lock.py": {
+   "references": [
+    {
+     "anchor": "L66-L70",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/rt/fnvl.h"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/lift_dsl.py"
+   ]
+  },
+  "test_dsl_xsimd.py": {
    "references": [
     {
      "anchor": "## Classes of run-time failure and their gates",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/VERDICT.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/fnvlift/dsl.py"
+   ]
+  },
+  "test_ehoracle.py": {
+   "references": [
+    {
+     "kind": "external",
+     "name": "wine-msvcrt",
+     "path": "dlls/msvcrt/except_i386.c"
+    },
+    {
+     "kind": "external",
+     "name": "wine-msvcrt",
+     "path": "dlls/msvcrt/cppexcept.h"
+    },
+    {
+     "kind": "external",
+     "name": "wine-msvcrt",
+     "path": "dlls/msvcrt/cpp.c"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/ehoracle.py",
+    "ports/fnv-nx/lift/proof/wine_pin.json"
+   ]
+  },
+  "test_formgate.py": {
+   "references": [
+    {
+     "anchor": "L31-L31",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/VERDICT.md"
+    },
+    {
+     "anchor": "## External inputs",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
     }
    ],
    "subject": [
     "ports/fnv-nx/lift/proof/formgate.py"
    ]
   },
-  "test_fpexact_host.py": {
+  "test_forms_cmpimm.py": {
    "references": [
     {
-     "anchor": "## Classes of run-time failure and their gates",
+     "anchor": "L17-L19",
      "kind": "spec",
-     "path": "ports/fnv-nx/verify/VERDICT.md"
+     "path": "ports/fnv-nx/lift/proof/tests/sdm_oracle_cites.txt"
     }
    ],
    "subject": [
-    "ports/fnv-nx/lift/proof/gate_fpexact.py"
+    "ports/fnv-nx/lift/proof/symform.py",
+    "ports/fnv-nx/lift/proof/shape.py"
+   ]
+  },
+  "test_forms_far.py": {
+   "references": [
+    {
+     "anchor": "L2-L16",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/sysspec_far.py"
+    },
+    {
+     "kind": "contract",
+     "path": "ports/fnv-nx/platform/declared/x86sys.json"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/forms.py",
+    "ports/fnv-nx/lift/proof/forms_flow.py"
+   ]
+  },
+  "test_forms_immsel.py": {
+   "references": [
+    {
+     "anchor": "L159-L159",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/CERTS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/forms_simd.py",
+    "ports/fnv-nx/lift/proof/symform.py"
+   ]
+  },
+  "test_forms_simdclass.py": {
+   "references": [
+    {
+     "anchor": "L20-L49",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/tests/sdm_oracle_cites.txt"
+    },
+    {
+     "kind": "model",
+     "path": "ports/fnv-nx/lift/rt/rcptab.c"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/forms_ssefp.py",
+    "ports/fnv-nx/lift/proof/ssefp.py"
+   ]
+  },
+  "test_forms_ssefp.py": {
+   "references": [
+    {
+     "anchor": "L20-L36",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/tests/sdm_oracle_cites.txt"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/forms_ssefp.py",
+    "ports/fnv-nx/lift/proof/ssefp.py"
    ]
   },
   "test_gate_fpexact.py": {
@@ -37,6 +257,252 @@
     "ports/fnv-nx/lift/proof/gate_fpexact.py",
     "ports/fnv-nx/verify/recipe.py",
     "ports/fnv-nx/verify/unitstage.py"
+   ]
+  },
+  "test_generated_readers.py": {
+   "references": [
+    {
+     "anchor": "L193-L196",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/rt/build.json"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/genout.py"
+   ]
+  },
+  "test_imageset.py": {
+   "references": [
+    {
+     "anchor": "L1-L45",
+     "kind": "spec",
+     "path": "ports/fnv-nx/contract/modules.py"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/imageset.py"
+   ]
+  },
+  "test_irdeps.py": {
+   "references": [
+    {
+     "anchor": "## Certificate key K (closure rule)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/CERTS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/irdeps.py",
+    "ports/fnv-nx/lift/proof/model_sail.py"
+   ]
+  },
+  "test_model_patches.py": {
+   "references": [
+    {
+     "anchor": "L2-L5",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/tests/model_patch_rows.tsv"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/forms.py",
+    "ports/fnv-nx/lift/proof/prove.py"
+   ]
+  },
+  "test_opmap.py": {
+   "references": [
+    {
+     "anchor": "L1-L984",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/tests/opmap_cells.tsv"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/opmap.py"
+   ]
+  },
+  "test_opmap_sdm.py": {
+   "references": [
+    {
+     "anchor": "L1-L984",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/tests/opmap_cells.tsv"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/opmap.py"
+   ]
+  },
+  "test_pins.py": {
+   "references": [
+    {
+     "anchor": "L1-L8",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/pins.json"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/platform/declared/x86sys.json"
+   ]
+  },
+  "test_rewrite.py": {
+   "references": [
+    {
+     "anchor": "L3-L7",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/tests/smtlib_bv_rows.tsv"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/rewrite.py",
+    "ports/fnv-nx/lift/proof/model_sail.py"
+   ]
+  },
+  "test_rtroot.py": {
+   "references": [
+    {
+     "anchor": "### Guest roots: the game's compiler (MSVCMODEL1)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/rt/build.json"
+   ]
+  },
+  "test_sdmfeat.py": {
+   "references": [
+    {
+     "anchor": "L3-L668",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/tests/sdm_cpuid_feature_rows.tsv"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/sdmfeat.py"
+   ]
+  },
+  "test_sdmpriv.py": {
+   "references": [
+    {
+     "anchor": "L2-L10",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/tests/sdm_priv_sentences.tsv"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/sdmpriv.py",
+    "ports/fnv-nx/lift/proof/privset.py"
+   ]
+  },
+  "test_shape.py": {
+   "references": [
+    {
+     "anchor": "L4-L13",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/tests/sdm_shape_rows.tsv"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/shape.py"
+   ]
+  },
+  "test_shardok.py": {
+   "references": [
+    {
+     "anchor": "L120-L120",
+     "kind": "spec",
+     "path": "ports/fnv-nx/farm/farm_shapeprove.sh"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/shardok.py"
+   ]
+  },
+  "test_simdcheck.py": {
+   "references": [
+    {
+     "anchor": "## SIMD refinement (simdspec.py, simdcheck.py)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/CERTS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/simdcheck.py"
+   ]
+  },
+  "test_simdspec.py": {
+   "references": [
+    {
+     "anchor": "L1-L135",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/acl2_cites.tsv"
+    },
+    {
+     "anchor": "L1-L41",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/simdsdm_cites.txt"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/simdsdm.py",
+    "ports/fnv-nx/lift/proof/simdspec.py",
+    "ports/fnv-nx/lift/proof/ssefp.py"
+   ]
+  },
+  "test_stringspec.py": {
+   "references": [
+    {
+     "anchor": "L1-L16",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/tests/sdm_oracle_cites.txt"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/stringspec.py"
+   ]
+  },
+  "test_sysspec.py": {
+   "references": [
+    {
+     "anchor": "L1-L56",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/sdm_priv_rows.tsv"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/sysspec.py",
+    "ports/fnv-nx/lift/proof/x86sys.py"
+   ]
+  },
+  "test_treeid.py": {
+   "references": [
+    {
+     "anchor": "L160-L160",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/CERTS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/treeid.py"
+   ]
+  },
+  "test_x87spec.py": {
+   "references": [
+    {
+     "anchor": "L1-L142",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/tests/x87_sdm_rows.txt"
+    },
+    {
+     "anchor": "L1-L131",
+     "kind": "spec",
+     "path": "ports/fnv-nx/journal/inbox/l3b-w9-x87-list.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/sdm_pages.tsv",
+    "ports/fnv-nx/lift/proof/x87spec.py"
    ]
   }
  }

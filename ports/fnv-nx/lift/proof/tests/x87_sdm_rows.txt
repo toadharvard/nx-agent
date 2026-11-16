@@ -1,0 +1,142 @@
+# Reference rows for tests/test_x87spec.py: values read from the Intel SDM (Vol. 1 and 2A, the combined edition),
+# independent of proof/x87spec.py. Row format:  kind | fields... | citation.  Blank and '#' lines are comments.
+# Compare (Table 8-6): fields  relation | C3 C2 C0
+cmp | gt        | 0 0 0 | SDM 1:T8-6 "ST(0) > Source Operand 0 0 0"
+cmp | lt        | 0 0 1 | SDM 1:T8-6 "ST(0) < Source Operand 0 0 1"
+cmp | eq        | 1 0 0 | SDM 1:T8-6 "ST(0) = Source Operand 1 0 0"
+cmp | unordered | 1 1 1 | SDM 1:T8-6 "Unordered 1 1 1"
+# EFLAGS of FCOMI/FUCOMI (Table 8-7): fields  relation | ZF PF CF
+eflags | gt        | 0 0 0 | SDM 1:T8-7 "ST0 > ST(i) 0 0 0"
+eflags | lt        | 0 0 1 | SDM 1:T8-7 "ST0 < ST(i) 0 0 1"
+eflags | eq        | 1 0 0 | SDM 1:T8-7 "ST0 = ST(i) 1 0 0"
+eflags | unordered | 1 1 1 | SDM 1:T8-7 "Unordered 1 1 1"
+# FXAM (SDM 2A:FXAM Table 3-?? "FXAM Results"): fields  class | C3 C2 C0
+fxam | nan      | 0 0 1 | SDM 2A:FXAM table "NaN 0 0 1"
+fxam | normal   | 0 1 0 | SDM 2A:FXAM table "Normal finite number 0 1 0"
+fxam | infinity | 0 1 1 | SDM 2A:FXAM table "Infinity 0 1 1"
+fxam | zero     | 1 0 0 | SDM 2A:FXAM table "Zero 1 0 0"
+fxam | empty    | 1 0 1 | SDM 2A:FXAM table "Empty 1 0 1"
+fxam | denormal | 1 1 0 | SDM 2A:FXAM table "Denormal number 1 1 0"
+fxam | unsupported | 0 0 0 | SDM 2A:FXAM Op "Unsupported:C3, C2, C0 := 000;"
+fxam_c1 | sign | SDM 2A:FXAM "The C1 flag is set to the sign of the value in ST(0), regardless of whether the register is empty or full."
+# Tag word (SDM 1:8.1.7): value | 2-bit tag
+tag | valid   | 00 | SDM 1:8.1.7 tag word "00 Valid"
+tag | zero    | 01 | SDM 1:8.1.7 tag word "01 Zero"
+tag | special | 10 | SDM 1:8.1.7 tag word "10 Special: invalid (NaN, unsupported), infinity, or denormal"
+tag | empty   | 11 | SDM 1:8.1.7 tag word "11 Empty"
+# Initialised state (SDM 1:8.1.5, 8.1.6, 8.1.7 and 2A:FINIT Op, also FNSAVE): register | hex
+init | fcw | 037F | SDM 1:8.1.5 (sdm.txt line 12141) "the x87 FPU control word is set to 037FH, which masks all floating-point exceptions, sets rounding to nearest, and sets the x87 FPU precision to 64 bits"
+init | fsw | 0000 | SDM 2A:FINIT Op (FPUStatusWord initialised to 0); SDM 1:T8-1 row FINIT/FNINIT: C0..C3 = 0 0 0 0, sdm.txt line 12035
+init | ftw | FFFF | SDM 1:8.1.7 "the x87 FPU tag word is set to FFFFH, which marks all the x87 FPU data registers as empty"
+init | fip | 00000000 | SDM 1:8.1.8 (sdm.txt line 12273) "FINIT/FNINIT. Each instruction clears FIP, FCS, FDP, and FDS."
+# Double-extended encodings (SDM 1:T4-3, 1:4.2.2 biasing constant 16,383): name | 80-bit hex (sign+exp 16 bits, significand 64 bits)
+m80 | +0                | 00000000000000000000 | SDM 1:T4-3 "+Zero 0 00..00 0 00..00"
+m80 | -0                | 80000000000000000000 | SDM 1:T4-3 "-Zero 1 00..00 0 00..00"
+m80 | +inf              | 7FFF8000000000000000 | SDM 1:T4-3 "+inf 0 11..11 1 00..00"
+m80 | -inf              | FFFF8000000000000000 | SDM 1:T4-3 "-inf 1 11..11 1 00..00"
+m80 | +1.0              | 3FFF8000000000000000 | SDM 1:T4-3 "+Normals ... 00..01 1 00..00", biasing constant 16,383 = 3FFFH
+m80 | -2.0              | C0008000000000000000 | SDM 1:T4-3, biased exponent 16384 = 4000H, sign 1
+m80 | qnan_indefinite   | FFFFC000000000000000 | SDM 1:T4-3 "QNaN Floating-Point Indefinite 1 11..11 1 10..00"
+m80 | bcd_indefinite    | FFFFC000000000000000 | SDM 1:4.7 (sdm.txt line 5748) "The packed BCD integer indefinite encoding (FFFFC000000000000000H) is stored by the FBSTP instruction"
+# Integer indefinite (SDM 1:4.2.1.1 / 2A:FIST "integer indefinite"): width | hex
+intindef | 16 | 8000 | SDM 1:T4-1 signed integer indefinite, word format: 8000H (sdm.txt line 5281 introduces the integer indefinite)
+intindef | 32 | 80000000 | SDM 1:T4-1 signed integer indefinite, doubleword format: 80000000H
+intindef | 64 | 8000000000000000 | SDM 1:T4-1 signed integer indefinite, quadword format: 8000000000000000H
+# Status word layout (SDM 1:8.1.3, Figure 8-4): field | bit position
+fsw | IE | 0  | SDM 1:8.1.3 Figure 8-4: IE bit 0
+fsw | DE | 1  | SDM 1:8.1.3 Figure 8-4: DE bit 1
+fsw | ZE | 2  | SDM 1:8.1.3 Figure 8-4: ZE bit 2
+fsw | OE | 3  | SDM 1:8.1.3 Figure 8-4: OE bit 3
+fsw | UE | 4  | SDM 1:8.1.3 Figure 8-4: UE bit 4
+fsw | PE | 5  | SDM 1:8.1.3 Figure 8-4: PE bit 5
+fsw | SF | 6  | SDM 1:8.1.3 Figure 8-4: SF bit 6
+fsw | ES | 7  | SDM 1:8.1.3 Figure 8-4: ES bit 7
+fsw | C0 | 8  | SDM 1:8.1.3 Figure 8-4: C0 bit 8
+fsw | C1 | 9  | SDM 1:8.1.3 Figure 8-4: C1 bit 9
+fsw | C2 | 10 | SDM 1:8.1.3 Figure 8-4: C2 bit 10
+fsw | TOP | 11 | SDM 1:8.1.3 Figure 8-4: TOP bits 11-13
+fsw | C3 | 14 | SDM 1:8.1.3 Figure 8-4: C3 bit 14
+fsw | B | 15 | SDM 1:8.1.3 Figure 8-4: B bit 15
+# Control word layout (SDM 1:8.1.5, Figure 8-6): field | bit position
+fcw | IM | 0 | SDM 1:8.1.5 Figure 8-6: IM bit 0
+fcw | PM | 5 | SDM 1:8.1.5 Figure 8-6: PM bit 5
+fcw | PC | 8 | SDM 1:8.1.5 Figure 8-6: PC bits 8-9
+fcw | RC | 10 | SDM 1:8.1.5 Figure 8-6: RC bits 10-11
+# Transcendentals, special operands (FSIN FCOS FPTAN FSINCOS): class | expected | citation
+trig | inf | #IA (IE set), the masked result is the QNaN indefinite in ST(0) | SDM 2A:FSIN Table 1-31, 2A:FSINCOS Table 1-32, 2A:FPTAN Table 1-29 ("*" = #IA for +-inf); SDM 1:8.5.1.2; SDM 1:T4-3 indefinite
+trig | out_of_range | C2 = 1, ST(0) unchanged, no exception | SDM 2A:FSIN Description "The instruction does not raise an exception when the source operand is out of range"; 2A:FPTAN Op ELSE branch
+trig | nan | the NaN (quieted) is the result, IE only for an SNaN | SDM 2A:FSIN Table 1-31 "NaN -> NaN"; SDM 1:T4-8
+trig | push | FPTAN pushes 1.0 after the result; FSINCOS pushes the cosine; a NaN or infinite source may or may not push (nd.trig.push) | SDM 2A:FPTAN Op, 2A:FSINCOS Op (the push is inside "IF ST(0) < 2^63 THEN", NaN and infinity not decided)
+# FPREM, D >= 64: ST(0) := ST(0) - ST(1) * QQ * 2^(D-N), QQ := trunc((ST(0)/ST(1)) / 2^(D-N)), C2 := 1, N in 32..63
+prem | big | C2 = 1 and the SDM remainder for every N in 32..63 | SDM 2A:FPREM Op ELSE branch "N := An implementation-dependent number between 32 and 63"
+# FCMOVcc with an empty ST(i)
+fcmov | true_empty | stack underflow: IE, SF, C1 = 0 | SDM 2A:FCMOVcc Exc "#IS Stack underflow occurred"; SDM 1:8.5.1.1
+fcmov | false_empty | undecided by the SDM: both outcomes admissible (nd.fcmov.uf_false) | SDM 2A:FCMOVcc Op "IF condition TRUE THEN ST(0) := ST(i)" and Exc "#IS"
+# FSCALE Table 1-30 (rows ST(0), columns ST(1) = -inf -F -0 +0 +F +inf NaN)
+fscale | -inf | NaN -inf -inf -inf -inf -inf NaN | SDM 2A:FSCALE Table 1-30
+fscale | -F | -0 -F -F -F -F -inf NaN | SDM 2A:FSCALE Table 1-30
+fscale | -0 | -0 -0 -0 -0 -0 NaN NaN | SDM 2A:FSCALE Table 1-30
+fscale | +0 | +0 +0 +0 +0 +0 NaN NaN | SDM 2A:FSCALE Table 1-30
+fscale | +F | +0 +F +F +F +F +inf NaN | SDM 2A:FSCALE Table 1-30
+fscale | +inf | NaN +inf +inf +inf +inf +inf NaN | SDM 2A:FSCALE Table 1-30
+fscale | NaN | NaN NaN NaN NaN NaN NaN NaN | SDM 2A:FSCALE Table 1-30
+# FPATAN Table 1-26 (rows ST(1) = Y, columns ST(0) = X = -inf -F -0 +0 +F +inf, in units of pi; range = a range of angles, a symbolic cell)
+fpatan | -inf | -3/4 -1/2 -1/2 -1/2 -1/2 -1/4 | SDM 2A:FPATAN Table 1-26
+fpatan | -F | -1 range -1/2 -1/2 range -0 | SDM 2A:FPATAN Table 1-26
+fpatan | -0 | -1 -1 -1 -0 -0 -0 | SDM 2A:FPATAN Table 1-26
+fpatan | +0 | 1 1 1 0 0 0 | SDM 2A:FPATAN Table 1-26
+fpatan | +F | 1 range 1/2 1/2 range 0 | SDM 2A:FPATAN Table 1-26
+fpatan | +inf | 3/4 1/2 1/2 1/2 1/2 1/4 | SDM 2A:FPATAN Table 1-26
+# FYL2X Table 1-44 (rows ST(1), columns ST(0) = -inf -F +-0 (+0<+F<+1) +1 (+F>+1) +inf NaN; * = #IA with the QNaN indefinite, ** = #Z with an infinity signed opposite to ST(1); F = a finite value, symbolic in the spec)
+fyl2x | -inf | * * +inf +inf * -inf -inf NaN | SDM 2A:FYL2X Table 1-44
+fyl2x | -F | * * ** +F -0 -F -inf NaN | SDM 2A:FYL2X Table 1-44
+fyl2x | -0 | * * * +0 -0 -0 * NaN | SDM 2A:FYL2X Table 1-44
+fyl2x | +0 | * * * -0 +0 +0 * NaN | SDM 2A:FYL2X Table 1-44
+fyl2x | +F | * * ** -F +0 +F +inf NaN | SDM 2A:FYL2X Table 1-44
+fyl2x | +inf | * * -inf -inf * +inf +inf NaN | SDM 2A:FYL2X Table 1-44
+fyl2x | NaN | NaN NaN NaN NaN NaN NaN NaN NaN | SDM 2A:FYL2X Table 1-44
+# FSIN Table 1-31 (SRC -> DEST; '*' = #IA, 'range' = a finite value)
+fsin | -inf | * | SDM 2A:FSIN Table 1-31
+fsin | -F | range | SDM 2A:FSIN Table 1-31
+fsin | -0 | -0 | SDM 2A:FSIN Table 1-31
+fsin | +0 | +0 | SDM 2A:FSIN Table 1-31
+fsin | +F | range | SDM 2A:FSIN Table 1-31
+fsin | +inf | * | SDM 2A:FSIN Table 1-31
+fsin | NaN | NaN | SDM 2A:FSIN Table 1-31
+# FPTAN Table 1-29
+fptan | -inf | * | SDM 2A:FPTAN Table 1-29
+fptan | -F | range | SDM 2A:FPTAN Table 1-29
+fptan | -0 | -0 | SDM 2A:FPTAN Table 1-29
+fptan | +0 | +0 | SDM 2A:FPTAN Table 1-29
+fptan | +F | range | SDM 2A:FPTAN Table 1-29
+fptan | +inf | * | SDM 2A:FPTAN Table 1-29
+fptan | NaN | NaN | SDM 2A:FPTAN Table 1-29
+# FSINCOS Table 1-32 (SRC | ST(1) cosine, ST(0) sine)
+fsincos | -inf | * * | SDM 2A:FSINCOS Table 1-32
+fsincos | -F | range range | SDM 2A:FSINCOS Table 1-32
+fsincos | -0 | +1 -0 | SDM 2A:FSINCOS Table 1-32
+fsincos | +0 | +1 +0 | SDM 2A:FSINCOS Table 1-32
+fsincos | +F | range range | SDM 2A:FSINCOS Table 1-32
+fsincos | +inf | * * | SDM 2A:FSINCOS Table 1-32
+fsincos | NaN | NaN NaN | SDM 2A:FSINCOS Table 1-32
+# F2XM1 Table 1-12 (SRC in the listed range -> DEST); the +-0 rows exact
+f2xm1 | -1.0..-0 | -0.5..-0 | SDM 2A:F2XM1 Table 1-12
+f2xm1 | -0 | -0 | SDM 2A:F2XM1 Table 1-12
+f2xm1 | +0 | +0 | SDM 2A:F2XM1 Table 1-12
+f2xm1 | +0..+1.0 | +0..1.0 | SDM 2A:F2XM1 Table 1-12
+# FPREM Table 1-27 (rows ST(0) -inf -F -0 +0 +F +inf NaN, columns ST(1) in the same order); 'S' = ST(0) unchanged, 'a/b' = either
+fprem | -inf | * * * * * * NaN | SDM 2A:FPREM Table 1-27
+fprem | -F | S -F/-0 * * -F/-0 S NaN | SDM 2A:FPREM Table 1-27
+fprem | -0 | -0 -0 * * -0 -0 NaN | SDM 2A:FPREM Table 1-27
+fprem | +0 | +0 +0 * * +0 +0 NaN | SDM 2A:FPREM Table 1-27
+fprem | +F | S +F/+0 * * +F/+0 S NaN | SDM 2A:FPREM Table 1-27
+fprem | +inf | * * * * * * NaN | SDM 2A:FPREM Table 1-27
+fprem | NaN | NaN NaN NaN NaN NaN NaN NaN | SDM 2A:FPREM Table 1-27
+# FPREM1 Table 1-28 ('+-F' either sign)
+fprem1 | -inf | * * * * * * NaN | SDM 2A:FPREM1 Table 1-28
+fprem1 | -F | S F/-0 * * F/-0 S NaN | SDM 2A:FPREM1 Table 1-28
+fprem1 | -0 | -0 -0 * * -0 -0 NaN | SDM 2A:FPREM1 Table 1-28
+fprem1 | +0 | +0 +0 * * +0 +0 NaN | SDM 2A:FPREM1 Table 1-28
+fprem1 | +F | S F/+0 * * F/+0 S NaN | SDM 2A:FPREM1 Table 1-28
+fprem1 | +inf | * * * * * * NaN | SDM 2A:FPREM1 Table 1-28
+fprem1 | NaN | NaN NaN NaN NaN NaN NaN NaN | SDM 2A:FPREM1 Table 1-28

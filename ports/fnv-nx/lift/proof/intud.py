@@ -1,0 +1,5 @@
+"""Encodings the SDM opcode map (Vol. 2, Appendix A, Tables A-2 and A-6) gives no cell: the integer family's cleared-#UD classes (decoded by capstone, so a Form is asked for) (the x87 ones are x87spec.CLEARED_UD).  Key: (opcode byte, ModRM.reg); the value is the reason.
+The evidence is the reference of the pinned SDM's cells, tests/opmap_cells.tsv (opmap.dump of the pinned PDF): test_intud checks that the group row of each opcode has an empty cell at that reg, and that every such empty cell of a
+one-byte group row (the universe of this class) is in this dict.  The lifter makes each such Form fault(UD) only under L3a's unreachable-or-data certificate of the site; a reachable non-data site goes to the orchestrator."""
+CLEARED_UD = {**{(op, 6): '%02X /6 (the shift group, no cell: SAL is /4 = SHL/SAL; Table A-6 Group 2)' % op for op in (0xc0, 0xc1, 0xd0, 0xd1, 0xd2, 0xd3)},
+              **{(op, 1): '%02X /1 (the unary group, no cell: only /0 is TEST; Table A-6 Group 3)' % op for op in (0xf6, 0xf7)}}
