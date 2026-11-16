@@ -773,3 +773,4 @@ After the first frame:
   - New item, to w2: imports in toolchain/ use the `fnvnx.<rel>` package form (L1 class rule, mount /imp/fnvnx/<rel>). 3 files are uncertified at base3 a033e5cbe; census before and after; then merge w28-c5.
 - 2026-11-16 11:15Z: toolchain/ imports in the fnvnx form at cand4b 410ab9d13 (w2). Census: toolchain/ uncertified 3 -> 0. The c5 toolchain hunks and the ports/fnvnx symlink are taken; a full merge with c5 is not possible (~100 conflicts outside toolchain/). The toolchain stages run only under c5's recipe mount. Sent to L1 for cand5.
 - bottleneck: the recipe-path rt run (farm, w3) -> the pin commit with FNPARM.
+- 2026-11-16 11:50Z: L1 asks for the rules/ bare sibling imports (13 in 5 tools, 26 in 8 tests, on w28-c5 4eb5a2bd4) in the fnvnx form for cand5 -> w2, doing. S29 needs no change (c5's gate_datamodel judges the structured form).
