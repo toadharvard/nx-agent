@@ -12,15 +12,3 @@
 # 6: body is fflush(NULL); exit(code) (C11 7.21.5.2 fflush)
 # 7: "does not return"; the calling thread ends
 # 8: the calling thread ends and does not return to its caller (IEEE Std 1003.1-2017)
-1	TerminateProcess	single-process	win-doc:learn.microsoft.com/windows/win32/api/processthreadsapi/nf-processthreadsapi-terminateprocess:TerminateProcess|wine-9.0:dlls/ntdll/unix/process.c:NtTerminateProcess	u32	0	ERROR_INVALID_HANDLE=6
-2	ExitProcess	process-end	win-doc:learn.microsoft.com/windows/win32/api/processthreadsapi/nf-processthreadsapi-exitprocess:ExitProcess	noreturn	-	-
-3	c_exit	process-end	std:C11:7.22.4.4	noreturn	-	-
-4	c_abort	process-end	std:C11:7.22.4.1	noreturn	-	-
-5	c_amsg_exit	process-end	wine-9.0:dlls/msvcrt/exit.c:_amsg_exit	noreturn	-	-
-6	os_exit_process	process-end	std:C11:7.22.4.4	noreturn	-	-
-7	ExitThread	thread-end	win-doc:learn.microsoft.com/windows/win32/api/processthreadsapi/nf-processthreadsapi-exitthread:ExitThread	noreturn	-	-
-8	os_thread_exit	thread-end	std:POSIX.1-2017:pthread_exit	noreturn	-	-
-9	c_purecall	process-end	wine-9.0:dlls/msvcrt/exit.c:_purecall	noreturn	-	-
-10	fnvnx_thread_exit	thread-end	hostabi:hostabi/include/fnvnx/hostapi.h:thread_exit	noreturn	-	-
-11	FatalAppExitA	process-end	wine-9.0:dlls/kernelbase/debug.c:FatalAppExitA	noreturn	-	-
-12	os_terminate_process	process-end	hostabi:hostabi/include/fnvnx/hostapi.h:exit|wine-9.0:dlls/ntdll/unix/process.c:NtTerminateProcess	noreturn	-	-
