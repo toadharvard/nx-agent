@@ -18,7 +18,7 @@ L1 also adds `ports/fnv-nx/render/total` to the argv of the `pure` and `selftest
 
 The gate reads only the git-tracked files of these paths (`git ls-files`). It copies them to `GATE_OUT/d3d9total.work/in`, and a declared path with no tracked file makes the gate red:
 
-- `render/d3d9/front`, `bridgefacts/d3d9/d3d9_spec.json`
+- `render/d3d9/front`, `bridgefacts/d3d9` (generator of D9_SPEC)
 - the roots' own records: `render/d3d9/build.json` and the directories of its `include` list (nothing restated in the gate), `render/shaders/translator/build.json`
 - `render/shaders/total/sm_table.json`, `gen_sm_rows.py`, `fnvnx_sm_rows.h`
 
@@ -30,16 +30,7 @@ It is fetched as the recipe does: a bare repository under `GATE_CACHE/external/<
 
 **Environment.** It reads `GATE_OUT`, `GATE_CACHE` (optional) and `ARTIFACTS_URL` (optional, defaults to the fnv-nx-build URL).
 
-## Verdicts (step 4)
-
-| Run | Verdict |
-|---|---|
-| `gate_pure.py ports/fnv-nx/render/total` (trunk bab699b9 checkout) | green, 4 of 4 files accepted by puregate (tests/ is outside the universe) |
-| `gate_tests.py --jobs 3 ports/fnv-nx/render/total` (trunk checkout) | green, 1 of 1 test files pass in 43.5 s: 47 of 47 mutations killed, base 332 of 332 |
-| The gate run as l1.py runs it (trunk checkout, GATE_OUT, GATE_CACHE) | green, 332 of 332, 4 s, external fetched from the default ARTIFACTS_URL (github fnv-nx-build) |
-| The gate on this branch | green, 332 of 332: 161 of 161 enum values, 12 of 12 enumerations sensitive; 171 of 171 SM commands, 0 mutations not killed; 3 s |
-
-`tests/test_d3d9total.py` checks 47 rule-derived mutations, and each one makes the gate red on exactly the ids its check guards:
+`tests/test_d3d9total.py` checks rule-derived mutations, and each one makes the gate red on exactly the ids its check guards:
 - for each of the 12 switched enumerations: a header value changed, an enumerator dropped, and the front switch retyped to int;
 - a case label missing in the front;
 - an SM table row changed, both without and with regenerating the rows header;

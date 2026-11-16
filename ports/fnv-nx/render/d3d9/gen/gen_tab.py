@@ -17,8 +17,8 @@ PROPSRC = {
     "IDirect3DVertexDeclaration9": ("UINT n = 0; r->GetDeclaration(0, &n);", {"decl_bytes": "8 * (uint64_t)n"}),
     "IDirect3DQuery9": ("", {"data_size": "r->GetDataSize()", "qtype": "(uint64_t)r->GetType()"}),
 }
-PIDS = {"length": "D9P_LENGTH", "fmt": "D9P_FMT", "width": "D9P_WIDTH", "height": "D9P_HEIGHT", "depth": "D9P_DEPTH", "levels": "D9P_LEVELS", "usage": "D9P_USAGE",
-        "pool": "D9P_POOL", "shader_bytes": "D9P_SHADER_BYTES", "decl_bytes": "D9P_DECL_BYTES", "data_size": "D9P_DATA_SIZE", "qtype": "D9P_QTYPE"}
+from gen_expr import PROP  # noqa: E402
+PIDS = PROP   # the one name -> D9P_ table of gen_expr
 
 
 def props_of(iface):

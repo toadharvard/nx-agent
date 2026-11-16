@@ -1,6 +1,6 @@
 /*
  * ffp_vs_state.h - D3D9 fixed-function VERTEX pipeline state (rule RD5): the data that selects the behaviour of the one
- * program ffp.vert.glsl / nx_ffp_vs_eval(). Plain C99; NxFfpVsState IS the std140 UBO contents (binding
+ * program ffp.vert.glsl. Plain C99; NxFfpVsState IS the std140 UBO contents (binding
  * NX_FFP_VS_UBO_BINDING) and the matrix palette is a second UBO (binding NX_FFP_VS_PALETTE_BINDING). The driver UBO 2
  * of fnvnx_dk_layout.h (VS: vec4 posfix) is reused unchanged.
  *
@@ -8,28 +8,8 @@
  * pattern (domain functions: ffp_vs_README.md). Matrices keep D3D's row-major, row-vector layout (v' = v M); GLSL reads
  * the same bytes as the transposed mat4 and writes M * v (see ffp.vert.glsl).
  *
- * std140 layout of NxFfpVsState (bytes, sizeof == 2144, every member vec4-aligned):
- *   0    u32 inputs[4]   x flags NX_FFP_IN_*, y texCount nibbles (stage-set s: bits 4s..4s+3 = components 0..4 of
- *                        TEXCOORD s as the declaration provides them; > 4 reads as 4), z w 0
- *   16   u32 rsBlend[4]  VERTEXBLEND, INDEXEDVERTEXBLENDENABLE, NORMALIZENORMALS, LIGHTING
- *   32   u32 rsLight[4]  COLORVERTEX, SPECULARENABLE, LOCALVIEWER, FOGENABLE
- *   48   u32 rsFog[4]    FOGVERTEXMODE, FOGTABLEMODE, RANGEFOGENABLE, POINTSCALEENABLE
- *   64   u32 rsSrc[4]    DIFFUSEMATERIALSOURCE, SPECULARMATERIALSOURCE, AMBIENTMATERIALSOURCE, EMISSIVEMATERIALSOURCE
- *   80   u32 rsMisc[4]   CLIPPLANEENABLE, CLIPPING, number of lights (<= NX_FFP_MAX_LIGHTS), 0
- *   96   u32 tci[8]      D3DTSS_TEXCOORDINDEX per stage        (2 x uvec4)
- *   128  u32 ttff[8]     D3DTSS_TEXTURETRANSFORMFLAGS per stage (2 x uvec4)
- *   160  f32 fog[4]      FOGSTART, FOGEND, FOGDENSITY, TWEENFACTOR
- *   176  f32 point[4]    POINTSIZE, POINTSIZE_MIN, POINTSIZE_MAX, POINTSCALE_A
- *   192  f32 point2[4]   POINTSCALE_B, POINTSCALE_C, viewport height (pixels), 0
- *   208  f32 viewport[4] X, Y, Width, Height (pixels; used by POSITIONT)
- *   224  f32 ambient[4]  D3DRS_AMBIENT as r,g,b,a
- *   240  f32 mDiffuse[4], 256 mAmbient[4], 272 mSpecular[4], 288 mEmissive[4], 304 mPower[4] (x = power)
- *   320  f32 view[16]    D3DTS_VIEW
- *   384  f32 proj[16]    D3DTS_PROJECTION
- *   448  f32 normalMat[16] (inverse transpose of the upper 3x3 of WORLD0 * VIEW; adjugate transpose if singular)
- *   512  f32 tex[8][16]  D3DTS_TEXTURE0..7
- *   1024 f32 clipPlane[6][4]  user clip planes already in EYE space (V^-1 * plane; adjugate if V is singular)
- *   1120 NxFfpVsLight light[8]  (128 bytes each)
+ * The std140 layout of NxFfpVsState is the struct: render/gl4shim/ffp/gen_glsl.py writes its GLSL block from it (UBO NX_FFP_VS_UBO_BINDING) and the offset of every
+ * member as typedef-char assertions (ffp_layout_vs.gen.h, included by ffp_vs_state.c).
  * Palette block: f32 world[NX_FFP_MAX_BLEND_MATRICES][16] = D3DTS_WORLDMATRIX(0..255), 16384 bytes.
  */
 #ifndef NX_FFP_VS_STATE_H
@@ -63,21 +43,28 @@ typedef struct NxFfpVsLight {
 } NxFfpVsLight;
 
 typedef struct NxFfpVsState {
-    uint32_t inputs[4], rsBlend[4], rsLight[4], rsFog[4], rsSrc[4], rsMisc[4], tci[8], ttff[8];
-    float fog[4], point[4], point2[4], viewport[4], ambient[4];
-    float mDiffuse[4], mAmbient[4], mSpecular[4], mEmissive[4], mPower[4];
-    float view[16], proj[16], normalMat[16], tex[8][16], clipPlane[6][4];
+    uint32_t inputs[4];    /* x flags NX_FFP_IN_*, y texCount nibbles (stage-set s: bits 4s..4s+3 = components 0..4 of TEXCOORD s as the declaration provides them; > 4 reads as 4), z w 0 */
+    uint32_t rsBlend[4];   /* VERTEXBLEND, INDEXEDVERTEXBLENDENABLE, NORMALIZENORMALS, LIGHTING */
+    uint32_t rsLight[4];   /* COLORVERTEX, SPECULARENABLE, LOCALVIEWER, FOGENABLE */
+    uint32_t rsFog[4];     /* FOGVERTEXMODE, FOGTABLEMODE, RANGEFOGENABLE, POINTSCALEENABLE */
+    uint32_t rsSrc[4];     /* DIFFUSEMATERIALSOURCE, SPECULARMATERIALSOURCE, AMBIENTMATERIALSOURCE, EMISSIVEMATERIALSOURCE */
+    uint32_t rsMisc[4];    /* CLIPPLANEENABLE, CLIPPING, number of lights (<= NX_FFP_MAX_LIGHTS), 0 */
+    uint32_t tci[8];       /* D3DTSS_TEXCOORDINDEX per stage */
+    uint32_t ttff[8];      /* D3DTSS_TEXTURETRANSFORMFLAGS per stage */
+    float fog[4];          /* FOGSTART, FOGEND, FOGDENSITY, TWEENFACTOR */
+    float point[4];        /* POINTSIZE, POINTSIZE_MIN, POINTSIZE_MAX, POINTSCALE_A */
+    float point2[4];       /* POINTSCALE_B, POINTSCALE_C, viewport height (pixels), 0 */
+    float viewport[4];     /* X, Y, Width, Height (pixels; used by POSITIONT) */
+    float ambient[4];      /* D3DRS_AMBIENT as r,g,b,a */
+    float mDiffuse[4], mAmbient[4], mSpecular[4], mEmissive[4], mPower[4];   /* x of mPower = power */
+    float view[16];        /* D3DTS_VIEW */
+    float proj[16];        /* D3DTS_PROJECTION */
+    float normalMat[16];   /* inverse transpose of the upper 3x3 of WORLD0 * VIEW; adjugate transpose if singular */
+    float tex[8][16];      /* D3DTS_TEXTURE0..7 */
+    float clipPlane[6][4]; /* user clip planes already in EYE space (V^-1 * plane; adjugate if V is singular) */
     NxFfpVsLight light[NX_FFP_MAX_LIGHTS];
 } NxFfpVsState;
 
-#define NX_FFP_VSA(n, c) typedef char nx_ffp_vs_sa_##n[(c) ? 1 : -1]
-NX_FFP_VSA(light_size, sizeof(NxFfpVsLight) == 128 && offsetof(NxFfpVsLight, kind) == 112);
-NX_FFP_VSA(tci, offsetof(NxFfpVsState, tci) == 96 && offsetof(NxFfpVsState, ttff) == 128);
-NX_FFP_VSA(fog, offsetof(NxFfpVsState, fog) == 160 && offsetof(NxFfpVsState, viewport) == 208);
-NX_FFP_VSA(mat, offsetof(NxFfpVsState, mDiffuse) == 240 && offsetof(NxFfpVsState, mPower) == 304);
-NX_FFP_VSA(xf, offsetof(NxFfpVsState, view) == 320 && offsetof(NxFfpVsState, normalMat) == 448);
-NX_FFP_VSA(tex, offsetof(NxFfpVsState, tex) == 512 && offsetof(NxFfpVsState, clipPlane) == 1024);
-NX_FFP_VSA(light, offsetof(NxFfpVsState, light) == 1120 && sizeof(NxFfpVsState) == 2144);
 
 /* ---- D3D9-side description (what the device holds); all of it is plain data ----------------------------------------- */
 enum { NX_VS_RS_FOGENABLE = 28, NX_VS_RS_SPECULARENABLE = 29, NX_VS_RS_FOGTABLEMODE = 35, NX_VS_RS_FOGSTART = 36, NX_VS_RS_FOGEND = 37,

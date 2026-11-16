@@ -9,7 +9,7 @@ import gen_tab as T                           # noqa: E402
 KIND = {"value": 0, "enum": 1, "flags": 2, "float": 3, "ohandle": 4, "handle": 5, "struct": 6, "buffer": 7, "locked": 8}
 DIR = {"in": 0, "out": 1, "inout": 2}
 SHAPE = {"linear": 0, "rect": 1, "box": 2, "dc": 3}
-REFS = ("REFIID", "REFGUID")
+from gen_expr import REFS  # noqa: E402
 
 
 def isptr(p): return p["byref"] or p["kind"] in ("buffer", "locked", "struct")
@@ -92,8 +92,8 @@ def generate(spec, raw, outdir):
 
 
 def main():
-    if len(sys.argv) < 2: sys.exit("usage: gen_replay.py OUTDIR [d3d9_spec.json]")
-    raw = open(sys.argv[2] if len(sys.argv) > 2 else os.path.join(HERE, "..", "..", "..", "bridgefacts", "d3d9", "d3d9_spec.json"), "rb").read()
+    if len(sys.argv) < 3: sys.exit("usage: gen_replay.py OUTDIR d3d9_spec.json")
+    raw = open(sys.argv[2], "rb").read()
     try: n = generate(json.loads(raw), raw, sys.argv[1])
     except GenError as ex: print(f"gen_replay: FAIL: {ex}", file=sys.stderr); sys.exit(2)
     print(f"gen_replay: wrote {n} lines to {sys.argv[1]}")

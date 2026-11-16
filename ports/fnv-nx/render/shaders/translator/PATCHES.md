@@ -20,7 +20,7 @@ Deletes the files the CMake profile set of build.sh does not build: `mojoshader_
 programs. Adds `mojoshader_version.h`, which CMake wrote with `MOJOSHADER_VERSION -1` and `MOJOSHADER_CHANGESET "???"` (build.sh's shallow
 clone has no HEAD~, so CMake's git step always gave "???"). Result: 13 units, all built today by `ninja mojoshader`.
 `fnvnx_sm_rows.h` is not in the patch: it is a recipe `generated` python step (`total/gen_sm_rows.py`, input `total/sm_table.json`,
-output byte-equal to the committed `total/fnvnx_sm_rows.h`, which `gen_sm_rows.py --check` compares).
+output byte-equal to `gen/inc/fnvnx_sm_rows.h` of the render/shaders/total stage).
 
 uam patches (`uam_gen.patch`, `uam_nomain.patch`) were removed: generated content is not tracked. See journal/inbox/l6-render-w1b.md, "after the first frame".
 
@@ -74,3 +74,11 @@ Rule: everything that depends on the COMPLETE register set is emitted in the def
 - Check (reach_census.py, red otherwise): every read of the configuration goes through `dk_cfg()` (never inlined); in the relocation graph of the profile object only
   `emit_GLSL_attribute` and `emit_GLSL_finalize` reach it, no other `emit_GLSL_*` root (94) does; TLS 0.
 Mirror pin: commit 6e7f1791, tree_sha256 af453ab9…, see build.json.
+
+## 9th patch: rows without an opcode string have no emitter (`derivation/mojoshader_reserved.patch`)
+Rule (owner order of 2026-11-10, rules that close the class): every row of the instruction table whose `opcode_string` is NULL is written `INSTRUCTION_UNASSIGNED` and has no
+emitter (the profile tables get zeros); the X-macro emits none. Proof of unreachability (the comment at the macro in mojoshader_internal.h): parse_instruction_token returns on
+`opcode_string == NULL` ("Unknown opcode.") before it reads or calls the emitter, and the emitter pointer is read from this table only. The 16 RESERVED rows (token values
+with no D3D9 instruction) are exactly these rows; `emit_GLSL_RESERVED` and its prototype are deleted. The facts of that proof stay computed by
+render/total/gen_opcover.py from the tree (op_reserved.tsv).
+Mirror pin: commit 7693847e, tree_sha256 bc0ea3c1…, see build.json.
