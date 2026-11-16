@@ -239,9 +239,12 @@ case("cli missing file exit 1", run("check", os.path.join(TMP, "none.json"))[0] 
 case("cli usage exit 1", run()[0] == 1 and run("bogus")[0] == 1 and run("check")[0] == 1)
 rc, out = run("policy")
 case("cli policy table", rc == 0 and "gcc" in out and "reproducible-builds.org" in out, out[:200])
-pg = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "puregate.py"), "check",
-                     os.path.join(VERIFY, "toolflags.py"), os.path.join(VERIFY, "toolflags_policy.py")],
-                    capture_output=True, text=True)
+with tempfile.TemporaryDirectory() as view:   # puregate's view of the module path: the files at <view>/fnvnx/verify (a copy: puregate does not follow symlinks)
+    os.makedirs(os.path.join(view, "fnvnx", "verify"))
+    for f in ("toolflags.py", "toolflags_policy.py"):
+        shutil.copyfile(os.path.join(VERIFY, f), os.path.join(view, "fnvnx", "verify", f))
+    pg = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "puregate.py"), "check", os.path.join(view, "fnvnx", "verify", "toolflags.py"),
+                         os.path.join(view, "fnvnx", "verify", "toolflags_policy.py"), "--base", view], capture_output=True, text=True)
 case("toolflags passes puregate", pg.returncode == 0, pg.stdout[-300:])
 
 shutil.rmtree(TMP, ignore_errors=True)

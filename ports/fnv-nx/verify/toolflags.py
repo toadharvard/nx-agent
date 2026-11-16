@@ -21,8 +21,8 @@ import re
 import shlex
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from toolflags_policy import (FIXED, FORBID_ENV, GNU, KINDS, POLICY, PYENV_OK)  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx)
+from fnvnx.verify.toolflags_policy import (FIXED, FORBID_ENV, GNU, KINDS, POLICY, PYENV_OK)  # noqa: E402
 
 FORMAT = "fnvnx-toolflags/1"
 
