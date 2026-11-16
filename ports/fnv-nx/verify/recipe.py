@@ -2800,7 +2800,7 @@ class Job:
             units = [u for u in units if u not in self.blocked]
             kinds = {u: k for u, k in kinds.items() if u in units}
             self.built = []
-        if self.analysis is None and any(k != "asm" for k in kinds.values()):
+        if self.analysis is None and guest and any(k != "asm" for k in kinds.values()):   # the analysis plugin is bound to the guest compiler: a host root has none
             try:
                 self.analysis = self.analysis_plugin(ws)
             except BuildRed as r:   # the gate objstub cannot judge the root: red and named, no unit is blocked by it

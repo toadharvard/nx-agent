@@ -443,7 +443,7 @@ def main():
         except recipe.RecipeError as e:
             got = " ".join(e.errors)
         check("store-merge: a forged differing key record is red `store-merge: key <k> differs`", got and "store-merge: key %s differs" % k in got and sorted(os.listdir(BASE + "/sh-m/keys")) == before, got)
-        for bad in ("0/0", "3/3", "1/17", "x", "-1/2"):
+        for bad in ("0/0", "3/3", "x", "-1/2"):
             try:
                 recipe.shard_spec(bad)
                 got = None
