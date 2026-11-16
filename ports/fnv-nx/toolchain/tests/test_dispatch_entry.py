@@ -4,7 +4,7 @@ that type is not rewritten and has no .fnvnx.disp row (a plain fnptr call is sti
 conversion with an entry type on one side (int, plain fnptr, void*, C cast, reinterpret_cast, implicit) is the error ENTRY1-CONT naming both types; the
 attribute on anything but a pointer-to-function type is an error. Built through plugbuild (the recipe's flags and plugins).
 Run: python3 -I <this file> from the checkout root."""
-import os
+import json, os
 import re
 import shutil
 import sys
@@ -34,9 +34,13 @@ def headers(td, so):
     """a header of platform/include is included from C and from C++ units: each one compiles as both languages under the recipe's flags and plugins
     (the C++ unit with the C++ keywords only: g++ rejects `_Static_assert` and `_Alignof`)"""
     inc = os.path.join(HERE, '..', '..', 'platform', 'include')
-    pb.EXTRA['copy'].append(('ports/fnv-nx/platform/include', 'inc'))
-    pb.EXTRA['copy'].append(('ports/fnv-nx/shim/include', 'shim'))
-    pb.EXTRA['include'] += [pb.ROOT + '/inc', pb.ROOT + '/shim']
+    # the include dirs are the owning root's own (platform/build.json `include`: the repository directories of the root and of the roots it `uses`), copied whole under the
+    # toy root, in the root's order; the pinned externals of that list are the toy root's own toolchain
+    owner = json.load(open(os.path.join(HERE, '..', '..', 'platform', 'build.json')))
+    repo = os.path.abspath(os.path.join(HERE, '..', '..', '..', '..'))   # a directory the root generates (a stage output) is not a repository directory: it is no header home here
+    for i, d in enumerate(x for x in owner['include'] if x.startswith('ports/fnv-nx/') and os.path.isdir(os.path.join(repo, x))):
+        pb.EXTRA['copy'].append((d, 'inc%d' % i))
+        pb.EXTRA['include'].append(pb.ROOT + '/inc%d' % i)
     try:
         # the universe: every header of the directory whose includes stay inside it and the shim (a header that reaches a sibling tree by `../` needs that tree's
         # own product root as its home; it is covered where that root is built)
