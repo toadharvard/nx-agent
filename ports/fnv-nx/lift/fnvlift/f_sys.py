@@ -373,9 +373,9 @@ def _ud_rows():
         for ln in open(path):
             if ln.startswith('#') or not ln.strip():
                 continue
-            h, verdict = ln.split('\t')[:2]
-            assert verdict == 'UD', ln
-            rows.append(bytes.fromhex(h))
+            h, verdict, _extent, cls = ln.rstrip('\n').split('\t')[:4]
+            assert verdict == 'UD' and cls in ('sail', 'feature'), ln
+            rows.append((bytes.fromhex(h), cls))
         _UD_ROWS[path] = rows
     return _UD_ROWS[path]
 
@@ -383,12 +383,13 @@ def _ud_rows():
 def ud_gap(b):
     """the byte sequence `b` that capstone refuses, as a UdIns when the pinned Sail model decided it #UD on the bytes up to its decode extent (a row of the udsail input: the row's bytes are a prefix of b), else None (undecided: the caller reports a bad decode)"""
     b = bytes(b)
-    for r in _ud_rows():
+    for r, cls in _ud_rows():
         if b.startswith(r):
             i = 0
             while r[i] in WINE_PREFIX:
                 i += 1
-            return UdIns(r, r[:i])
+            u = UdIns(r, r[:i]); u.ud_class = cls      # `feature`: the class is decided, the site still needs its call-graph certificate (CLAUDE.md, the declared CPU)
+            return u
     return None
 
 

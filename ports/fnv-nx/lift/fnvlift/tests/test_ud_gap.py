@@ -9,7 +9,7 @@ from fnvlift.core import Unsupported
 from fnvlift.image import Image
 
 d = tempfile.mkdtemp(prefix='udgap-')
-open(d + '/udsail.tsv', 'w').write('# fnvnx-udsail/1\nc7d8\tUD\t2\tfixture\n8fe0\tUD\t2\tfixture\n')
+open(d + '/udsail.tsv', 'w').write('# fnvnx-udsail/2\nc7d8\tUD\t2\tsail\tfixture\n8fe0\tUD\t2\tfeature\tfixture\n')
 open(d + '/universe.tsv', 'w').close(); open(d + '/depth.tsv', 'w').close()
 inputs.reset()
 inputs.configure(universe=d + '/universe.tsv', fpstate=d, fpdepth=d + '/depth.tsv', x86sys=_inputs.X86SYS, cpufeat=CPUFEAT, udsail=d + '/udsail.tsv', segwrites=d + '/none.json', image='buf')
@@ -19,7 +19,7 @@ assert f_sys.ud_gap(bytes.fromhex('c7c8')) is None                        # c7 /
 assert f_sys.ud_gap(bytes.fromhex('66c7d8')) is None                      # a row is a prefix of the sequence (legacy prefixes are part of the decided bytes): this one is not
 assert f_sys.decode_gap(bytes.fromhex('0f1f00')) is not None and f_sys.decode_gap(bytes.fromhex('0f1f00')).mnemonic == 'nop'      # reserved NOP is still nop_gap's
 ins = f_sys.decode_gap(bytes.fromhex('8fe0aabb'))
-assert ins.mnemonic == '(ud)' and ins.size == 2 and ins.operands == ()
+assert ins.mnemonic == '(ud)' and ins.size == 2 and ins.operands == () and ins.ud_class == 'feature'
 img = Image.from_bytes(bytes.fromhex('c7d8') + b'\x90\xc3', 0x401000)
 t = L.lift(img, 0x401000, 4)[0]
 assert 'FNVL_UD' in t, t[:400]
