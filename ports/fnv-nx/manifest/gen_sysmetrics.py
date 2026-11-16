@@ -16,12 +16,14 @@ Errors (exit 1, the stage is red): a label with no id or no handler; a handler `
 give: its default answers 0); a literal case whose handler returns another value; a name defined twice; two labels with one id.
 Output <out.inc>: forward declarations of the handlers and `k_rules[]` {index, handler, citation}, sorted by index; the citation is
 `wine-9.0:dlls/win32u/sysparams.c:get_system_metrics case SM_X (line N)`. Python 3 standard library only."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from gen_wine_cites import strip_comments  # noqa: E402
+from fnvnx.manifest.gen_wine_cites import strip_comments  # noqa: E402
 
 FILE = "dlls/win32u/sysparams.c"
 FUNC = "get_system_metrics"

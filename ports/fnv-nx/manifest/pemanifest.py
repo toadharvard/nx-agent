@@ -36,10 +36,12 @@ Output (exe-derived; keep out of the public repository):
   dynsites.tsv  module, site_va, api, operand, hmod
   regsites.tsv  module, site, api, root, subkey, value, status, reason  (registry call sites, see regsites.py)
 """
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import bisect, collections, os, struct, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import funcfacts
+import fnvnx.manifest.funcfacts as funcfacts
 X = funcfacts.X
 
 DYN = {"LoadLibraryA", "LoadLibraryW", "LoadLibraryExA", "LoadLibraryExW",
@@ -379,7 +381,7 @@ def main(d, root, out, bridge_tsv, dllkind_py, dllkind_sha):
             fc.write("%s\t%s\t%d\t%d\t%s\n" % (n, kind.get(n, "root"), len(m.imports), m.exports,
                                                  "-" if n == root else "static" if n in static_names else "dynamic"))
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        import regsites
+        import fnvnx.manifest.regsites as regsites
         regsites.write(mods, out)
         for n in sorted(k for k in kind if k not in mods):          # met names that are not analysed modules
             fc.write("%s\t%s\t-\t-\t%s\n" % (n, kind[n], "static"))

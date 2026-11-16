@@ -7,6 +7,8 @@ The rule: sdd builds them as `__atomic_load_N(p + off, ACQUIRE)` itself.  Fixtur
 (the vptr and the slot of a 32-bit pointer) are all `ldar`, there are exactly two `ldar` per delete-expression, and the machine-code gate
 link/gate_order.py certifies every one of them (item kind ''); a function without a virtual call is certified whole (control).
 No network, no game data.  Run: python3 -I <this file> from the checkout root."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
@@ -19,7 +21,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, '..'))
 from lift.gates import gate_order  # noqa: E402
-import realobj  # noqa: E402
+import fnvnx.link.tests.realobj as realobj  # noqa: E402
 
 fails = []
 

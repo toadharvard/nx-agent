@@ -13,11 +13,13 @@ No hand list; output is sorted, one `dll<TAB>name` per line.
 Usage: sys_names.py <manifest-dir> [--root ports/fnv-nx] [--probe path] [--out file] [--selftest]
   <manifest-dir> holds imports.tsv, dynsites.tsv, closure.tsv. Everything read from it stays private; nothing is embedded here.
 """
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import check_dynsites as cd  # noqa: E402
+import fnvnx.manifest.check_dynsites as cd  # noqa: E402
 
 
 def derive(imports, dynsites, translated, absent_mods, reg, probe):

@@ -4,8 +4,10 @@ both envprobe2.c (mingw, real D3D9) and hostenv.cpp (our NxDirect3D9) include, s
 Domains are COMPLETE finite sets: every D3DFORMAT enum value of d3d9types.h + the FOURCC list + unknown values; every D3DDEVTYPE/D3DRESOURCETYPE/
 D3DMULTISAMPLE_TYPE enum value + invalid ones; every single usage bit of the 32-bit word + all pairs of the bits that are not masked by Wine
 (see render/d3d9/env/README.md for why single bits + pairs cover the usage function)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import json, os, re, sys
-import wine_fourcc
+import fnvnx.render.d3d9.env.wine_fourcc as wine_fourcc
 fcc = wine_fourcc.fcc
 
 

@@ -17,6 +17,8 @@ rule and must make exactly the ids that check guards uncertified (red):
 The assertion mutations are made on the pinned mirror itself: the test takes the checkout of the translator recipe's mojoshader external from the
 build cache, mutates one file, commits the tree into a bare repository placed in the cache under the new commit, and points the scratch recipe at the new
 commit and tree hash. Plus the stage's tree hash equals verify/cas.py ingest (files, exec bit, symlink, empty dir, and the fetched external)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import argparse, importlib.util, json, os, re, shutil, subprocess, sys, tempfile
 from concurrent.futures import ThreadPoolExecutor
 
@@ -27,7 +29,7 @@ REPO = os.path.normpath(os.path.join(PORT, "..", ".."))
 PORT_REL = "ports/fnv-nx"
 ROOT = PORT_REL + "/render/total/d3d9total"
 sys.path.insert(0, os.path.join(PORT, "verify"))
-import recipe  # noqa: E402
+import fnvnx.verify.recipe as recipe  # noqa: E402
 _spec = importlib.util.spec_from_file_location("d3d9total_stage", os.path.join(TOTAL, "d3d9total", "stage.py"))
 G = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(G)

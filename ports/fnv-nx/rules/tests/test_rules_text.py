@@ -5,6 +5,8 @@ temporary directory.
 
     python3 -I rules/tests/test_rules_text.py
 """
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import re
 import shutil as _shutil
@@ -19,10 +21,10 @@ from collections import Counter
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import support  # noqa: E402
-from support import check  # noqa: E402
-import core as prepare  # noqa: E402
-import s1_compile as s1  # noqa: E402
+import fnvnx.rules.tests.support as support  # noqa: E402
+from fnvnx.rules.tests.support import check  # noqa: E402
+import fnvnx.rules.core as prepare  # noqa: E402
+import fnvnx.rules.s1_compile as s1  # noqa: E402
 
 core = prepare
 core.CTX['win32_header'] = support.WIN32_HEADER

@@ -9,12 +9,14 @@ Emits, each row with the Wine source line it is read from:
   k_pal1[2], k_pal4[16], k_pal8[256]   the RGBQUAD tables table_1/table_4/table_8 of get_default_color_table in dlls/win32u/dib.c, as
                    0x00RRGGBB (RGBQUAD is blue, green, red, reserved); the sizes must match the declared bounds.
 Any other shape (a row that does not parse, a size mismatch, a gap in the ids) exits 1. Python 3 standard library only."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from gen_wine_cites import strip_comments  # noqa: E402
+from fnvnx.manifest.gen_wine_cites import strip_comments  # noqa: E402
 
 SYSP = "dlls/win32u/sysparams.c"
 DIB = "dlls/win32u/dib.c"

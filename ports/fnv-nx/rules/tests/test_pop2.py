@@ -10,6 +10,8 @@ MSVC's names place (a header, a per-function namespace) and the new decorated na
 in the moved argument, an overload clash, a result that is not read as a bool and a chained receiver with
 arguments of its own leave the call alone. Line numbers stay.
 """
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import collections
 import json
 import os
@@ -19,12 +21,12 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import support  # noqa: E402
+import fnvnx.rules.tests.support as support  # noqa: E402
 support.legacy_units_lookup()
-import core as prepare  # noqa: E402
+import fnvnx.rules.core as prepare  # noqa: E402
 sys.modules.setdefault('prepare', prepare)
-import s2_bodies    # noqa: E402
-import _msvcsig     # noqa: E402
+import fnvnx.rules.s2_bodies as s2_bodies    # noqa: E402
+import fnvnx.rules._msvcsig as _msvcsig     # noqa: E402
 
 HDR = '''#pragma once
 struct FormMask

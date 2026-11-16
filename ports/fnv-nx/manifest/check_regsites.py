@@ -11,10 +11,12 @@ The image holds, at 16-aligned entries:
   T   frameless thunk `jmp [RegSetValueExA]` after D                   (reported, never dropped)
 Usage: check_regsites.py [specs dir]   (with a Wine specs dir it also checks the ROLES table against the exports)
 """
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, struct, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import funcfacts, pemanifest, regsites
+import fnvnx.manifest.funcfacts as funcfacts; import fnvnx.manifest.pemanifest as pemanifest; import fnvnx.manifest.regsites as regsites
 
 BASE = 0x400000
 OPEN, QUERY, SETV, SAVE = 0x403000, 0x403004, 0x403008, 0x40300c

@@ -32,10 +32,12 @@ Usage: import_escape.py --winmd Windows.Win32.winmd --sha256 HEX --commit ID --b
                         --report report.tsv [--check]          (--check: regenerate and compare with --out; exit 1 on diff)
        import_escape.py --winmd W --sha256 HEX --selftest
 """
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import argparse, collections, os, re, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import funcfacts
+import fnvnx.manifest.funcfacts as funcfacts
 
 # ECMA-335 II.23.1.16 element types
 E_VOID, E_BOOL, E_CHAR, E_I1, E_U1, E_I2, E_U2, E_I4, E_U4, E_I8, E_U8, E_R4, E_R8, E_STRING = range(1, 15)

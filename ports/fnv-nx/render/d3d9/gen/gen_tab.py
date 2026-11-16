@@ -1,6 +1,8 @@
 """gen_tab.py: emitters for the spec-derived tables of d9wrap.gen.cpp (struct descriptors, ids, formats, primitives, shader walk, object properties)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import re
-from gen_expr import GenError
+from fnvnx.render.d3d9.gen.gen_expr import GenError
 
 # object property sources: iface -> (setup C++ run on `r`, {prop: C++ value expression}); tables of D3D9 itself (desc getters), not per-item guesses
 _S = ("D3DSURFACE_DESC d; r->%s;", {"width": "d.Width", "height": "d.Height", "fmt": "d.Format", "usage": "d.Usage", "pool": "d.Pool"})
@@ -17,7 +19,7 @@ PROPSRC = {
     "IDirect3DVertexDeclaration9": ("UINT n = 0; r->GetDeclaration(0, &n);", {"decl_bytes": "8 * (uint64_t)n"}),
     "IDirect3DQuery9": ("", {"data_size": "r->GetDataSize()", "qtype": "(uint64_t)r->GetType()"}),
 }
-from gen_expr import PROP  # noqa: E402
+from fnvnx.render.d3d9.gen.gen_expr import PROP  # noqa: E402
 PIDS = PROP   # the one name -> D9P_ table of gen_expr
 
 

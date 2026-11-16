@@ -8,6 +8,8 @@ Fixture fixtures/order_local.cc, built by the recipe with the full plugin set (r
   plain_local     a struct local only read and written by name: no memory access at all
   escaped         a local whose address is passed to a function: its stores are `stlr`, its address is recorded, gate_order certifies all
 No network, no game data.  Run: python3 -I <this file> from the checkout root."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
@@ -19,8 +21,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, '..'))
 from lift.gates import gate_order  # noqa: E402
-import realobj  # noqa: E402
-import test_sdd_order as T  # noqa: E402
+import fnvnx.link.tests.realobj as realobj  # noqa: E402
+import fnvnx.link.tests.test_sdd_order as T  # noqa: E402
 
 fails = []
 
