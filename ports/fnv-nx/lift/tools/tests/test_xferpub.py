@@ -28,7 +28,7 @@ check('publish ran: %s' % (r.stderr[-200:] or r.stdout.strip()), r.returncode ==
 commit, tree = r.stdout.split()
 check('the branch is in the artifacts repository at the commit', sh('git', '-C', bare, 'rev-parse', 'refs/heads/l3a-lift/xferpack/tiny') == commit)
 check('the commit is parentless and its message is exactly the one line', sh('git', '-C', bare, 'log', '-1', '--format=%P', commit) == '' and sh('git', '-C', bare, 'log', '-1', '--format=%B', commit) == 'liftsrc pack tiny')
-check('the clone has no working-tree change and only the published branch', sh('git', '-C', clone, 'status', '--short') == '' and sh('git', '-C', clone, 'for-each-ref', '--format=%(refname)') == 'refs/heads/l3a-lift/xferpack/tiny')
+check('the clone has no working-tree change and only the published branch', sh('git', '-C', clone, 'status', '--short') == '' and sh('git', '-C', clone, 'for-each-ref', '--format=%(refname)', 'refs/heads') == 'refs/heads/l3a-lift/xferpack/tiny')
 orig = open(os.path.join(REPO, 'ports', 'fnv-nx', 'lift', 'pack', 'build.json')).read(); new = open(out).read()
 bo, bn = json.loads(orig), json.loads(new)
 e = [x for x in bn['external'] if x['name'] == 'liftpack'][0]
