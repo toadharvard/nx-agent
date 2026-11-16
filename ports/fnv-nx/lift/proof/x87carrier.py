@@ -68,7 +68,7 @@ def table(c):
     return rows, hashlib.sha256(json.dumps(rows, sort_keys=True).encode()).hexdigest()
 
 
-def call(fn, *bvs, c=None):
+def call(fn, *bvs, c=None, raw=False):
     """the z3 terms of the helper `fn` applied to the bit-vectors BVS, one per parameter in C order: a scalar parameter takes a bit-vector of its width, a struct by value one bit-vector that is the
     concatenation of its fields (the first field the low bits: fnvl_f80 = se:m), a pointer parameter a fresh cell (its final contents are the outputs).  -> (return value as a bit-vector or None,
     [(parameter name, final cell contents as bit-vectors)], obligations (Result.ub), FP domain obligations (Result.dom))"""
@@ -90,9 +90,17 @@ def call(fn, *bvs, c=None):
         else:
             assert b.size() <= t[1], (fn, p.name, b.size(), t[1]); args.append(ctrans.V(b if b.size() == t[1] else z3.ZeroExt(t[1] - b.size(), b), t))      # a narrower value is zero-extended (the C passes it in the wider type)
     mc.G.pop('c', None); r = mc.apply(fn, args)
+    if raw: return r
     ret = r.ret.e if isinstance(r.ret, ctrans.V) else None
     outs = [(n, [x.e for x in cell]) for n, cell in cells]
     return ret, outs, list(r.ub), list(r.dom)
+
+
+def call_struct(fn, *bvs):
+    """call(fn, ...) of a helper that returns a struct by value: {field name: bit-vector}"""
+    r = call(fn, *bvs, raw=True)
+    assert isinstance(r.ret, dict), fn
+    return {n: v.e for n, v in r.ret.items()}
 
 
 def term(fn, args):
