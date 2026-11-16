@@ -8,19 +8,28 @@ objects (objects.json "objects") are judged; no product root: universe 0, green.
 ports/fnv-nx/verify, sibling of lift/, the way verify/gate_contract.py imports its own; a checkout without verify/ cannot run the gate (no result file: red).
 All object input handling is in `read_inputs` (objects.json -> [(unit, object path)]), `read_f2i_paths` (objects.json -> {unit: the plugin's file of
 its object}: the `f2i` field of the object's row, the single place where the recipe records the path) and `read_f2i` (that file).
-The table files are files of the admitted root that holds them (L3a's guest root lift/rt: rcpref.h, rcptab.c, rcptab.cert.json): the item
+The table files are files of the admitted root that holds them (L3a's guest root lift/rt: rcptab.c, rcptab.cert.json; rcpref.h is in the root's published GEN output, genout.gen_dir): the item
 `<image>:rcpcert` exists per linked image (a root with a link stage) iff another object of the image references a symbol that the object compiled from the unit rcptab.c defines (symbol tables of the objects: the link resolves exactly those references); no image, or no such reference: no item (universe 0 for check 1).
 
-Check 0, dependency (item `<root>:forms`): the correctness of the helpers sse_f2i / fv_i, whose conversions this gate lets through, is
-established by the form certificates, not here. The item is certified iff the gate `forms` (formgate.py, the one copy) is green on its own
-declared inputs; fpexact evaluates it by calling formgate.judge(repo, cache) (verdict.py gives every gate its own GATE_OUT, so one gate cannot read another's
-result file; the same code on the same declared inputs gives the same verdict). Red reason `forms: not green` plus forms' own reason.
+Check 0, the helpers of lift/rt (items `helper:<root>/<callee>` and `<root>:helper-table`). The shape certificates (gate "forms") prove that a Form equals the Sail model; they stop at the call into a
+lift/rt helper, so the C body of a helper is NOT covered by them, and this gate makes no claim that it is. What this check certifies, exactly: every helper of the derived universe is covered,
+by one of two things, and a helper covered by neither is red.
+  the HELPER UNIVERSE is derived, never listed: (A) the Form -> helper call table of proof/helpercalls.py (the lifter's own emitter decides which Form node is a call; the Forms are those of
+  the lifted pack of formgate_inputs.json), and (B) the functions that the plugin fnvnx_ftoi reports as `helpers` (attribute fnvnx_f2i) in the f2i files of the root's objects. A root has these items iff
+  (B) is not empty there (the root of the lift/rt runtime holds the FNVL_F2I helpers; (A) is the table of that runtime).
+  rcpcert: a helper whose DEFINING UNIT is the rcpcert table unit: the object of the unit rcptab.c defines a symbol of that name (symbol table, as table_item) and the item `<image>:rcpcert` exists
+  for the root (its certificate is check 1). Decided from the build's object facts, never from a name prefix.
+  ASM-329 (verify/ASSUMPTIONS.json, REMOVE, owner L3b; integ CLAUDE.md a172a44b7): every other helper, of any width. Its C body is tested, not proven; removed by isla over the helper's host x86_64
+  object under the pinned Sail model plus four static conditions, after the first frame. The gate computes the scope from the universe, the record does not list it, and reports it by name in its detail.
+  A helper that is neither rcpcert's nor covered because ASM-329 is not a REMOVE record of L3b in the registry is red, code `helper-uncovered`.
+  `<root>:helper-table` is red (`helper-table-inputs`) when the Forms of the pack cannot be read (the declared inputs of formgate): the universe cannot be derived, nothing is skipped.
+Check 0 says nothing about the rcp table itself (check 1) or about the conversion sites (check 3).
 
 Check 1, certificate (item `<root>:rcpcert`, files of the root): rcptab.c is the table of RCPSS / RSQRTSS of the one reference CPU. The pinned certificate
 rt/rcptab.cert.json (made on that CPU by farm/rcpcert.sh: CPUID identity read with the instruction, all 2^32 inputs of both functions
 executed on the hardware and compared bit for bit with the functions of rt/rcptab.c, SHA-256 of both result streams) is accepted iff
-  sha256(rt/rcptab.c) == source_sha256, sha256(rt/rcpref.h) == header_sha256, mismatches == 0 (the integer 0), and the CPU identity of the
-  certificate equals the four FNVL_RCP_REF_* constants of rt/rcpref.h (the same header rt/rcptab.c includes and the certifying program uses).
+  sha256(rt/rcptab.c) == source_sha256, sha256(GEN/rcpref.h) == header_sha256, mismatches == 0 (the integer 0), and the CPU identity of the
+  certificate equals the four FNVL_RCP_REF_* constants of GEN/rcpref.h (the same header rt/rcptab.c includes and the certifying program uses).
 A missing, unreadable or malformed certificate is a finding. Argument: the table functions are pure functions of 32 bits; the certificate
 states equality with the hardware on the whole domain for the exact source bytes whose hash it carries, on the reference identity; so the
 source named by the hash computes RCPSS / RSQRTSS of the reference CPU for every input. Registered assumptions (ports/fnv-nx/lift/ASSUMPTIONS.l3b.json): ASM-320 (the certifying run was made by farm/rcpcert.sh on a CPU
@@ -68,17 +77,14 @@ object-level necessary condition:
   transformation; outside the attributed helpers none exists, so the conversion instructions of the object are copies of the helpers'
   bodies. The helpers' own correctness (range guard, rounding mode, indefinite value) is not decided here: it is by review, and it is
   listed per object in the output (`helpers` of each result file are the analysed helper functions). Registered assumptions (ASSUMPTIONS.l3b.json), none new:
-  ASM-322 (the helpers are correct: removed by the dependency on the gate forms, item `<root>:forms`), ASM-323 (an object and its result file
+  ASM-329 (the f2i-attributed helpers equal their SDM semantics: REMOVE, check 0), ASM-323 (an object and its result file
   come from the same compile: the recipe's stage key binds both), ASM-218 (an inline asm without a float / vector operand and without an FP register
   clobber does no conversion; 3b backs it up for units with no site), ASM-325 (no conversion of a C literal occurs in lifted code), ASM-801
   (native bodies compiled with the fnvnx_ftoi plugin are judged by the L2 rules, not here).
 
-Universe: per product root: `<root>:rcpcert` (per image, when it uses the table), `<root>:forms`, and for every object `rcp:<root>/<unit>` and `f2i:<root>/<unit>`; a root that does not
+Universe: per product root: `<root>:rcpcert` (per image, when it uses the table), the items of check 0, and for every object `rcp:<root>/<unit>` and `f2i:<root>/<unit>`; a root that does not
 build or whose recipe is invalid is the one item `<root>:inputs` (uncertified, reason in detail: never skipped). Certified: items with no finding.
 uncertified: the first 50 ids sorted. Exit 0 iff green."""
-import os
-import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import hashlib
 import json
 from fractions import Fraction
@@ -88,20 +94,20 @@ import sys
 
 from elftools.common.exceptions import ELFError
 from elftools.elf.elffile import ELFFile
-from capstone import CS_ARCH_ARM64, CS_ARCH_X86, CS_MODE_64, CS_MODE_ARM, Cs
+from capstone import CS_ARCH_ARM64, CS_MODE_ARM, Cs
 import capstone.arm64_const as A
-import capstone.x86_const as X
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LIFT = os.path.dirname(HERE)
 VERIFY = os.path.normpath(os.path.join(LIFT, "..", "verify"))
 sys.path.insert(0, LIFT)
+sys.path.insert(0, os.path.join(VERIFY, "..", "contract"))
 sys.path.insert(0, VERIFY)
-from proof import formgate  # noqa: E402
-from verify import gate_build  # noqa: E402
-from verify import gate_datamodel  # noqa: E402     (cc_docs: the reader of the CC stage documents, the one copy)
-from contract import gatefile  # noqa: E402     (ports/fnv-nx/contract)
-from verify import recipe  # noqa: E402
+from proof import formgate, genout, helpercalls  # noqa: E402     (genout: the one reader of the lift/rt GEN output; helpercalls: the Form -> helper call table)
+import gate_build  # noqa: E402
+import gate_datamodel  # noqa: E402     (cc_docs: the reader of the CC stage documents, the one copy)
+import gatefile  # noqa: E402     (ports/fnv-nx/contract)
+import recipe  # noqa: E402
 
 NAME = "fpexact"
 FORMAT = "fnvnx-gate/1"
@@ -110,8 +116,6 @@ RECIP = {A.ARM64_INS_FRECPE: "frecpe", A.ARM64_INS_FRECPS: "frecps", A.ARM64_INS
 FCVT = {A.ARM64_INS_FCVTZS: "fcvtzs", A.ARM64_INS_FCVTZU: "fcvtzu", A.ARM64_INS_FCVTNS: "fcvtns", A.ARM64_INS_FCVTNU: "fcvtnu",
         A.ARM64_INS_FCVTMS: "fcvtms", A.ARM64_INS_FCVTMU: "fcvtmu", A.ARM64_INS_FCVTPS: "fcvtps", A.ARM64_INS_FCVTPU: "fcvtpu",
         A.ARM64_INS_FCVTAS: "fcvtas", A.ARM64_INS_FCVTAU: "fcvtau", A.ARM64_INS_FJCVTZS: "fjcvtzs"}
-X86_RECIP = {X.X86_INS_RCPSS: "rcpss", X.X86_INS_RCPPS: "rcpps", X.X86_INS_RSQRTSS: "rsqrtss", X.X86_INS_RSQRTPS: "rsqrtps",
-             X.X86_INS_VRCPSS: "vrcpss", X.X86_INS_VRCPPS: "vrcpps", X.X86_INS_VRSQRTSS: "vrsqrtss", X.X86_INS_VRSQRTPS: "vrsqrtps"}
 REF_KEYS = ("VENDOR", "FAMILY", "MODEL", "STEPPING")
 HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 SHF_EXECINSTR = 4
@@ -133,13 +137,13 @@ def read_f2i_paths(res):
     return {o["unit"]: o.get("f2i") for o in res["objects"]}
 
 
-GEN_HEADER = os.path.join("gen", "rcpref.h")      # a generated file of the root (rt/build.json stage gen_cpuref), not a committed one
+GEN_HEADER = "rcpref.h"      # a file of the root's published GEN output (rt/build.json stage gen_cpuref; genout.gen_dir), not a committed one
 
 
-def read_ref(rt):
-    """the four FNVL_RCP_REF_* constants of rt/rcpref.h -> {"VENDOR": str, "FAMILY": int, ...}; ValueError unless each is defined exactly once"""
+def read_ref(gen):
+    """the four FNVL_RCP_REF_* constants of GEN/rcpref.h (GEN: genout.gen_dir()) -> {"VENDOR": str, "FAMILY": int, ...}; ValueError unless each is defined exactly once"""
     out = {}
-    with open(os.path.join(rt, GEN_HEADER)) as fh:
+    with open(os.path.join(gen, GEN_HEADER)) as fh:
         for line in fh:
             m = re.match(r'#define FNVL_RCP_REF_([A-Z]+) ("[^"\n]*"|[0-9]+)\s*$', line)
             if m and m[1] in REF_KEYS:
@@ -147,14 +151,14 @@ def read_ref(rt):
                     raise ValueError("FNVL_RCP_REF_%s defined twice" % m[1])
                 out[m[1]] = m[2][1:-1] if m[2].startswith('"') else int(m[2])
     if sorted(out) != sorted(REF_KEYS):
-        raise ValueError("rt/gen/rcpref.h does not define exactly FNVL_RCP_REF_{VENDOR,FAMILY,MODEL,STEPPING}")
+        raise ValueError("GEN/rcpref.h does not define exactly FNVL_RCP_REF_{VENDOR,FAMILY,MODEL,STEPPING}")
     return out
 
 
-def check_cert(rt):
-    """check 1 -> [finding strings]"""
+def check_cert(rt, gen):
+    """check 1 -> [finding strings]; RT the directory of rcptab.c and its certificate, GEN the published generated directory (genout.gen_dir)"""
     try:
-        ref = read_ref(rt)
+        ref = read_ref(gen)
     except (OSError, ValueError) as e:
         return ["reference identity unreadable: %s" % e]
     path = os.path.join(rt, "rcptab.cert.json")
@@ -172,8 +176,8 @@ def check_cert(rt):
             bad.append("cpu identity %s is not the reference %s" % (json.dumps(cpu, sort_keys=True), json.dumps(want, sort_keys=True)))
         if cert["mismatches"] != 0 or isinstance(cert["mismatches"], bool):
             bad.append("mismatches is %r, not 0" % (cert["mismatches"],))
-        for key, file in (("source_sha256", "rcptab.c"), ("header_sha256", GEN_HEADER)):
-            have = sha256_file(os.path.join(rt, file))
+        for key, base, file in (("source_sha256", rt, "rcptab.c"), ("header_sha256", gen, GEN_HEADER)):
+            have = sha256_file(os.path.join(base, file))
             if cert[key] != have:
                 bad.append("%s %s differs from sha256 of rt/%s (%s)" % (key, cert[key], file, have))
         for key in ("rcp_stream_sha256", "rsqrt_stream_sha256"):
@@ -220,41 +224,14 @@ def owner(funcs, off, secname):
     return "%s+0x%x" % (secname, off)
 
 
-def scan_x86(elf, res):
-    """The host-target profile (RECIPE.md TARGETS elf_x86_64): the object's own e_machine is its root's profile. x86-64 has no mapping symbols: every byte of an
-    executable section is code. The float->int conversions (cvtt*) ARE the x86 semantics, so none is a finding; the estimate instructions RCPSS / RSQRTSS and the
-    packed ones return the executing CPU's table, which is what the rcp item judges (the same class as FRECPE)."""
-    res["arch"] = "x86_64"
-    md = Cs(CS_ARCH_X86, CS_MODE_64)
-    for idx, sec in enumerate(elf.iter_sections()):
-        if not sec["sh_flags"] & SHF_EXECINSTR or sec["sh_type"] != "SHT_PROGBITS":
-            continue
-        data = sec.data()
-        funcs = functions(elf, idx)
-        pos = 0
-        while pos < len(data):
-            seen_end = pos
-            for ins in md.disasm(data[pos:], pos):
-                seen_end = ins.address + ins.size
-                if ins.id in X86_RECIP:
-                    res["recip"].append((owner(funcs, ins.address, sec.name), X86_RECIP[ins.id]))
-            if seen_end < len(data):
-                res["undecodable"].append("%s@0x%x" % (owner(funcs, seen_end, sec.name), seen_end))
-                seen_end += 1
-            pos = seen_end
-    return res
-
-
 def scan_object(path):
     """-> {"recip": [(where, mnemonic)], "fcvt": [(where, mnemonic)], "undecodable": [where]} over all executable sections of the object"""
-    res = {"recip": [], "fcvt": [], "undecodable": [], "arch": "aarch64"}
+    md = Cs(CS_ARCH_ARM64, CS_MODE_ARM)
+    res = {"recip": [], "fcvt": [], "undecodable": []}
     with open(path, "rb") as fh:
         elf = ELFFile(fh)
-        if elf["e_type"] != "ET_REL" or elf.little_endian is not True or elf["e_machine"] not in ("EM_AARCH64", "EM_X86_64"):
-            raise ValueError("%s is not a little-endian AArch64 or x86-64 relocatable object" % path)
-        if elf["e_machine"] == "EM_X86_64":
-            return scan_x86(elf, res)
-        md = Cs(CS_ARCH_ARM64, CS_MODE_ARM)
+        if elf["e_machine"] != "EM_AARCH64" or elf["e_type"] != "ET_REL" or elf.little_endian is not True:
+            raise ValueError("%s is not a little-endian AArch64 relocatable object" % path)
         for idx, sec in enumerate(elf.iter_sections()):
             if not sec["sh_flags"] & SHF_EXECINSTR or sec["sh_type"] != "SHT_PROGBITS":
                 continue
@@ -385,10 +362,10 @@ def judge_object_coded(oid, path, asm=False, unit=None, f2i_path=None):
     und = [("undecodable", "undecodable bytes at %s" % w) for w in scan["undecodable"]]
     rcp += und
     f2i += und
-    d, why = ({"format": F2I_FORMAT, "findings": [], "ranged": [], "sites": 0, "rewritten": 0, "helper": 0, "helpers": []}, None) if asm or scan["arch"] == "x86_64" else read_f2i(f2i_path)
+    d, why = ({"format": F2I_FORMAT, "findings": [], "ranged": [], "sites": 0, "rewritten": 0, "helper": 0, "helpers": []}, None) if asm else read_f2i(f2i_path)
     if d is None:
         f2i.append(("f2i-report-missing", why))
-    elif not asm and scan["arch"] != "x86_64" and d["unit"] != recipe.sandbox_src(unit):
+    elif not asm and d["unit"] != recipe.sandbox_src(unit):
         f2i.append(("f2i-report-unit", "result file names the unit %r, not %r" % (d["unit"], recipe.sandbox_src(unit))))
     else:
         f2i += [("f2i-" + f["kind"], "%s:%s in %s: %s outside a conversion helper, not rewritten" % (f["file"], f["line"], f["function"], f["kind"]))
@@ -421,11 +398,9 @@ def ftoi_why(doc):
 TABLE_UNIT = "rcptab.c"
 
 
-def table_item(objs, image_dir):
-    """-> None (no item) or [findings] of the item `<image>:rcpcert`. IMAGE_DIR: the directory of the root that is linked into one image, or None when
-    the root links nothing. The table object is the object of the unit rcptab.c of the image; the symbols it defines come from its symbol table. The image
-    needs the item iff another object of the image references one of those symbols (the link resolves the reference to the table). The certificate is
-    judged on the directory that holds the unit rcptab.c (rcpref.h, rcptab.c, rcptab.cert.json there)."""
+def table_defined(objs, image_dir):
+    """-> None (no item `<image>:rcpcert`) or (the symbols the objects of the unit rcptab.c define, those units): the item exists iff the root links one image and another object of the image
+    references one of the defined symbols (the link resolves the reference to the table)."""
     if image_dir is None:
         return None
     tabs = [(u, p) for u, p in objs if os.path.basename(u) == TABLE_UNIT]
@@ -435,9 +410,20 @@ def table_item(objs, image_dir):
     for _, p in tabs:
         defined |= symbols_of(p)[0]
     used = sorted({n for u, p in objs if os.path.basename(u) != TABLE_UNIT for n in symbols_of(p)[1] & defined})
-    if not used:
+    return (defined, tabs) if used else None
+
+
+def table_item(objs, image_dir, cache=None):
+    """-> None (no item) or [findings] of the item `<image>:rcpcert` (existence: table_defined). The certificate is
+    judged on the directory that holds the unit rcptab.c (rcptab.c, rcptab.cert.json there; rcpref.h from the published GEN)."""
+    td = table_defined(objs, image_dir)
+    if td is None:
         return None
-    return check_cert(os.path.join(image_dir, os.path.dirname(tabs[0][0])))
+    try:
+        gen = genout.gen_dir(cache)
+    except RuntimeError as e:
+        return ["reference identity unreadable: %s" % e]
+    return check_cert(os.path.join(image_dir, os.path.dirname(td[1][0][0])), gen)
 
 
 def object_result(oid, path, asm, unit, f2i_path, cache):
@@ -454,12 +440,46 @@ def object_result(oid, path, asm, unit, f2i_path, cache):
     return {k: [tuple(x) for x in items] for k, items in v.items()}
 
 
-def judge_objects_coded(root, objs, image_dir, forms_ok, docs=None, f2i=None, cache=None):
-    """-> {item id: [(code, text)]} of one root: OBJS [(unit, path)], IMAGE_DIR (see table_item), FORMS_OK (reason string or None: the dependency on the
-    gate forms), DOCS ({unit: CC document} of a native root; None: lifted root), F2I ({unit: the `f2i` of the row}, read_f2i_paths; a unit without an entry
+def helper_items(root, tab, why, names, record_ok, cert_defined):
+    """-> {item id: [(code, text)]} of check 0 for one root. TAB: the call table (helpercalls.table) or None with WHY (reason string); NAMES: the helper names of the objects' f2i files
+    (empty: the root holds no f2i helper and has no item of check 0); RECORD_OK: ASM-329 is a REMOVE record of L3b; CERT_DEFINED: the symbols that the rcpcert table unit defines when
+    the item `<root>:rcpcert` exists (empty otherwise)."""
+    if not names:
+        return {}
+    if tab is None:
+        return {root + ":helper-table": [("helper-table-inputs", why)]}
+    return {"helper:%s/%s" % (root, h): [] if h in cert_defined or record_ok else
+            [("helper-uncovered", "helper %s is neither defined in the rcpcert table unit nor covered by %s (not a REMOVE record of L3b in verify/ASSUMPTIONS.json)" % (h, RECORD))]
+            for h in sorted(set(tab) | set(names))}
+
+
+def covered_scope(tab, names, cert_defined):
+    """-> (the helpers ASM-329 covers, the helpers rcpcert covers), sorted"""
+    u = set(tab or {}) | set(names)
+    return sorted(u - cert_defined), sorted(u & cert_defined)
+
+
+def cert_symbols(objs, image_dir, cache):
+    """the symbols defined by the object of the rcpcert table unit, iff the root has the item `<root>:rcpcert` (table_item), else the empty set"""
+    td = table_defined(objs, image_dir)
+    return set() if td is None else td[0]
+
+
+def record_ok(repo):
+    """ASM-329 is a REMOVE record of owner L3b in the registry of this tree"""
+    try:
+        with open(os.path.join(repo, "ports", "fnv-nx", "verify", "ASSUMPTIONS.json")) as fh:
+            ents = json.load(fh)["entries"]
+    except (OSError, ValueError, KeyError):
+        return False
+    return any(e.get("id") == RECORD and e.get("status") == "REMOVE" and e.get("owner") == "L3b" for e in ents)
+
+
+def judge_objects_coded(root, objs, image_dir, helpers, docs=None, f2i=None, cache=None):
+    """-> {item id: [(code, text)]} of one root: OBJS [(unit, path)], IMAGE_DIR (see table_item), HELPERS ({item id: [(code, text)]} of check 0, helper_items), DOCS ({unit: CC document} of a native root; None: lifted root), F2I ({unit: the `f2i` of the row}, read_f2i_paths; a unit without an entry
     has none)."""
-    items = {root + ":forms": [("forms-not-green", forms_ok)] if forms_ok else []}
-    cert = table_item(objs, image_dir)
+    items = dict(helpers)
+    cert = table_item(objs, image_dir, cache)
     if cert is not None:
         items[root + ":rcpcert"] = [("rcpcert", t) for t in cert]
     for unit, path in objs:
@@ -470,31 +490,27 @@ def judge_objects_coded(root, objs, image_dir, forms_ok, docs=None, f2i=None, ca
     return items
 
 
-def judge_objects(root, objs, image_dir, forms_ok, docs=None, f2i=None):
+def judge_objects(root, objs, image_dir, helpers, docs=None, f2i=None):
     """-> {item id: [findings]}, see judge_objects_coded"""
-    return {k: [t for _, t in v] for k, v in judge_objects_coded(root, objs, image_dir, forms_ok, docs, f2i).items()}
+    return {k: [t for _, t in v] for k, v in judge_objects_coded(root, objs, image_dir, helpers, docs, f2i).items()}
 
 
 def fixture_findings(root, items):
     """-> [{"id", "code"}] (RECIPE.md "Fixtures"): one per distinct code of each item: `rcp:<root>/<unit>` and `f2i:<root>/<unit>` give id `<root>/<unit>`;
-    `<root>:forms` and `<root>:rcpcert` give id `<root>/forms` and `<root>/rcpcert` (a finding id is under its root: gate_fixtures.py)"""
+    `helper:<root>/<callee>` gives id `<root>/<callee>`; `<root>:helper-table` and `<root>:rcpcert` give id `<root>/helper-table` ... (a finding id is under its root: gate_fixtures.py)"""
     out = set()
     for k, v in items.items():
-        i = k.split(":", 1)[1] if k.split(":", 1)[0] in ("rcp", "f2i") else root + "/" + k.split(":", 1)[1]
+        i = k.split(":", 1)[1] if k.split(":", 1)[0] in ("rcp", "f2i", "helper") else root + "/" + k.split(":", 1)[1]
         out |= {(i, c) for c, _ in v}
     return [{"id": i, "code": c} for i, c in sorted(out)]
 
 
-def forms_reason(repo, cache):
-    """None iff the gate forms is green on its declared inputs, else `forms: not green: <its reason>`"""
-    u, c, ids, detail = formgate.judge(repo, cache)
-    return None if u == c else "forms: not green: %s" % detail[:300]
-
-
+RECORD = "ASM-329"       # the REMOVE record of the lift/rt helper bodies (verify/ASSUMPTIONS.json)
+WIDE = {}                # root -> the helpers of this run that ASM-329 covers (the scope of RECORD)
 FINDINGS = []   # every finding of the run as {id, code}, written to fpexact.json (RECIPE.md "Fixtures")
 
 
-def judge_root(root, repo, cache, forms):
+def judge_root(root, repo, cache, table):
     """One admitted product ROOT -> (universe, certified, ids, detail); an input problem is one red item, never a skip"""
     try:
         rec = recipe.load_recipe(repo, recipe.load_admit(repo), root)
@@ -512,7 +528,12 @@ def judge_root(root, repo, cache, forms):
         image = os.path.join(repo, root) if res.get("elf") else None
         native = recipe.load_admit(repo).get(root, {}).get("cxx_origin") == "native"
         docs = gate_datamodel.cc_docs(os.path.join(cache, "store"), res) if native else None
-        coded = judge_objects_coded(root, read_inputs(res), image, forms(), docs, read_f2i_paths(res), cache)
+        paths = read_f2i_paths(res)
+        names = sorted({h for p in paths.values() if p for h in ((read_f2i(p)[0] or {}).get("helpers") or [])})
+        tab, why = table() if names else (None, None)
+        cdef = cert_symbols(read_inputs(res), image, cache) if names else set()
+        WIDE[root] = covered_scope(tab, names, cdef)[0]
+        coded = judge_objects_coded(root, read_inputs(res), image, helper_items(root, tab, why, names, record_ok(repo), cdef), docs, paths, cache)
         FINDINGS.extend(fixture_findings(root, coded))
         items = {k: [t for _, t in v] for k, v in coded.items()}
     except (OSError, ValueError, ELFError) as e:
@@ -539,12 +560,15 @@ def main(argv):
     os.makedirs(cache, exist_ok=True)
     memo = []
 
-    def forms():
+    def table():      # (call table, None) or (None, reason): derived once per run from the Forms of the lifted pack
         if not memo:
-            memo.append(forms_reason(".", os.path.join(cache, "forms")))
+            try:
+                memo.append((helpercalls.table(helpercalls.pack_forms(os.path.join(cache, "forms"))), None))
+            except (formgate.Red, OSError, ValueError) as e:
+                memo.append((None, "the Forms of the pack cannot be read: %s" % str(e)[:300]))
         return memo[0]
-    u, c, ids, detail = gate_build.quantify(".", lambda root: judge_root(root, ".", cache, forms))
-    gatefile.write(NAME, u, c, ids, detail if u != c else ("rcp table certified, no rcp/rsqrt estimate instruction and no uncertified float->int conversion in %d items" % u if u else detail))
+    u, c, ids, detail = gate_build.quantify(".", lambda root: judge_root(root, ".", cache, table))
+    gatefile.write(NAME, u, c, ids, detail if u != c else ("rcp table certified, no rcp/rsqrt estimate instruction and no uncertified float->int conversion in %d items" % u + ("; helpers covered by %s (tested, not proven): %s" % (RECORD, "; ".join("%s: %s" % kv for kv in sorted(WIDE.items()) if kv[1])[:600]) if any(WIDE.values()) else "") if u else detail))
     st = "green" if u == c else "red"
     if os.environ.get("GATE_OUT"):     # also in normal mode: a whole-root fixture is judged in normal mode
         path = os.path.join(os.environ["GATE_OUT"], NAME + ".json")
