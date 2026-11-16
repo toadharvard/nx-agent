@@ -1409,7 +1409,7 @@ def run_errors(rec, root, files, roots, mine, seen, repo):
         else:
             for p in ins:
                 if isinstance(p, str):
-                    if not (rel_ok(p) and any(f == p or under(f, p) for f in files) and any(under(p, r) for r in roots)):
+                    if not (rel_ok(p) and any(f == p or under(f, p) for f in files) and tree_of(roots, p)):
                         err.append("run[%d].inputs: %s is not a tracked file or directory of an admitted root" % (i, p))
                 elif isinstance(p, dict) and set(p) == {"external", "path"}:
                     if p["external"] not in [e.get("name") for e in rec.get("external", []) if isinstance(e, dict)]:
