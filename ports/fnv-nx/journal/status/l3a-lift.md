@@ -1900,3 +1900,11 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - Density measurement re-planned: the old w12 heads are retired. On them the liftsrc build loops through loader → bridgetable → exports → imptest/lifted (about 120 repeats, 0 built); L1 has the recipe cycle guard.
   - New plan (w13): four measurement branches claude/fnv-l3a-lift-dens-{b,r1,r12,r123p} on the relift head, differing only by reverts of rules 1, 2, 3 and the polls. Never merged.
   - Then farm 3 measures bytes per head and the CPU time.
+- base3 → c807608b0 (w8). It carries:
+  - L1's resolve-once chain 82a245d49, 24ec7e128, 4b4e25ae1, cd5d432fa;
+  - FNVNX_FPCR in lift/rt (12 objects, green);
+  - fnvnx_win32_ext.h restored from a mixed root.
+  - Recipe check: 64 valid, 1 red. The red is render/total/d3d9total: include_of is not counted as a declaration after imports were deleted. Owner L1, sent.
+- The liftsrc loop is gone on w28's relift: 642 stage starts, 6m42s.
+- Blocker for every liftsrc and facts build: the platform root has 10 red cc stages (crt/iob.c __pioinfo/__badioinfo: export records before their declarations). It is pre-merge too (607880467). Owner L5, sent.
+- Density heads (w13): dens-b afff94d57, dens-r1 c3d5a6ada, dens-r12 a4ff69c1a, dens-r123p e6617eaaa. They wait for the platform fix.
