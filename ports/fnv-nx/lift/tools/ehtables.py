@@ -175,7 +175,7 @@ class EH(Flow):
             for h_ in sorted(Hs): s.emit(h_, 'seh-frame', a)
             cls, arg = s.field_class(sload(st, o + 8)); e = st.regs.get('ebp')
             disp = (o + 12 - e[1]) if isinstance(e, tuple) and e[0] == 'sp' else None
-            r = s.regsites[a] = {'site': a, 'handlers': sorted(Hs), 'kind': cls, 'disp': disp}
+            r = s.regsites[a] = {'site': a, 'handlers': sorted(Hs), 'kind': cls, 'disp': disp, 'push': sorted(st.org.get(o + 4) or ())}
             if cls == 'red': s.seh_red.append((a, 'record field: ' + arg)); continue
             if cls == 'const':
                 for S in sorted(arg):
@@ -638,7 +638,7 @@ class EH(Flow):
             t = tinfo[a]; J['throwinfo'].append({'addr': h(a), 'attrs': t['attrs'], 'unwind': h(t['unwind']) if t['unwind'] else 0,
                 'types': [{'type': h(ty), 'size': sz, 'copy': h(cp) if cp else 0} for _, ty, sz, cp, _ in t['types']]})
         J['conts'] = {h(k): h(v) for k, v in sorted(s.conts.items())}
-        J['registrations'] = [{'site': h(a), 'handlers': [h(x) for x in r['handlers']], 'kind': r['kind'], 'frame_disp': r['disp']} for a, r in sorted(s.regsites.items())]
+        J['registrations'] = [{'site': h(a), 'handlers': [h(x) for x in r['handlers']], 'kind': r['kind'], 'frame_disp': r['disp'], 'push': [h(x) for x in r['push']]} for a, r in sorted(s.regsites.items())]
         J['helpers'] = [{'addr': h(R), 'arg': d['k'], 'handlers': [h(x) for x in sorted(d['handlers'])], 'frame_disp': d['disp'], 'err': d.get('err')} for R, d in sorted(s.hlp.items())]
         J['jtab_red'] = [{'site': h(a), 'why': w} for a, w in sorted(getattr(X, 'jtab_red', {}).items())]; J['jtab_sites'] = len(getattr(X, 'jtab', ()))
         J['jtab_tables'] = [{'site': h(a), 'base': h(t.base), 'lo': t.lo, 'hi': t.hi, 'words': [h(w) for w in t.addrs], 'targets': [h(w) for w in t]} for a, t in sorted(getattr(X, 'jtab_ok', {}).items())]

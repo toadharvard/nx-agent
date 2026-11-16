@@ -81,11 +81,11 @@ def vjoin(a, b):
 
 
 class St:
-    __slots__ = ('regs', 'stack', 'sp', 'root', 'exp', 'esc')
+    __slots__ = ('regs', 'stack', 'sp', 'root', 'exp', 'esc', 'org')
 
-    def __init__(s, regs, stack, sp, root, exp, esc=frozenset()): s.regs = regs; s.stack = stack; s.sp = sp; s.root = root; s.exp = exp; s.esc = esc
-    def cp(s): return St(dict(s.regs), dict(s.stack), s.sp, s.root, s.exp, s.esc)
-    def __eq__(s, o): return s.sp == o.sp and s.root == o.root and s.exp == o.exp and s.esc == o.esc and s.regs == o.regs and s.stack == o.stack
+    def __init__(s, regs, stack, sp, root, exp, esc=frozenset(), org=None): s.regs = regs; s.stack = stack; s.sp = sp; s.root = root; s.exp = exp; s.esc = esc; s.org = {} if org is None else org
+    def cp(s): return St(dict(s.regs), dict(s.stack), s.sp, s.root, s.exp, s.esc, dict(s.org))
+    def __eq__(s, o): return s.sp == o.sp and s.root == o.root and s.exp == o.exp and s.esc == o.esc and s.regs == o.regs and s.stack == o.stack and s.org == o.org
 
 
 def sload(st, o):
@@ -94,12 +94,18 @@ def sload(st, o):
     return None
 
 
-def swrite(st, o, size, v):
-    if size == 4 and o % 4 == 0: st.stack[o] = v; return
-    for w in range(o & ~3, (o + size + 3) & ~3, 4): st.stack[w] = None
+def swrite(st, o, size, v, site=None):
+    """site: the instruction that stores v; st.org[o] = the stores that may have written the word at o (the origin of the value: a registration's handler push). A slot without an
+    entry has no known origin. Origins do not change any value: they are carried beside it."""
+    if size == 4 and o % 4 == 0:
+        st.stack[o] = v
+        if site is None: st.org.pop(o, None)
+        else: st.org[o] = frozenset((site,))
+        return
+    for w in range(o & ~3, (o + size + 3) & ~3, 4): st.stack[w] = None; st.org.pop(w, None)
 
 
-def killstack(st): st.stack = {}; st.root = None
+def killstack(st): st.stack = {}; st.root = None; st.org = {}
 
 
 def joinst(p, q):
@@ -107,9 +113,12 @@ def joinst(p, q):
     for k in set(p.regs) | set(q.regs):
         v = vjoin(p.regs.get(k), q.regs.get(k))
         if v is not None: regs[k] = v
-    stack = {}
-    for k in set(p.stack) | set(q.stack): stack[k] = vjoin(sload(p, k), sload(q, k))
-    return St(regs, stack, p.sp if p.sp == q.sp else None, p.root if p.root == q.root else None, p.exp or q.exp, p.esc | q.esc)
+    stack = {}; org = {}
+    for k in set(p.stack) | set(q.stack):
+        stack[k] = vjoin(sload(p, k), sload(q, k))
+        a, b = p.org.get(k), q.org.get(k)
+        if a is not None and b is not None: org[k] = a | b
+    return St(regs, stack, p.sp if p.sp == q.sp else None, p.root if p.root == q.root else None, p.exp or q.exp, p.esc | q.esc, org)
 
 
 UNKNOWN = lambda: St({}, {}, None, None, True, frozenset())
@@ -198,7 +207,7 @@ class Flow:
             if a is None:
                 if m.base and ins.reg_name(m.base) in ('esp', 'ebp'): killstack(st)
                 return
-            if a[0] == 'sp': swrite(st, a[1], max(op.size, 1), v if op.size == 4 else None)
+            if a[0] == 'sp': swrite(st, a[1], max(op.size, 1), v if op.size == 4 else None, ins.address)
 
     # ---- one instruction
     def step(s, ins, st):
@@ -209,7 +218,7 @@ class Flow:
             if isinstance(v, tuple) and v[0] == 'sp':
                 st.esc = st.esc | {v[1]}
                 if v[1] >= 4: st.exp = True
-            st.sp -= 4; swrite(st, st.sp, 4, v); return
+            st.sp -= 4; swrite(st, st.sp, 4, v, ins.address); return
         if mn == 'pop' and n == 1:
             if st.sp is None: s.wr(ins, ops[0], st, ('ld',) if ops[0].size == 4 else None); return
             v = sload(st, st.sp); v = ('ld',) if v is None else v
@@ -221,14 +230,14 @@ class Flow:
             else: st.sp = None; st.regs.pop('ebp', None)
             return
         if mn in ('pushfd', 'pushf'):
-            if st.sp is not None: st.sp -= 4; st.stack[st.sp] = None
+            if st.sp is not None: st.sp -= 4; st.stack[st.sp] = None; st.org.pop(st.sp, None)
             return
         if mn in ('popfd', 'popf'):
             if st.sp is not None: st.sp += 4
             return
         if mn in ('pushal', 'pushad'):
             if st.sp is not None:
-                for k in range(8): st.sp -= 4; st.stack[st.sp] = None
+                for k in range(8): st.sp -= 4; st.stack[st.sp] = None; st.org.pop(st.sp, None)
             return
         if mn in ('popal', 'popad'):
             if st.sp is not None: st.sp += 32
@@ -278,7 +287,7 @@ class Flow:
             elif not (eff and r in eff[0]): st.regs.pop(r, None)
         if st.exp: killstack(st)
         else: st.stack = {k: v for k, v in st.stack.items() if k >= 4}
-        st.stack.update(keep)
+        st.stack.update(keep); st.org = {k: v for k, v in st.org.items() if k in st.stack}
         st.sp = sp0 + eff[1] if sp0 is not None and eff and eff[1] is not None else None
 
     # ---- forward solver over a set of decoded instructions
@@ -320,7 +329,7 @@ class Flow:
         ext = s.extent(C)
         for x in ext:
             if X.insns[x][1] == 'call': return None
-        tok = ('ret', site); init = st.cp(); init.sp = st.sp - 4; init.stack[init.sp] = tok
+        tok = ('ret', site); init = st.cp(); init.sp = st.sp - 4; init.stack[init.sp] = tok; init.org.pop(init.sp, None)
         IN = s.solve(ext, {C: init}); posts = []
         for x in sorted(ext):
             sz, mn, ft, fall, tg = X.insns[x]
