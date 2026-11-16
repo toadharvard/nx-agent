@@ -9,8 +9,7 @@
 
 /* ---- modules. ONE table, ONE rule: a module is (a) the exe, whose HMODULE is its original image base where the
  * loader (S3) maps the data image, (b) a system DLL - one per distinct DLL name of the export table
- * (fnvnx_win32_system_module), all "loaded" and pinned - or (c) a translated game module registered by the loader
- * with fnvnx_register_module, or (d) a translated game module / the exe, whose image the loader reports with
+ * (fnvnx_win32_system_module: fnvnx_export_modules[], the generated table), all "loaded" and pinned - or (d) a translated game module / the exe, whose image the loader reports with
  * fnvnx_win32_register_image: its HMODULE is its base address and its exports are read from the PE export directory
  * in memory. A translated module that is not loaded yet is loaded by the loader (fnvnx_bnd_module_load). Whatever is
  * not in the table and not loadable is not loaded: ERROR_MOD_NOT_FOUND.
@@ -23,7 +22,6 @@
 
 struct module {
     char file[64];                 /* "kernel32.dll", "atimgpud.dll" */
-    fnvnx_module_resolver resolve; /* registered resolver, or NULL */
     int refs;                      /* registered modules: the loader's own reference + one per LoadLibrary */
     int system;                    /* pinned */
     int image;                     /* a registered image: HMODULE = base, exports from its PE export directory */
@@ -96,42 +94,6 @@ static struct module *find_locked(const char *file)
         if (!w32_stricmp(g_modules[i].file, file))
             return &g_modules[i];
     return NULL;
-}
-
-extern "C" void fnvnx_register_module(const char *dll, fnvnx_module_resolver resolve)
-{
-    char f[64];
-    int hp;
-    if (!normalize(base_name(dll), f, sizeof f, &hp))
-        return;
-    os_lock(&g_mod_lock);
-    init_locked();
-    struct module *m = find_locked(f);   /* a system DLL: its exports gain the resolver; the same name again: replaced */
-    if (!m && g_nmodules < MAX_MODULES) {
-        m = &g_modules[g_nmodules++];
-        snprintf(m->file, sizeof m->file, "%s", f);
-        m->refs = 1;
-    }
-    if (m)
-        m->resolve = resolve;
-    os_unlock(&g_mod_lock);
-}
-
-/* Resolver of a module registered with fnvnx_register_module (S7 audio/input, ...), for export lookups. */
-extern "C" void *fnvnx_registered_module_export(const char *dll, const char *proc)
-{
-    fnvnx_module_resolver r = NULL;
-    char f[64];
-    int hp;
-    if (dll && !normalize(base_name(dll), f, sizeof f, &hp))
-        return NULL;
-    os_lock(&g_mod_lock);
-    init_locked();
-    for (int i = 0; i < g_nmodules && !r; i++)
-        if (g_modules[i].resolve && (!dll || !w32_stricmp(f, g_modules[i].file)))
-            r = g_modules[i].resolve;
-    os_unlock(&g_mod_lock);
-    return r ? (void *)r(proc) : NULL;
 }
 
 /* the loaded module a name denotes; the exe, a table entry (taken with `take` references) or NULL */
@@ -530,7 +492,7 @@ extern "C" void fnvnx_win32_register_image(const char *name, uint32_t base, uint
     } else {
         struct module *m = find_locked(f);   /* a system DLL's name, or the same module again: its image is replaced */
         for (int i = 0; i < g_nmodules && !m; i++)   /* a slot an unloaded module left */
-            if (!g_modules[i].file[0] && !g_modules[i].system && !g_modules[i].image && !g_modules[i].resolve) {
+            if (!g_modules[i].file[0] && !g_modules[i].system && !g_modules[i].image) {
                 m = &g_modules[i];
                 snprintf(m->file, sizeof m->file, "%s", f);
                 m->refs = 1;

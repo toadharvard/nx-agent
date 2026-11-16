@@ -219,28 +219,6 @@ extern "C" HMODULE GetModuleHandleW(LPCWSTR name)
     return GetModuleHandleA(a);
 }
 
-/* kernel32.dll and user32.dll as modules: the CRT's _mtinit fails without GetModuleHandleW(L"KERNEL32.DLL") (it
- * then asks it for FlsAlloc/EncodePointer, absent here: it falls back to TLS), and __crtMessageBoxA reaches
- * MessageBoxA through LoadLibraryA("USER32.DLL"). GetProcAddress serves the export table; the guard stops the
- * table's fallback to registered modules from asking this resolver again. */
-static __thread int g_sys_depth;
-static FARPROC sys_export(const char *dll, const char *proc)
-{
-    if (g_sys_depth)
-        return NULL;
-    g_sys_depth++;
-    void *p = fnvnx_win32_lookup_export(dll, proc);
-    g_sys_depth--;
-    return (FARPROC)p;
-}
-static FARPROC kernel32_export(const char *proc) { return sys_export("kernel32", proc); }
-static FARPROC user32_export(const char *proc) { return sys_export("user32", proc); }
-__attribute__((constructor(FNVNX_INIT_MODULES))) static void sys_modules_register(void)
-{
-    fnvnx_register_module("kernel32.dll", kernel32_export);
-    fnvnx_register_module("user32.dll", user32_export);
-}
-
 FNVNX_EXPORT("kernel32.dll", "TerminateProcess", TerminateProcess, "func");
 /* ---- process */
 extern "C" BOOL TerminateProcess(HANDLE h, UINT code)

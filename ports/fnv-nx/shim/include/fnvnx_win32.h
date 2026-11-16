@@ -296,7 +296,6 @@ BOOL FileTimeToLocalFileTime(const FILETIME *, LPFILETIME);
 LONG CompareFileTime(const FILETIME *, const FILETIME *);
 DWORD GetLastError(void);
 void SetLastError(DWORD);
-void RaiseException(DWORD, DWORD, DWORD, const ULONG_PTR *);
 
 typedef struct _SYSTEM_INFO {
     union { DWORD dwOemId; struct { WORD wProcessorArchitecture; WORD wReserved; }; };
@@ -607,7 +606,6 @@ BOOL HeapDestroy(HANDLE);
 HANDLE LocalAlloc(UINT, SIZE_T);
 BOOL SystemTimeToTzSpecificLocalTime(LPTIME_ZONE_INFORMATION, const SYSTEMTIME *, LPSYSTEMTIME);
 BOOL IsDebuggerPresent(void);
-void DebugBreak(void);
 void RtlUnwind(PVOID, PVOID, PVOID, PVOID);
 BOOL IsBadCodePtr(FARPROC);
 BOOL IsBadReadPtr(const void *, UINT_PTR);
