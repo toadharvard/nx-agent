@@ -105,7 +105,8 @@ def check(key):
     try: f = symform.symbuild(key).form
     except Exception as e: return 'not-covered', 'no Form (%s)' % type(e).__name__
     sr, sf, ss, se = spec(rep, op, w, size)
-    if f.faults: return 'FAILED(dsl)', 'faults'
+    from proof import sysspec_store      # the string destination ES:EDI: a store through ES whose selector names a code descriptor is #GP(0) (sysspec_store); a REP form stores only while ECX != 0 (the ECX = 0 case of the REP rule quoted at the top of this file)
+    if sysspec_store.faults_ok(f, ins, rep=bool(rep)): return 'FAILED(dsl)', 'faults'
     pr = {r[0]: dsl.to_smt(r[1]) for r in f.regs}; pf = {r[0]: dsl.to_smt(r[1]) for r in f.flags}
     s = z3.Solver()
     diff = []

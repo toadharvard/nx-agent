@@ -133,3 +133,16 @@ def emit_form(cx, ins):
         for l in L:
             cx.em(l)
         cx.em('}')
+
+
+def covers(ins):
+    """is this instruction emitted from its Form (emit_form does not SKIP it)? core.gs_guard asks: the Form carries the null-selector fault of forms.NULL_CHECKED and every code-segment store fault"""
+    return supported(ins)
+
+
+def carried_null():
+    """the state indexes (dsl.SEGS) of the segment registers whose null-selector access fault the Form carries"""
+    return frozenset(dsl.SEGS.index(n) for n in forms.NULL_CHECKED)
+
+
+emit_form.covers, emit_form.carried_null = covers, carried_null
