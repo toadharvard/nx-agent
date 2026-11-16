@@ -1518,3 +1518,7 @@ Paused: w3b, w4, farm; no other work.
 - bottleneck: w28 external_of input form; base3 retake; farm1 sm_link; the cand4 base.
 - 03:37Z w28 d0b52b39f carries only the render/shaders/total admit row; L6's other rows enter with L6's candidate. It also renames render/total and platform/com imports to the qualified form. w6 merges it into w6-root three-way and reviews the render/total hunks (import lines only).
 - 03:38Z L1 accepted w6-root 00d74f4d5 (13/13 valid, abspath 0, d3d9total 332/332). It accepted the `external_of` form exactly as specified and assigned it to w28.
+- 03:40Z w6-root e7103c5e6: three-way merge of w28 d0b52b39f (no conflicts; render hunks are import lines only).
+    - One defect came from the merge: w28's crash wrapper `run()` shadowed the gate's subprocess helper `run()`. Fixed by renaming the entry to evaluate(); w28 has been told to carry the rename.
+    - recipe check 13/13; abspath render 0 (6 findings, all in lift/); pure render 0 (whole set 88/96); d3d9total 332/332.
+- bottleneck: w28 external_of; base3 retake; farm1 sm_link; the cand4 base.
