@@ -14,9 +14,6 @@ import json
 import os
 import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(HERE)
-for p in ('tools', ''):
-    sys.path.insert(0, os.path.join(LIFT, p))
 S = {}          # the capture of the last explore() result, and the memo of lifted sets by (image bytes path, facts, emit)
 
 

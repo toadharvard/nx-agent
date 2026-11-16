@@ -20,7 +20,7 @@ cleared by a proof.
 The lifter (core.gs_guard) guards an access through the effective segment S iff S is not non-null in the image (its initial selector is null, or some write of S is possibly null).
 Context restores (SetThreadContext, exception continuation) load the selectors a context holds, which are the captured ones: the platform's rule, not this tool's."""
 import argparse, json, os, sys
-HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = sys.argv[sys.argv.index('--lift') + 1] if '--lift' in sys.argv else os.path.dirname(HERE)
+HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = sys.argv[sys.argv.index('--lift') + 1]      # the lift/ directory: a declared input, always an argument
 sys.path[:0] = [HERE, LIFT]
 from capstone import x86 as X
 from fnvlift.image import Image

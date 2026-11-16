@@ -11,7 +11,6 @@ There is no x86 oracle for msvcrt.dll: every expected value is derived by hand f
 Trace convention: a guest event EV(k) appends the hex digit k to the word TR; a case that ends in a return gives TR in eax. Output words O0.. hold values a case stores.
 usage: gen.py OUT_DIR LIFT_DIR --x86sys F --sdmrows F --cpumodel F --rcptab F --rcpcert F      (the lifter's declared inputs: lifted.buffer_arguments)"""
 import json, os, re, struct, sys, tempfile
-HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.join(HERE, '..', '..', '..')
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # the tool root (/tool)
 sys.path.insert(0, sys.argv[2])   # lift/, whose fnvlift package is a declared input
 import argparse, lifted
