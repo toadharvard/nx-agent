@@ -15,18 +15,24 @@ supplied = sys.argv[5:]   # -I directories the recipe supplies itself (include_u
 rows = [json.loads(l) for l in open(log)]
 if not rows:
     sys.exit("mkunits: empty compile list")
-KEEP_FIRST = lambda fl: [f for f in fl if not f.startswith("-DOPERATION_")]
-common = KEEP_FIRST(rows[0]["flags"])
-# the common flags are defines (written into every unit below), the two include dirs (the recipe's `include`: build, src) and the optimisation and debug flags
-# the recipe's own flags carry (-O2 -g); anything else would be lost, so it is an error
-ok = [f for f in common if f.startswith("-D") or f in ("-I.", "-g", "-O2") or (f.startswith("-I") and (os.path.realpath(os.path.join(rows[0]["cwd"], f[2:])) in (src, os.path.join(src, "src")) or f[2:] in supplied))]
-if ok != common:
-    sys.exit("mkunits: flags the unit files cannot carry: %s" % [f for f in common if f not in ok])
+for r in rows:   # the object's path in the build tree, whatever directory the sub-make compiled in
+    r["out"] = os.path.relpath(os.path.realpath(os.path.join(r["cwd"], r["out"])), build)
+# Per compile: the defines (-D) become text of the unit; the -I directories must each be one the unit view has (the build tree, the source tree, the compile's own directory, the
+# directory of its source: the headers of the last two are written beside the unit below, the first two are the recipe's `include`, or a directory the recipe supplies); -g and -O2 are
+# the recipe's own flags. Anything else would be lost, so it is an error.
+real = lambda r, d: os.path.realpath(os.path.join(r["cwd"], d))
+def check_flags(r):
+    srcdir = os.path.dirname(real(r, r["src"]))
+    for f in r["flags"]:
+        if f.startswith("-D") or f in ("-g", "-O2"):
+            continue
+        if f.startswith("-I") and (f[2:] in supplied or real(r, f[2:]) in (build, src, os.path.realpath(r["cwd"]), srcdir)):
+            continue
+        sys.exit("mkunits: %s: the flag %s cannot be carried by a unit" % (r["out"], f))
 units, seen = {}, {}
 for r in rows:
-    if KEEP_FIRST(r["flags"]) != common:
-        sys.exit("mkunits: %s has flags %s, not the common %s" % (r["out"], KEEP_FIRST(r["flags"]), common))
-    key = (r["out"], r["src"], tuple(f for f in r["flags"] if f.startswith("-DOPERATION_")))
+    check_flags(r)
+    key = (r["out"], r["src"], tuple(f for f in r["flags"] if f.startswith("-D")))
     if key in seen:
         continue
     seen[key] = 1
@@ -49,9 +55,9 @@ for o, r in sorted(units.items()):
 # unit's source directory are written beside the unit. Two source directories that map to one unit directory with different headers of one name are a stop: the unit could not tell them apart.
 sib = {}
 for o, r in sorted(units.items()):
-    sdir = os.path.dirname(os.path.realpath(os.path.join(r["cwd"], r["src"])))
     udir = os.path.join(out, "u", os.path.dirname(o))
-    for fn in sorted(os.listdir(sdir)):
+    for sdir in sorted({os.path.dirname(os.path.realpath(os.path.join(r["cwd"], r["src"]))), os.path.realpath(r["cwd"])}):
+      for fn in sorted(os.listdir(sdir)):
         if fn.endswith(".h"):
             data = open(os.path.join(sdir, fn), "rb").read()
             key = (udir, fn)
@@ -70,4 +76,4 @@ for tag, root in (("build", build), ("src", src)):
                     dst = os.path.join(out, "inc", tag, os.path.relpath(p, root))
                     os.makedirs(os.path.dirname(dst), exist_ok=True)
                     shutil.copyfile(p, dst)
-print("mkunits: %d units" % len(units))
+print("mkunits: %d units, %d with per-file defines (wrapper units)" % (len(units), sum(1 for r in units.values() if any(f.startswith("-D") and f not in ("-DHAVE_CONFIG_H", "-D__GMP_WITHIN_GMP") for f in r["flags"]))))
