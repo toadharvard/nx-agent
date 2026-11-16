@@ -10,11 +10,14 @@ Red iff a row of the universe is uncertified, or the root needs the bodysel verd
 naming the input; owner L1 for bodysel, L2 for the cl side), or the root's build is red."""
 import os
 import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+import os
+import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gate_l2native as L  # noqa: E402
 import gate_names  # noqa: E402
-import l2sections  # noqa: E402
+from contract import l2sections  # noqa: E402
 
 
 def judge_root(repo, cache, root):

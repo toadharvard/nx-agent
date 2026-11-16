@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """The loader's generated tables (loader/build.json): the eight symbols the loader links against come from generator stages over the pinned exe, never from a
 tracked file. Pure: reads the recipe and runs the producers' text functions on toy rows; no private input."""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import subprocess
@@ -9,10 +12,9 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 TREE = os.path.join(HERE, "..", "..")
 sys.path.insert(0, os.path.join(HERE, ".."))
-sys.path.insert(0, os.path.join(TREE, "contract"))
-import iat  # noqa: E402
-import mkidentity  # noqa: E402
-import modules  # noqa: E402
+from contract import iat  # noqa: E402
+from contract import mkidentity  # noqa: E402
+from contract import modules  # noqa: E402
 import recipe  # noqa: E402
 
 fails = 0

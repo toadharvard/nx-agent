@@ -4,6 +4,9 @@ l1-contract/elf/<id>), a scratch directory for HOME and a directory with a dummy
 are the tiny ELFs of test_bootmachine.build (MODE 6: a clean exit; MODE 3: a fault), with the code section renamed to
 .text.fnvl as the job's icount spec expects. No network, no game data, no package installs. Plain script: exit 0 on pass.
 Scratch: tempfile.mkdtemp, removed at exit."""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import atexit
 import hashlib
 import json
@@ -67,8 +70,7 @@ FONT_FILES = {"fonts/A.ttf": b"alpha", "fonts/Sub/B.ttf": b"bravo"}
 
 
 EXE = _exe()
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "contract"))
-import modules as cmod  # noqa: E402
+from contract import modules as cmod  # noqa: E402
 # modules.tsv of the contract: the exe row (the contract's own PE parse) and one DLL row
 MODULES = cmod.modules_text("falloutnv.exe", EXE, cmod.PE(EXE, "FalloutNV.exe"), [], {}) + "m.dll\t%s\t16\t10000000\t01410000\t00001000\t0\t00000010\t0\t\t1\n" % ("a" * 64)
 

@@ -10,6 +10,9 @@ Roots come only from verify/admit.json (class product). A root DECLARES its hive
 Universe, classes and certification: contract/hive.py. Writers are read from the objects of the build (recipe.symbols per object: undefined
 names). A dynamic site (root, key or value not statically resolved) is class `dynamic`: the gate is red and its detail says MEASUREMENT, as the reach
 gate treats a dynamic-name GetProcAddress site; there is no allow-list. Universe: gate_build.quantify (the admitted product roots; a root without registry.in.json is one red item, unless it is header-only (gate_build.unitless): 0 items, or outside the class `registry-reader`: its build's symbol table defines and references no registry API and no GetProcAddress / LoadLibrary* (hive_names): 0 items; a root that has one enters the class and is the one red item). No product root: universe 0, green. Bad input, a red build, an invalid recipe or an external that fails its hash is red. Exit 0 iff green."""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import shutil
@@ -19,12 +22,11 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.join(os.path.dirname(HERE), "contract"))
 import cas  # noqa: E402
 import gate_build  # noqa: E402
 import gate_imports  # noqa: E402
-import exportgen  # noqa: E402
-import hive  # noqa: E402
+from contract import exportgen  # noqa: E402
+from contract import hive  # noqa: E402
 import recipe  # noqa: E402
 
 IN_KEYS = {"format", "sites", "declared", "seed", "seed_unit"}

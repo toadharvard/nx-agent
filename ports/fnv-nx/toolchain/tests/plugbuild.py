@@ -9,6 +9,9 @@ plugins with fixed arguments, so a test of one plugin (or an A/B argument, or a 
 cxx_origin {"lifted_by": gen/lift.py, "pack": the compiler external}; the generator copies the fixture text.
 Recipe stages emit objects only; tests read the object back with the pinned binutils (`objdump`, `cstring`, `section_size`, elfobj).
 Tests run as `python3 -I FILE` from the checkout root, so a test inserts its own directory in sys.path to import this."""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import re
@@ -20,11 +23,10 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 REAL = os.path.normpath(os.path.join(HERE, '..', '..', '..', '..'))    # checkout root
 sys.path.insert(0, os.path.join(HERE, '..', '..', 'link'))
-sys.path.insert(0, os.path.join(HERE, '..', '..', 'verify'))
 import elfobj  # noqa: E402
-import recipe  # noqa: E402
-import sandbox  # noqa: E402
-import cas  # noqa: E402
+from verify import recipe  # noqa: E402
+from verify import sandbox  # noqa: E402
+from verify import cas  # noqa: E402
 import glob  # noqa: E402
 
 T = 'ports/fnv-nx/'

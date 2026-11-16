@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """selftests of crossing.py: the union, a missing source is red, a bridged import with no row is red, a dispatch `-` slot is excluded.  Run: python3 -I <this file>."""
 import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+import os
 import subprocess
 import sys
 import tempfile
@@ -8,8 +11,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import crossing  # noqa: E402
-sys.path.insert(0, os.path.join(HERE, "..", "contract"))
-import store  # noqa: E402
+from contract import store  # noqa: E402
 
 fails = []
 with tempfile.TemporaryDirectory() as td:
