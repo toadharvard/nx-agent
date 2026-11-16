@@ -2231,3 +2231,4 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - header root: an implicit INCLUDE output, through root_outputs, 5/5 tests pass. recipe.check gives 23 errors before and after, all render/* (L6).
 - Final header home: contract/include, a header root reached through uses. contract/exporthdr is withdrawn; L5 and w13 move to it.
 - RET/galaxywrp rule: the return class and argument slots come from the bound definer's own ctype/crossing record. No Wine spec, no SDK header. An import whose definer has no type record is red. Derived at stage B.
+- w13 9a5206d73: lift/rt uses the contract/include header root, and exporthdr and the contract product row are deleted. Recipe check is valid for lift/rt and lift/sdm. This goes into base3 through L3a.
