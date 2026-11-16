@@ -115,7 +115,7 @@ def new(**kw):
 
 check("a declared test adds no error", new(tests=[{"name": "t1", "units": ["t1.c"]}]) == [], new(tests=[{"name": "t1", "units": ["t1.c"]}]))
 check("declared test: product units exclude it", True
-      and recipe.units_of(dict(REC, tests=[{"name": "t1", "units": ["t1.c"]}]), T + "r", files) == ["a.c", "b.c", "t2.c"])
+      and recipe.units_of(dict(REC, tests=[{"name": "t1", "units": ["t1.c"]}]), T + "r", files, {}) == ["a.c", "b.c", "t2.c"])
 check("test unit that is no source of the root: error", any("not a source" in e for e in errs(tests=[{"name": "t", "units": ["zz.c"]}])))
 check("unit in two tests: error", any("two tests" in e for e in errs(tests=[{"name": "t", "units": ["t1.c"]}, {"name": "u", "units": ["t1.c"]}])))
 check("duplicate test name: error", any("twice" in e for e in errs(tests=[{"name": "t", "units": ["t1.c"]}, {"name": "t", "units": ["t2.c"]}])))

@@ -852,10 +852,25 @@ def run_input_sources(rec, root, files):
     return {f[len(root) + 1:] for f in files if under(f, root) and is_unit(f) and any(f == p or under(f, p) for p in ins)}
 
 
-def all_units_of(rec, root, files):
-    """Sorted root-relative paths of every source of the root: tracked source files + generated outputs with a source name, minus the sources that are declared
+def own_sources(root, files, roots, repo="."):
+    """{root-relative path}: the tracked files that are sources of ROOT and of no other stage. A file under a root admitted inside ROOT (nested admitted roots, e.g. verify/probes
+    in verify) belongs to the nearest admitted root, as tree_of resolves it; a plugin source and the files it includes (plugin_files) are inputs of the plugin stage of the
+    compiler build, never translation units of the root that holds them. One definition: the unit list, check() and the build read it."""
+    nested = [r for r in roots if r != root and under(r, root)]
+    plug = set()
+    for q in PLUGIN_SOURCES.values():
+        if q in files and os.path.isfile(os.path.join(repo, q)):
+            try:
+                plug |= {q} | set(plugin_inputs(q, files, roots, repo))
+            except ValueError:
+                pass   # reported by plugin_errors
+    return {f[len(root) + 1:] for f in files if under(f, root) and not any(under(f, r) for r in nested) and f not in plug}
+
+
+def all_units_of(rec, root, files, roots, repo="."):
+    """Sorted root-relative paths of every source of the root (own_sources): tracked source files + generated outputs with a source name, minus the sources that are declared
     inputs of a `run` step of the root (those are the step's inputs, never units)."""
-    mine = {f[len(root) + 1:] for f in files if under(f, root)} - run_input_sources(rec, root, files)
+    mine = own_sources(root, files, roots, repo) - run_input_sources(rec, root, files)
     return sorted(u for u in mine | set(generated_outputs(rec)) if is_unit(u))
 
 
@@ -870,10 +885,10 @@ def test_units_of(rec):
     return {u for _, us in tests_of(rec) for u in us}
 
 
-def units_of(rec, root, files):
+def units_of(rec, root, files, roots, repo="."):
     """Sorted root-relative PRODUCT unit paths: every source of the root that is not a unit of a declared test (RECIPE.md, tests)."""
     tu = test_units_of(rec)
-    return [u for u in all_units_of(rec, root, files) if u not in tu]
+    return [u for u in all_units_of(rec, root, files, roots, repo) if u not in tu]
 
 
 def pin_drivers():
@@ -1479,8 +1494,16 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
     if rec.get("units") != "all":
         err.append('units must be "all" (no tracked source file can be left out)')
     err += missing_recipes(roots, files)
-    mine = {f[len(root) + 1:] for f in files if under(f, root)}
+    mine = own_sources(root, files, roots, repo)
     gen = generated_outputs(rec)
+    if gonly:   # `compiler` and `plugins` of a root with no unit are used only by its run steps: a plugin is a step's {"plugin": NAME} input, the compiler builds the plugins
+        # (or is a step's {"external": NAME} input); an unused one is red, as gen:unused-import is
+        rins = [p for g in (rec.get("run") if isinstance(rec.get("run"), list) else []) if isinstance(g, dict) and isinstance(g.get("inputs"), list) for p in g["inputs"] if isinstance(p, dict)]
+        pl = [x.get("name") for x in (rec.get("plugins") if isinstance(rec.get("plugins"), list) else []) if isinstance(x, dict)]
+        err += ["gonly:unused-plugin:%s (a root with no unit declares a plugin only when a run step takes it as its {\"plugin\": NAME} input)" % n for n in pl if {"plugin": n} not in rins]
+        cp = rec.get("compiler")
+        if cp is not None and not (pl or any(set(p) == {"external"} and isinstance(cp, dict) and p["external"] in (cp.get("external"), cp.get("name")) for p in rins)):
+            err.append("gonly:unused-compiler (a root with no unit names a compiler only to build its plugins or as a run step's {\"external\": NAME} input)")
     if gonly:   # no compiler and no flags are written: the root compiles nothing; a source that is no run step's declared input is neither a unit nor an input: red
         err += ["generated-only root: %s is a translation unit (a root with units writes compiler, flags, include and units); a source file is a declared input of a `run` step or a unit" % u
                 for u in sorted((mine - run_input_sources(rec, root, files)) | set(gen)) if u.endswith(CC_EXT + CXX_EXT + ASM_EXT)]
@@ -1665,7 +1688,7 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
     sr = rec.get("sources")
     if sr is not None and not (isinstance(sr, str) and sr in generated_outputs(rec)):
         err.append("sources must name a path in generated[].outputs of this root (a file of <external>:<path> lines)")
-    allu = set(all_units_of(rec, root, files))
+    allu = set(all_units_of(rec, root, files, roots, repo))
     tl = rec.get("tests", [])
     seen_t, seen_u = set(), set()
     for i, t in enumerate(tl if isinstance(tl, list) else err.append("tests must be a list") or []):
@@ -1684,7 +1707,7 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
             seen_u.add(u)
     if seen_t and not rec.get("link"):
         err.append("tests need the root's link (a test is linked with the same script and flags)")
-    units = set(units_of(rec, root, files))
+    units = set(units_of(rec, root, files, roots, repo))
     ol = rec.get("os_layer", [])
     for u in ol if isinstance(ol, list) else err.append("os_layer must be a list") or []:
         if u not in units:
@@ -1774,7 +1797,7 @@ def plugin_errors(rec, root, files, roots, units, ext_names, variant="", repo=".
         for n in ("fnvnx_ftoi",):   # lifted C++ does its conversions in helpers: the plugin proves it (and only it is required)
             if n not in loaded:
                 err.append("lifted C++ root %s does not load plugin %s (mode lifted: every conversion outside an fnvnx_f2i function is an error)" % (root, n))
-        mine = {f[len(root) + 1:] for f in files if under(f, root)}
+        mine = own_sources(root, files, roots, repo)
         owner = next((r for r in roots if isinstance(tool, str) and tree_of({r: roots[r]}, tool)), None)
         if not (isinstance(tool, str) and tool in files and tool.endswith(".py") and owner and roots[owner]["class"] == "tool"):
             err.append("cxx_origin.lifted_by %r is not a tracked .py of an admitted tool root" % (tool,))
@@ -3597,7 +3620,7 @@ def build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True, shard=N
     errs = check(full, root, j.files, j.roots, load_pin(repo), repo)
     if errs:
         raise RecipeError(errs)
-    units = units_of(j.rec, root, j.files)
+    units = units_of(j.rec, root, j.files, j.roots, repo)
     res = {"format": OBJ_FORMAT, "root": spec, "objects": [], "tests": [], "elf": None, "link_roots": [], "constants": None, "contract_names": None, "defined": [], "undefined": [], "plugins": [],
            "link_archives": [], "stage_keys": [], "status": "green"}
     ws = tempfile.mkdtemp(prefix="recipe-")

@@ -70,6 +70,10 @@ the hash of the stage document + tool code. All paths are root-relative unless m
 - `external`: content-pinned inputs (see below).
 - `plugins`: GCC plugins of the C++ front end (see "Plugins"). `flags` may not hold any `-fplugin*` token.
 
+## Sources of a root (`own_sources`)
+
+The sources of a root are its tracked files minus (1) every file under a root admitted inside it (nearest-root ownership, as `tree_of` resolves a tool file: `verify/probes` inside `verify`, `toolchain/tests` inside `toolchain`) and (2) every plugin source of `PLUGIN_SOURCES` and the files it includes (`plugin_files`): those are inputs of the plugin stage, keyed by it, never translation units of the root that holds them. One function, `recipe.own_sources(root, files, roots, repo)`; the unit list, `check` and the build all read it.
+
 ## Plugins (`fnvnx_order`, `fnvnx_ftoi`, ...)
 **The plugin set belongs to the target profile, not to the language.** The guest profile requires the full set (`PLUGIN_SOURCES`, in load order), for C and C++ alike. The host
 profile (`"profile": "host"`) has the empty set, and a host root is required to load none: the plugins enforce guest-ABI semantics (msvcmodel, x86 TSO as `ldar`/`stlr`, MSVC
@@ -278,8 +282,11 @@ Readers of the record: gate_tlsmodel (the relocations of the linked ELF), contra
 - `outputs` are root-relative declared paths, stored in the store and copied into the root like generated outputs (they may be units, headers,
   constants ...). A nonzero exit, an undeclared output and a missing declared output are red, naming `run:<root>:<name>`.
 - A `run` stage is not a compile: toolflags does not judge it (its argv[0] is the artifact, never a compiler).
-- Generated-only roots (`recipe.generated_only`): a root with `generated` or `run` steps and none of `flags`, `include`, `units`, `link`, `profile`, `variants` has no unit. `compiler` and `plugins`
-  may be written in it (the compiler stage: a step's `{"plugin": NAME}` input is built against the root's compiler); a root with no `compiler` of its own gets the host profile's, never run.
+- Generated-only roots (`recipe.generated_only`): a root with `generated` or `run` steps and none of `flags`, `include`, `units`, `link`, `profile`, `variants` has no unit. It may write
+  `plugins` and `compiler` only for its run steps to use: a plugin is declared only when some run step takes it as its `{"plugin": NAME}` input (the built `.so` is then a stage input of that
+  step, so its content is in the step's key), and the `compiler` is named only to build those plugins (the plugin stage runs against it, so the compiler's content is in each plugin's key and
+  through it in the steps') or because a step takes it as an `{"external": NAME}` input. An unused plugin (`gonly:unused-plugin:<name>`) or compiler (`gonly:unused-compiler`) is red, as an unused
+  import declaration is. A root with no `compiler` of its own gets the host profile's, never run. Tests: `tests/test_runinsrc.py`.
 - A C/C++/asm file of the root that is a declared path input of one of its `run` steps (the file, or a directory holding it) is that step's input, not a unit: mounted at `/in/N`,
   its content in the step's key (`recipe.run_input_sources`; `all_units_of` leaves it out). Every other source of the root is a unit under the existing rules (`cxx_origin`),
   and in a generated-only root it is red: a source is a declared run input or a unit, nothing else. Tests: `tests/test_runinsrc.py` (the rule), `tests/test_run.py` family (builds).

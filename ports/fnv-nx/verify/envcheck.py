@@ -468,8 +468,7 @@ def snapshot(prev=None):
     files = [os.path.join(r, f) for t in trees for r, _, fs in os.walk(t) for f in fs]
     for p in files:
         add(p)
-    loads([os.path.realpath(e) for e in exes] + [p for p in files if os.path.isfile(p) and not os.path.islink(p)
-          and runtime.ident(p) == runtime.X86_64 and open(p, "rb").read(18)[16:18] in (b"\x02\x00", b"\x03\x00")])
+    loads([os.path.realpath(e) for e in exes] + [p for p in files if os.path.isfile(p) and not os.path.islink(p) and runtime.loadable(p)])
     src, comps = A64ACCESS
     cxx = subprocess.run(["llvm-config-18", "--cxxflags"], capture_output=True, text=True, check=True).stdout.split()
     deps = subprocess.run(["g++", "-std=c++17"] + cxx + ["-M", src], capture_output=True, text=True, check=True).stdout
