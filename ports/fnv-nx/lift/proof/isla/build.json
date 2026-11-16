@@ -24,7 +24,7 @@
  "run": [
   {
    "name": "isla",
-   "exec": "/usr/bin/python3",
+   "exec": "/usr/bin/python3.12",
    "args": [
     "-I",
     "/in/2",

@@ -24,7 +24,7 @@
  "run": [
   {
    "name": "model",
-   "exec": "/usr/bin/python3",
+   "exec": "/usr/bin/python3.12",
    "args": [
     "-I",
     "/in/2",
@@ -44,14 +44,11 @@
     "ports/fnv-nx/lift/proof/x86_fetch.sail",
     "ports/fnv-nx/lift/proof/x86_code_regs.sail"
    ],
-   "debs": [
-    "python3",
-    "python3-minimal",
-    "python3.12",
-    "python3.12-minimal",
-    "libpython3.12-stdlib",
-    "libpython3.12-minimal"
-   ],
+   "debs": {
+    "closure": [
+     "python3"
+    ]
+   },
    "dirs": [
     "model"
    ],
