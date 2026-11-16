@@ -656,20 +656,25 @@ FOREACH_TOKEN = re.compile(r"\{\{|\}\}|\{([A-Za-z][A-Za-z0-9_]*)\}")
 
 
 def foreach_rows(table, key, text):
-    """The rows of a foreach table (RECIPE.md "foreach"): TSV, a header line of column names, then one row per line, each with exactly the header's fields. KEY is a column
-    whose values are unique plain names (FOREACH_KEY). -> [{column: field}]; ValueError for any malformed, empty or duplicate row."""
+    """The rows of a foreach table (RECIPE.md "foreach"): TSV. The first line is the header iff it starts with `#`: its column names are the tab-split fields after that `#`.
+    Then one row per line, each with exactly the header's fields; no other line starts with `#` (a table has no comments). KEY is a column whose values are unique plain
+    names (FOREACH_KEY). -> [{column: field}]; ValueError for a table without a `#` header, any malformed, empty or duplicate row, or a `#` line after the header."""
     lines = text.split("\n")
     if lines and lines[-1] == "":
         lines.pop()
     if not lines:
-        raise ValueError("foreach %s: the table is empty (it needs a header line)" % table)
-    head = lines[0].split("\t")
+        raise ValueError("foreach %s: the table is empty (it needs a header line that starts with #)" % table)
+    if not lines[0].startswith("#"):
+        raise ValueError("foreach %s: the first line is not a header (a header starts with #, then the tab separated column names)" % table)
+    head = lines[0][1:].split("\t")
     if not all(FOREACH_NAME.fullmatch(c) for c in head) or len(set(head)) != len(head):
         raise ValueError("foreach %s: the header must be unique column names [A-Za-z][A-Za-z0-9_]*, tab separated" % table)
     if key not in head:
         raise ValueError("foreach %s: the key column %r is not in the header %s" % (table, key, head))
     rows, seen = [], set()
     for n, ln in enumerate(lines[1:], 2):
+        if ln.startswith("#"):
+            raise ValueError("foreach %s: line %d starts with # (only the first line is a header; a table has no comments)" % (table, n))
         f = ln.split("\t")
         if len(f) != len(head):
             raise ValueError("foreach %s: line %d has %d fields, the header has %d" % (table, n, len(f), len(head)))
@@ -779,7 +784,7 @@ def foreach_row_step(g, row, key):
 def foreach_dynamic(g, rec):
     """The marker step of a foreach whose table is produced at build time: `foreach: {table: {stage, path} | {external, path}, key, into: DIR}`. Its rows are not known
     until the table exists, so no row step is made here: the step stays ONE step that declares the directory DIR (`dirs: [DIR]`, no `outputs`); the row template (the step as
-    written) is kept under foreach.row, and Job.run_foreach runs one step per row of the table at build time, each writing under DIR. ValueError on a malformed form."""
+    written, its `outputs` files and `dirs` directories, each under DIR and naming the row) is kept under foreach.row, and Job.run_foreach runs one step per row of the table at build time, each writing under DIR. ValueError on a malformed form."""
     fe, name = g["foreach"], g.get("name")
     t = fe.get("table")
     if not (set(fe) == {"table", "key", "into"} and isinstance(fe["key"], str) and isinstance(fe["into"], str) and rel_ok(fe["into"])
@@ -787,11 +792,10 @@ def foreach_dynamic(g, rec):
         raise ValueError("run %r: a build-time foreach is {table: {stage, path} | {external, path}, key: column, into: directory}" % name)
     if "external" in t and t["external"] not in [e.get("name") for e in rec.get("external", []) if isinstance(e, dict)]:
         raise ValueError("run %r: foreach table external %r is not declared" % (name, t["external"]))
-    outs = g.get("outputs")
-    if not (isinstance(outs, list) and outs and all(isinstance(o, str) and under(o, fe["into"]) and ("{" + fe["key"] + "}") in o for o in outs)):
-        raise ValueError("run %r: the outputs of a build-time foreach step lie under `into` %s and name the row ({%s})" % (name, fe["into"], fe["key"]))
-    if g.get("dirs"):
-        raise ValueError("run %r: a build-time foreach step has `into`, not `dirs`" % name)
+    outs, dirs = g.get("outputs", []), g.get("dirs", [])
+    tmpl = (outs if isinstance(outs, list) else [None]) + (dirs if isinstance(dirs, list) else [None])
+    if not (tmpl and all(isinstance(o, str) and under(o, fe["into"]) and ("{" + fe["key"] + "}") in o for o in tmpl)):
+        raise ValueError("run %r: the outputs and dirs of a build-time foreach step lie under `into` %s and name the row ({%s})" % (name, fe["into"], fe["key"]))
     row = {k: v for k, v in g.items() if k != "foreach"}
     return dict({k: v for k, v in g.items() if k != "outputs"}, outputs=[], dirs=[fe["into"]], foreach=dict(fe, row=row))
 

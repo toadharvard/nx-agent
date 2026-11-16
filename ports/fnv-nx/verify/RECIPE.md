@@ -323,8 +323,9 @@ Tests: `tests/test_toolstep.py`, `tests/test_sandbox.py` case 13.
 
 ### `foreach` (one step per table row)
 
-A `run` step may carry `"foreach": {"table": PATH, "key": COLUMN}` in place of a hand-written list of steps. PATH is a tracked TSV file of the checkout: a header line of column
-names (`[A-Za-z][A-Za-z0-9_]*`, unique), then one row per line with exactly the header's fields. KEY is a column whose values are unique plain names (letters, digits, `_`, `.`, `-`).
+A `run` step may carry `"foreach": {"table": PATH, "key": COLUMN}` in place of a hand-written list of steps. PATH is a tracked TSV file of the checkout: a header line, then one row per line with exactly the header's fields.
+The first line of a table is its header iff it starts with `#`; the column names are the tab-split fields after that `#` (`[A-Za-z][A-Za-z0-9_]*`, unique). A table whose first line
+does not start with `#` has no header and is red, and so is any later line that starts with `#` (a table has no comments). KEY is a column whose values are unique plain names (letters, digits, `_`, `.`, `-`).
 `recipe.expand_foreach` (called by `read_recipe` and by `check`, so it is the one place) replaces the step by one step per row: the step as written, named `NAME.<key field>`, with
 `{COLUMN}` replaced by the row's field in its `args`, `outputs`, `dirs` and `env` values (`{{` and `}}` are literal braces). Every other reader sees plain static steps, so stage refs
 (`ROOT:run:NAME.<key>`), blocked outputs and the key are the ordinary ones.
@@ -342,9 +343,10 @@ names (`[A-Za-z][A-Za-z0-9_]*`, unique), then one row per line with exactly the 
   Two groups without `as`, a repeated name and an `@rows:NAME` with no such input are red.
 - Build-time table: `"foreach": {"table": {"stage": ROOT:run:NAME, "path": P} | {"external": NAME, "path": P}, "key": COLUMN, "into": DIR}`. The table is an earlier step's output of this
   root, another root's stage output, or a declared external, so its rows are known only when the build runs. The step stays one step to every other reader: it declares the directory DIR
-  (`dirs: [DIR]`) and no `outputs`; its `outputs` as written (each under DIR, each naming `{COLUMN}`) are the row template. At build time one step per row runs as an ordinary step (named
+  (`dirs: [DIR]`) and no `outputs`; its `outputs` (files) and `dirs` (directories) as written (each under DIR, each naming `{COLUMN}`, at least one of them) are the row template, and a
+  row's directory is keyed by its row like a row's file. At build time one step per row runs as an ordinary step (named
   `NAME.<key>`), each writing under DIR; a consumer reads DIR by content, so DIR's identity is the set of its rows' results, which are keyed by (row, tool, inputs) alone: an unchanged
-  row is a hit whatever the other rows are. An empty table, a bad row, an output outside DIR and one that two rows share are red. A `rows: all` fan-in needs a static table or range.
+  row is a hit whatever the other rows are. An empty table, a bad row, an output or dir outside DIR and one that two rows share are red. A `rows: all` fan-in needs a static table or range.
 Test: `tests/test_foreach.py`.
 
 ### Stage refs
