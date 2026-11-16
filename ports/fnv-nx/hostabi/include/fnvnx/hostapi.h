@@ -17,7 +17,6 @@
 #ifndef FNVNX_HOSTAPI_H
 #define FNVNX_HOSTAPI_H
 
-#include <stddef.h>
 #include <stdint.h>
 #include "fnvnx/sockwire.h"
 
@@ -538,9 +537,6 @@ typedef uint64_t (*fnvnx_hfn5)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t)
 
 /* Set by the guest runtime before main() runs. */
 extern const FnvnxHostApi *fnvnx_host;
-/* FNVNX_PROCESS_END(code): the one body of "the process ends now" - the host's `exit` slot, which does not return (no handler, no flush, no DLL detach).
- * os_terminate_process (platform/guest/os_guest.c) and the violation exits (platform/win32/platstat.cpp) expand it; no other code calls the slot. */
-#define FNVNX_PROCESS_END(code) do { FNVNX_HCALL1(exit, (code)); __builtin_unreachable(); } while (0)
 #define FNVNX_HCALL0(slot) FNVNX_HCALL0_ON(fnvnx_host, slot)
 #define FNVNX_HCALL1(slot, a) FNVNX_HCALL1_ON(fnvnx_host, slot, a)
 #define FNVNX_HCALL2(slot, a, b) FNVNX_HCALL2_ON(fnvnx_host, slot, a, b)

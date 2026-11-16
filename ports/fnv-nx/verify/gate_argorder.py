@@ -54,7 +54,8 @@ def main():
     cache = os.environ.get("GATE_CACHE")
     if not cache:
         import tempfile
-        cache = tmp = tempfile.mkdtemp(prefix="gate-argorder-")
+        tmp = tempfile.mkdtemp(prefix="gate-argorder-")
+        cache = os.path.join(tmp, "store")   # the pool is the store's sibling: both inside tmp, removed together
     roots = native_guest(repo)
     try:
         u = c = 0

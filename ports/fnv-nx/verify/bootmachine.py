@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/hostabi/include
 """The machine of the emulator boot stage: runs the guest ELF (elf32-littleaarch64 ILP32 PIE, crt0 "FNXG", entry(api)
 with the FnvnxHostApi v3 table) under Unicorn, deterministically. No fault-tolerating options exist.
 Library: Machine, VirtualClock, MachineError, ExtMissing.
