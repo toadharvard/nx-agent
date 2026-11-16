@@ -14,8 +14,8 @@
   "asm": []
  },
  "include": [
-  "ports/fnv-nx/lift/rt",
-  "ports/fnv-nx/platform/include",
+  "ports/fnv-nx/lift/tests/guest/imptest/lifted/inc",
+  "ports/fnv-nx/lift/tests/guest/imptest/lifted/inc",
   "ports/fnv-nx/shim/include"
  ],
  "units": "all",
@@ -49,6 +49,46 @@
     "gen/tab.cc",
     "gen/image.inc",
     "gen/labels.txt"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/packstage.py",
+   "args": [
+    "inc",
+    "fnvl_prelude.h",
+    "/out/inc/fnvl_prelude.h",
+    "/in/ports/fnv-nx/lift/rt",
+    "/in/ports/fnv-nx/platform/include",
+    "/uses/ports/fnv-nx/lift/rt/GEN"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/rt/fmath.h",
+    "ports/fnv-nx/lift/rt/fnvl.h",
+    "ports/fnv-nx/lift/rt/fnvl_abi.h",
+    "ports/fnv-nx/lift/rt/fnvl_fpc.h",
+    "ports/fnv-nx/lift/rt/fnvl_x87.h",
+    "ports/fnv-nx/lift/rt/x87.h",
+    "ports/fnv-nx/platform/include/fnvl_host.h"
+   ],
+   "outputs": [
+    "inc/fnvl_prelude.h"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/packstage.py",
+   "args": [
+    "inc",
+    "imp.h",
+    "/out/inc/imp.h",
+    "/in/ports/fnv-nx/lift/rt",
+    "/in/ports/fnv-nx/platform/include",
+    "/uses/ports/fnv-nx/lift/rt/GEN"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/rt/imp.h"
+   ],
+   "outputs": [
+    "inc/imp.h"
    ]
   }
  ],
