@@ -1336,3 +1336,9 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - A header-only root `contract` (INCLUDE) was added, because the recipe check required it. Waiting on L1 to confirm the form. w8 merges it into base3.
 - A first check on direct-compiler scratch objects was rejected as a second path and redone through the recipe.
 - bottleneck: L2's K2 pin (dispatch.c).
+
+## 2026-11-16 02:45: w7 facts2 b845407b8, baddecode and the drop test
+- Exe baddecode: fnv-nx-build l3a-lift/baddecode/exe ea7832b, 6 undecodable addresses for 4 entries.
+- The drop test (manifest/pefixture build_pe, the real universe.py --module) found that modlift's entries_on_data was vacuously 0: class data-reloc was never emitted. Fix: in the closure-complete residue, relocated slots are class 5 data-reloc (the exe's class-3 predicate). The 5 small images are unchanged.
+- Order restated to w7: the esp domain (register-relative stack, return through an RA jmp, reasons for every site) → residue → (B). The decode_gap merge into base3 goes through w8, with the BADDECODE/SHAPES outputs in the same batch. A synthetic exe-mode R3 drop case is added.
+- Bottlenecks: L2's K2 pin (lift/rt, contract/facts, lift/disp); pcsrc red at 75,171 (the esp domain, w7).
