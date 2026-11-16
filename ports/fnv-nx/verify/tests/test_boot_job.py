@@ -52,8 +52,6 @@ TID = "ef" * 32
 MILESTONES = "exe_entry\texe_entry\t00003000\texe PE ImageBase+AddressOfEntryPoint\n# table_id %s\n" % TID
 RUN = "emulator run: header\n   %s\n   [fnvnx] not a loader line\n" % LINE
 MANIFEST = "00001000\tfnvboot_a\tcode\n00002000\tfnvboot_b\tcode\n00003000\tfnvboot_c\tcode\n000ff000\tI_rt\timport\n# table_id %s\n" % TID
-MODULES = ("# name\tsha256\tsize\tpreferred_base\tassigned_base\tsize_of_image\thas_tls\tentry_rva\tstatic\tload_index\n"
-           "m.dll\t%s\t16\t10000000\t01410000\t00001000\t0\t00000010\t0\t\n" % ("a" * 64))
 KEYS_TSV = "# table_id %s\n000ff000\tm.dll\tf\t1\tstdcall\ti\ti\tI_rt\n" % TID
 FINAL = re.compile(r"^BOOT elf=(\S+) rc=(\d+) reason=(\S+) last=(\S+) instr=(\d+) main=(\d+) threads=(\d+) seconds=(\d+) "
                    r"published=(\S+)@([0-9a-f]{12})( presents=\d+)? stage_table=(\S+)$")
@@ -69,6 +67,10 @@ FONT_FILES = {"fonts/A.ttf": b"alpha", "fonts/Sub/B.ttf": b"bravo"}
 
 
 EXE = _exe()
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "contract"))
+import modules as cmod  # noqa: E402
+# modules.tsv of the contract: the exe row (the contract's own PE parse) and one DLL row
+MODULES = cmod.modules_text("falloutnv.exe", EXE, cmod.PE(EXE, "FalloutNV.exe"), [], {}) + "m.dll\t%s\t16\t10000000\t01410000\t00001000\t0\t00000010\t0\t\t1\n" % ("a" * 64)
 
 
 def git(*args, cwd=None, check=True):
