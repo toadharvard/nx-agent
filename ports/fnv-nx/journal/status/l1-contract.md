@@ -2919,3 +2919,5 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - w28-c5 671b7b1d4: done. Gate results list the whole set plus uncertified_n; MAX_IDS and gateids.py are deleted.
   - bridgegen, gate_imports, declareddlls, bootdecl, gpa_names, bootstart and assumptions report every error. test_verdict is green.
   - Next for w28: the own-root mount, then reached.tsv.
+- w28-c5 e5685a6bf: done. The own-root closure, tool file included, is mounted at /imp/fnvnx; sent to L6.
+  - Ruling: a bare sibling import through /tool is a second module path. Tools run as `python -m fnvnx.<rel>.<tool>` and /tool is deleted (w28, doing, before item C). Owners rewrite their own trees from w28's global list.
