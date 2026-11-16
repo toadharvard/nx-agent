@@ -90,8 +90,7 @@
   }
  ],
  "outputs": {
-  "image.inc": "gen/image.inc",
-  "labels.txt": "gen/labels.txt"
+  "GEN": "gen"
  },
  "external": [],
  "uses": [

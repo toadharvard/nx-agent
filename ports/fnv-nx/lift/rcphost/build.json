@@ -5,31 +5,56 @@
   "cxx": "x86_64-linux-gnu-g++-13"
  },
  "flags": {
-  "c": ["-O1", "-fPIC"],
-  "cxx": ["-O1", "-fPIC"],
+  "c": [
+   "-O1",
+   "-fPIC"
+  ],
+  "cxx": [
+   "-O1",
+   "-fPIC"
+  ],
   "asm": []
  },
- "include": [],
+ "include": [
+  "ports/fnv-nx/platform/include"
+ ],
  "units": "all",
  "generated": [
   {
    "tool": "ports/fnv-nx/lift/rcphost/gen_sources.py",
-   "args": ["/out/gen/sources.txt"],
+   "args": [
+    "/out/gen/sources.txt"
+   ],
    "inputs": [],
-   "outputs": ["gen/sources.txt"]
+   "outputs": [
+    "gen/sources.txt"
+   ]
   }
  ],
  "sources": "gen/sources.txt",
  "uses": [
-  {"root": "ports/fnv-nx/lift/rt", "output": "GEN"}
+  {
+   "root": "ports/fnv-nx/lift/rt",
+   "output": "GEN"
+  },
+  {
+   "root": "ports/fnv-nx/platform",
+   "output": "INCLUDE"
+  }
  ],
  "include_uses": [
-  {"root": "ports/fnv-nx/lift/rt", "output": "GEN"}
+  {
+   "root": "ports/fnv-nx/lift/rt",
+   "output": "GEN"
+  }
  ],
  "link": {
   "output": "librcptab.so",
   "kind": "shared",
   "version_script": "exports.ver",
-  "flags": ["-m", "elf_x86_64"]
+  "flags": [
+   "-m",
+   "elf_x86_64"
+  ]
  }
 }
