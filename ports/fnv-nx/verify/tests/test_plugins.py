@@ -54,7 +54,7 @@ def w(repo, rel, text):
     open(p, "w").write(text)
 
 
-def make_repo(name, rec, origin, files=None, extra_roots=(), target="host"):
+def make_repo(name, rec, origin, files=None, extra_roots=(), target="guest"):
     repo = os.path.join(BASE, name)
     os.makedirs(repo)
     git(repo, "init", "-q")
