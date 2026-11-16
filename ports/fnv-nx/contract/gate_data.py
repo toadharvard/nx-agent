@@ -48,7 +48,7 @@ def run(facts, obj, link):
     copies = collections.defaultdict(list)
     for k, v in obj.items():
         a = k[1]
-        if store.is_function_key(k) and a in facts['fn']:
+        if store.is_function_key(k) and a in facts['fn']:   # an address outside facts['fn'] is not skipped: it is red below (class `absent`)
             copies[a].append(pick(v[1]))
     exe = {a: pick(t for _, t in facts['fn'][a]['data']) for a in copies}
     miss = collections.Counter()
@@ -68,4 +68,7 @@ def run(facts, obj, link):
             rows.append((a, v, 'exe_only=%d native_only=%d first=0x%08x' % (len(x - n), len(n - x), first)))
     counts = dict(counts)
     counts['cookie_refs_ignored'] = miss[cookie]
-    return {'counts': counts, 'rows': rows, 'fail': ['superset', 'different'], 'judged': len(copies)}
+    gone = store.absent_functions(obj, facts['fn'])
+    rows += [(a, 'absent', 'a native function at an address that is not an entry of the exe universe') for a in gone]
+    counts = dict(counts, absent=len(gone)) if gone else dict(counts)
+    return {'counts': counts, 'rows': rows, 'fail': ['superset', 'different', 'absent'], 'judged': len(copies)}

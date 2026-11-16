@@ -18,7 +18,7 @@ def run(facts, obj, link):
     copies = collections.defaultdict(list)
     for k, v in obj.items():
         a = k[1]
-        if store.is_function_key(k) and a in facts['fn']:
+        if store.is_function_key(k) and a in facts['fn']:   # an address outside facts['fn'] is not skipped: it is red below (class `absent`)
             copies[a].append(sorted(v[4]))
     counts, rows, delta = collections.Counter(), [], collections.Counter()
     for a, vs in sorted(copies.items()):
@@ -44,4 +44,8 @@ def run(facts, obj, link):
     counts = dict(counts)
     for d, n in delta.most_common(10):
         counts['delta:%d' % d] = n
-    return {'counts': counts, 'rows': rows, 'fail': ['other'], 'judged': judged}
+    gone = store.absent_functions(obj, facts['fn'])
+    rows += [(a, 'absent', 'a native function at an address that is not an entry of the exe universe') for a in gone]
+    if gone:
+        counts['absent'] = len(gone)
+    return {'counts': counts, 'rows': rows, 'fail': ['other', 'absent'], 'judged': judged}

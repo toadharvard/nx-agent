@@ -83,7 +83,7 @@ def run(facts, obj, link):
     copies = collections.defaultdict(list)
     for k, v in obj.items():
         a = k[1]
-        if store.is_function_key(k) and a in facts['fn']:
+        if store.is_function_key(k) and a in facts['fn']:   # an address outside facts['fn'] is not skipped: it is red below (class `absent`)
             copies[a].append((k[0], v))
     if copies and 'pristine' not in facts:
         raise ValueError("facts['pristine'] missing: the caller must set it from pristine_names(n1)")
@@ -120,4 +120,7 @@ def run(facts, obj, link):
             rows.append((a, 'undeclared', '%s: edge 0x%08x: %s' % (decl[2], decl[0], decl[1])))
         if ORDER[k] == 'different':
             rows.append((a, 'different', 'exe_only=%d native_only=%d first=0x%08x' % (len(x - n), len(n - x), min(x ^ n))))
-    return {'counts': dict(counts), 'rows': rows, 'fail': ['different', 'undeclared'], 'judged': len(copies)}
+    gone = store.absent_functions(obj, facts['fn'])
+    rows += [(a, 'absent', 'a native function at an address that is not an entry of the exe universe') for a in gone]
+    counts = dict(counts, absent=len(gone)) if gone else dict(counts)
+    return {'counts': dict(counts), 'rows': rows, 'fail': ['different', 'undeclared', 'absent'], 'judged': len(copies)}

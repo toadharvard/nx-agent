@@ -51,8 +51,9 @@ check('data cookie', c.get('cookie_refs_ignored'), 3)
 check('data fail 0x40', v.get(0x40), 'superset')
 check('data fail 0x70 worst of copies', v.get(0x70), 'different')
 check('data fail 0x50', v.get(0x50), 'different')
-check('data fail set', sorted(v), [0x40, 0x50, 0x70])
-check('data fail list', gate_data.run(F, O, tmp)['fail'], ['superset', 'different'])
+check('data fail set', sorted(v), [0x40, 0x50, 0x70, 0x99])   # 0x99: a native function that is no entry of the exe universe is red (absent), not skipped
+check('data absent', v[0x99], 'absent')
+check('data fail list', gate_data.run(F, O, tmp)['fail'], ['superset', 'different', 'absent'])
 
 # ---- call
 F = {'fn': {0x10: fn(), 0x20: fn(calls=[0x400100]), 0x30: fn(calls=[0x400100], tails=[0x400200]),
@@ -69,8 +70,8 @@ O = {('a', 'sympair'): SP, ('b', 'sympair'): SP,
 v, c = verdicts(gate_call.run(F, O, tmp))
 for k, n in (('none', 1), ('equal', 2), ('subset', 2), ('superset', 1), ('different', 2)):
     check('call ' + k, c.get(k, 0), n)
-check('call fail', sorted(v.items()), [(0x50, 'different'), (0x80, 'different')])
-check('call fail list', gate_call.run(F, O, tmp)['fail'], ['different', 'undeclared'])
+check('call fail', sorted(v.items()), [(0x11, 'absent'), (0x50, 'different'), (0x80, 'different')])
+check('call fail list', gate_call.run(F, O, tmp)['fail'], ['different', 'undeclared', 'absent'])
 check('call declared', (c.get('declared'), c.get('undeclared', 0)), (8, 0))
 
 # ---- vcall
@@ -81,13 +82,13 @@ F = {'fn': {0x10: fn(icalls=[(0, 'mem', 'eax', 8), (0, 'mem', 'eax', 0x10)]),
             0x50: fn(icalls=[(0, 'mem', 'eax', 8)]), 0x60: fn()},
      'secs': secs, 'xc': []}
 O = {('a', 0x10): ob(vcall=[0x10, 8]), ('a', 0x20): ob(vcall=[0xc, 0x14]), ('a', 0x30): ob(vcall=[]),
-     ('a', 0x40): ob(vcall=[0x20]), ('a', 0x60): ob(vcall=[4])}
+     ('a', 0x40): ob(vcall=[0x20]), ('a', 0x60): ob(vcall=[4]), ('a', 0x77): ob(vcall=[4])}
 v, c = verdicts(gate_vcall.run(F, O, tmp))
 for k, n in (('equal', 1), ('delta_0_or_4', 1), ('count_differs', 1), ('other', 1)):
     check('vcall ' + k, c.get(k, 0), n)
 check('vcall delta key', c.get('delta:4'), 2)
-check('vcall fail', sorted(v.items()), [(0x40, 'other')])
-check('vcall fail list', gate_vcall.run(F, O, tmp)['fail'], ['other'])
+check('vcall fail', sorted(v.items()), [(0x40, 'other'), (0x77, 'absent')])
+check('vcall fail list', gate_vcall.run(F, O, tmp)['fail'], ['other', 'absent'])
 
 # ---- xc
 F = {'fn': {0x400100: fn(), 0x400200: fn(), 0x400300: fn()}, 'secs': secs,

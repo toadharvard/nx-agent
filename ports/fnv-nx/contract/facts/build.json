@@ -40,6 +40,8 @@
    "args": [
     "--exe",
     "/ext/exe/FalloutNV.exe",
+    "--universe",
+    "/ext/facts/universe.tsv",
     "--out",
     "/out/facts.json"
    ],

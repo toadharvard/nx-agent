@@ -100,6 +100,12 @@ def _n1_dec(o):
 SECTION_KINDS = ('ztv', 'sympair', 'vtpair', 'n3')       # the non-function entries (object, kind) of an obj / objone file
 
 
+def absent_functions(obj, fn):
+    """The sorted addresses of the function keys of OBJ that are not entries of the exe universe FN (facts['fn']): each is a red reason in the
+    gate that judges the copy (the class `absent`), never a skipped row."""
+    return sorted({k[1] for k in obj if is_function_key(k) and k[1] not in fn})
+
+
 def is_function_key(k):
     """True for a key (object, exe address) of a function entry; False for (object, one of SECTION_KINDS)."""
     return k[1] not in SECTION_KINDS

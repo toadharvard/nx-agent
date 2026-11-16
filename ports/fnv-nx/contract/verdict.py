@@ -33,7 +33,7 @@ def main():
             os.symlink(os.path.abspath(p), d)
     py = lambda s, *x: [sys.executable, os.path.join(HERE, s)] + list(x)
     stages = [
-        ('exefacts', py('exefacts.py', '--exe', a.exe, '--out', w + '/facts.json'), False),
+        ('exefacts', py('exefacts.py', '--exe', a.exe, '--universe', a.universe, '--out', w + '/facts.json'), False),
         ('n1', py('n1.py', '--exe', a.exe, '--units', a.units, '--msvc', a.msvc, '--out', w + '/n1.json'), False),
         ('objfacts', py('objfacts.py', '--link', a.link, '--facts', w + '/facts.json', '--sympair-kinds', a.sympair_kinds, '--out', w + '/obj.json'), False),
         ('gates', py('registry.py', '--facts', w + '/facts.json', '--obj', w + '/obj.json', '--n1', w + '/n1.json',

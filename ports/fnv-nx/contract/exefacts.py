@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """exefacts - the one fact base read from the player's executable (L1 CONTRACT, M0).
 
-    exefacts.py --exe FalloutNV.exe --out facts.json [--jobs N]
+    exefacts.py --exe FalloutNV.exe --universe universe.tsv --out facts.json [--jobs N]
 
 Everything a boundary needs is a fact of the exe: base relocations, imports, RTTI vftables, and per function
 the `ret N` set, direct and indirect calls, vptr stores (in order, with base and
@@ -15,9 +15,9 @@ Facts (store.py kind `facts`, canonical JSON, one dict; the result does not depe
   vft       {vftable_va: (rtti_name, col_offset, [slot targets], col_va)}  (the RTTI vftables; no source of the decomp is read)
   ptrs      [(va, target)]   every relocated code pointer held in data (slots, callbacks, __xc ...)
   xc        [target ...]     the C++ initializer table, in order
-  fn        {va: F}          F as returned by analyze(); the entries are the PE entry point, every relocated code pointer in data and the
-                             direct call/jump targets reachable from them (no function list of the decomp is read; a function ends
-                             before the next known entry)
+  fn        {va: F}          F as returned by analyze(): exactly the entries of the universe (L3a's universe.tsv, a declared input), F['size']
+                             the entry's extent in that file.  The reachability walk is a check only: every call, jump and code-pointer
+                             target (and the PE entry point) must be an entry or lie inside an entry's extent, else the stage is red
 """
 import argparse, bisect, collections, hashlib, json, os, struct, sys
 import capstone
@@ -26,8 +26,9 @@ from capstone import x86_const as X
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: the siblings are imported by their qualified name (contract.X)
 from contract import store
 from contract import exepin
+from contract import imagerec
 
-VERSION = 9
+VERSION = 10
 
 
 class Image:
@@ -189,14 +190,14 @@ class Analyzer:
         self.t0, self.ts = img.text
         self.traw = img.secs['.text'][2]
 
-    def analyze(self, a, bound):
-        """The function at A ends before BOUND, the next known entry."""
+    def analyze(self, a, size):
+        """The function at A: the instructions reached from A inside [A, A + SIZE), SIZE the entry's extent in the universe."""
         img, md = self.img, self.md
-        lo, hi = a, bound
+        lo, hi = a, a + size
         d, t0, traw, relocs = img.d, self.t0, self.traw, img.relocs
         ins = {}          # addr -> size
         work = [a]
-        F = dict(a=a, ret=set(), calls=[], tails=[], icalls=[], itails=[], stores=[], vrefs=[],
+        F = dict(a=a, size=size, ret=set(), calls=[], tails=[], icalls=[], itails=[], stores=[], vrefs=[],
                  data=[], codeptrs=[], imports=[], jt=[], fs=0, x87=0, bad=0)
         pend = {}         # reg bit -> vftable loaded by `mov reg, imm`
         last = {}         # reg id -> displacement of the last `mov reg, [reg2+disp]`
@@ -346,37 +347,53 @@ def _run(job):
     return [_AN.analyze(*j) for j in job]
 
 
-def build(exe, jobs=4, log=print):
+def read_universe(path, img):
+    """universe.tsv -> {entry: extent}; the `# base=` header, when present, is the exe's ImageBase; every entry is in .text."""
+    with open(path) as fh:
+        uni, base = imagerec.universe_spans(fh.read(), path)
+    if base is not None and base != img.base:
+        raise SystemExit('exefacts: %s has base 0x%x, the exe has 0x%x' % (path, base, img.base))
+    out = [a for a, x in sorted(uni.items()) if not (img.intext(a) and img.intext(a + x - 1))]
+    if out:
+        raise SystemExit('exefacts: %d universe entries (first %08x) are not inside .text' % (len(out), out[0]))
+    return uni
+
+
+def reach_outside(img, fn, ptrs, spans):
+    """The check walk: every call, jump and code-pointer target of the function facts, every relocated code pointer in data and the PE entry
+    point must be an entry of the universe or lie inside an entry's extent (a mid-function target). -> sorted [(source, target)] of those that do not."""
+    ents = sorted(spans)
+    def inside(t):
+        k = bisect.bisect_right(ents, t) - 1
+        return k >= 0 and t < ents[k] + spans[ents[k]]
+    bad = {(0, img.entry)} if not inside(img.entry) else set()
+    bad |= {(r, v) for r, v in ptrs if not inside(v)}
+    for a, F in fn.items():
+        bad |= {(a, t) for _, t in F['calls'] + F['tails'] + F['codeptrs'] if img.intext(t) and not inside(t)}
+    return sorted(bad)
+
+
+def build(exe, universe, jobs=4, log=print):
     import multiprocessing
     img = Image(exe)
+    spans = read_universe(universe, img)
     vft = rtti_vftables(img)
     ptrs = data_code_pointers(img)
     xc, xc_va = xc_table(img, ptrs)
     fn = {}
-    todo = {img.entry}
-    for _, v in ptrs:
-        todo.add(v)
-    rnd = 0
+    jobs_ = sorted(spans.items())
+    chunks = [jobs_[i:i + 400] for i in range(0, len(jobs_), 400)]
     with multiprocessing.Pool(jobs, _init, (exe,)) as pool:
-        while todo:
-            rnd += 1
-            starts = sorted(set(todo) | set(fn))
-            jobs_ = []
-            for a in sorted(todo):
-                k = bisect.bisect_right(starts, a)
-                bound = starts[k] if k < len(starts) else img.text[0] + img.text[1]
-                jobs_.append((a, bound))
-            chunks = [jobs_[i:i + 400] for i in range(0, len(jobs_), 400)]
-            new = set()
-            for res in pool.imap(_run, chunks):   # ordered: the merge order is the chunk order
-                for F in res:
-                    fn[F['a']] = F
-                    for _, t in F['calls'] + F['tails'] + F['codeptrs']:
-                        if img.intext(t) and t not in fn and t not in todo:
-                            new.add(t)
-            log('round %d: analyzed %d, new targets %d' % (rnd, len(jobs_), len(new)))
-            todo = new
+        for res in pool.imap(_run, chunks):   # ordered: the merge order is the chunk order
+            for F in res:
+                fn[F['a']] = F
+    out = reach_outside(img, fn, ptrs, spans)
+    log('functions %d (the universe has %d entries); targets outside every entry and extent: %d' % (len(fn), len(spans), len(out)))
+    if out:
+        raise SystemExit('exefacts: %d call, jump or code-pointer targets are neither a universe entry nor inside an extent; first: %s' % (
+            len(out), ', '.join('%08x -> %08x' % x for x in out[:20])))
     meta = dict(version=VERSION, exe_sha256=img.sha256, tool_sha256=hashlib.sha256(open(__file__, 'rb').read()).hexdigest(),
+                universe_sha256=hashlib.sha256(open(universe, 'rb').read()).hexdigest(),
                 relocs=len(img.relocs), vftables=len(vft), functions=len(fn), ptrs=len(ptrs),
                 xc=len(xc), xc_va=xc_va, imports=len(img.imports))
     return dict(meta=meta, base=img.base, secs=img.secs, relocs=img.relocs, imports=img.imports, vft=vft, ptrs=ptrs,
@@ -386,11 +403,12 @@ def build(exe, jobs=4, log=print):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--exe', required=True)
+    ap.add_argument('--universe', required=True, help="L3a's universe.tsv of the exe (declared input): entry, kind, extent, flags")
     ap.add_argument('--out', required=True)
     ap.add_argument('--jobs', type=int, default=4)
     ap.add_argument('--vft-out', help='also write the sorted list of vftable addresses (input of objfacts_one.py)')
     a = ap.parse_args()
-    facts = build(a.exe, a.jobs, log=lambda s: print(s, file=sys.stderr))
+    facts = build(a.exe, a.universe, a.jobs, log=lambda s: print(s, file=sys.stderr))
     store.save(a.out, 'facts', facts)
     if a.vft_out:
         with open(a.vft_out, 'w') as fh:

@@ -202,7 +202,7 @@ def stages(w, doc, ext, rp, only=None):
     bridge = ["--bridge", P2(ext, doc["bridge"])] if doc.get("bridge") else []
     opt = lambda k: P2(ext, doc[k]) if k in doc else None
     st = {
-        "exefacts": (py("exefacts.py", "--exe", P("exe"), "--out", w + "/facts.json"), ["facts.json"]),
+        "exefacts": (py("exefacts.py", "--exe", P("exe"), "--universe", P("universe"), "--out", w + "/facts.json"), ["facts.json"]),
         "n1": (py("n1.py", "--exe", P("exe"), "--units", rp["units"], "--msvc", P("msvc"), "--out", w + "/n1.json"), ["n1.json", "gate/n1.json"]),
         "objfacts": (py("objfacts.py", "--link", link, "--facts", w + "/facts.json", "--sympair-kinds", l2sections.KINDS_INC, "--out", w + "/obj.json"), ["obj.json"]),
         "registry": (py("registry.py", "--facts", w + "/facts.json", "--obj", w + "/obj.json", "--n1", w + "/n1.json", "--link", link,

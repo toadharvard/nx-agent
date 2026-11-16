@@ -7,9 +7,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from contract import gatefile, store
 
 d = tempfile.mkdtemp()
-F = dict(a=16, ret=(0,), calls=[(16, 32)], tails=[], icalls=[(16, 'reg', 'eax', None)], itails=[], stores=[],
+F = dict(a=16, size=4, ret=(0,), calls=[(16, 32)], tails=[], icalls=[(16, 'reg', 'eax', None)], itails=[], stores=[],
          vrefs=[], data=[(17, 64)], codeptrs=[], imports=[], jt=[], fs=0, x87=0, bad=0, n=1, bytes=4, end=20)
-facts = dict(meta=dict(version=9), base=1, secs={'.text': (1, 2, 3, 4)}, relocs=[1, 2], imports={5: ('d', 'n')},
+facts = dict(meta=dict(version=10), base=1, secs={'.text': (1, 2, 3, 4)}, relocs=[1, 2], imports={5: ('d', 'n')},
              vft={7: ('.?AVC', 0, [9], 3)}, ptrs=[(1, 2)], xc=[3], fn={16: F})
 store.save(d + '/f.json', 'facts', facts)
 assert store.load(d + '/f.json', 'facts') == facts
