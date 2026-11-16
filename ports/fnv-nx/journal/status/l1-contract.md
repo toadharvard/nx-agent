@@ -2342,3 +2342,6 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - L3a confirms that the _CI* bodies (msvcrt_ci.cc CI1/CI2, per Wine math.c CREATE_FPU_FUNC1/2) and every lift/rt void fnvl_* are guest entries: they own the x87 state, their arguments and the return through c->ra.
   - Ruling: the export record carries the ABI kind: func (marshalled by decltype), entry (guest-state body, no marshalling) or data. An entry that is not void(void) is red.
   - w28 implements it; L3a re-marks its records.
+- Farm: the new L2 compiler pin is tools/gcc-ilp32-msvcmodel-noneelf d1a92e26 (tree d8bb3cc3, cand4b b51ad22ee). It supersedes 84f0883e; L2 updates guest_compiler.json.
+- test_layout and test_ldbl look for externals at GATE_CACHE/external, a second path. Folded into w28's ext_dir accessor item.
+- The farm's earlier w29 and cand3b runs died silently. The cand3b verdict at 963dce662 is moved to first; the farm reports the cause of the deaths.
