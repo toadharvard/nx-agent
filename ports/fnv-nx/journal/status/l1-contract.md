@@ -2857,3 +2857,8 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - Until the item closes, the runtime's float-to-int sites are outside fpexact's universe.
   - It closes when L2's pin commit gives FTOI/ (pairing by sha256) and L1's reader adds the runtime rows to objects.json.
 - bottleneck: cand4 verdict; cand5 waits on the L3a base3 head (it must include 687182c85).
+- From the L5 c5 verdict (6798e5ef84e1, 17 of 47 gates green), three items, assigned to w28 (doing):
+  - (1) e116876ab accepted: synth_names of a root with no objects is empty; a selftest goes with it.
+  - (2) guest.ld split: the layout script keeps the script-defined symbols, and link/guest_image.ld holds the ASSERTs over input-defined symbols (the crt0 hdr and mod0). ldsynth uses the layout script only, and the image link uses both. A selftest checks that each ASSERT is in the right file. This unblocks linkstrict, imports, abi and machine.
+  - (3) pure is 83 of 86: l2sections, gate_abs and gate_disp are to be fixed or reported.
+- bottleneck: cand4 verdict; the w28 head for L5; the L3a base3 head.
