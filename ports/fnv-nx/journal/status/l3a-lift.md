@@ -1311,3 +1311,15 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - ENTRY1-ATOMIC: the atomic and sync value movers over one entry type are a same-type copy. ORDER-RTLBUILTIN: fences for the RTL-expanded builtins, and __builtin_apply stays an error.
 - Next: the K2 plugin stamp's farm rebuild and pin (L2). Then w8 merges the pin into base3 and rebuilds lift/rt, lift/disp and the test images, and sends the 7-symbol table.
 - bottleneck: the K2 pin rebuild (L2 farm).
+
+## 2026-11-16 02:25: arrival join (w7 facts2 8fa62a67a)
+- The arrival join is computed and sound. The esp model now takes the callee pop from retn.tsv and the import pop from ehflow.import_pop.
+- Exe: esp-lost events 55,257 → 8,339; bad indirect jmp sites 84 → 13 of 133.
+- feed() could deepen keys without bound on recursive call chains. It now has a widening at ARG_LIMIT (ALLCODE_INPUT = top); accepted.
+- pcsrc red on the exe 10,115 → 75,171, because the 13 non-clean indirect jmps each get the whole ptr set as targets. The 5 images: 1,279 / 3,015 / 277 / 2,170 / 1,199.
+- Ruling: not the end state. Next, in order:
+  1. a register-relative stack domain, which closes the `mov esp,reg` and frame-restore classes;
+  2. an indirect jmp to the function's RA symbol is a return;
+  3. a reason for every residue site.
+  Then the residue with its code. Then (B), the ehtables handler and push-site column, with callback prototypes from the keys.tsv function-pointer types.
+- bottleneck: the K2 pin rebuild (L2 farm), which blocks lift/rt; pcsrc red, which blocks the pack root.
