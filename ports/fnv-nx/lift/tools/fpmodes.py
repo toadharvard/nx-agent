@@ -7,10 +7,12 @@ import os, sys, hashlib
 from collections import Counter, defaultdict
 from multiprocessing import Pool
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import libarg; libarg.take()      # --lib DIR: the package fnvlift (a declared input of the stage)
 import x86flow as W
 from x86flow import X, M32, SUB, mn, rn, memslot, Fn, UNC, KINDS, isx87, depth, track, frame_events, load_universe, pmap
 
 EXE = OUT = None        # set by main from the explicit arguments
+TABLE = IMAGE = None   # the module table and the image name (x86flow.image_base)
 T = {}                      # entry -> net x87 depth change at return (nonzero only), set before each wave
 KNOWN = set()
 EAXLIVE = set()             # entries that may read eax at entry (LTCG register args), set before the status pass
@@ -430,7 +432,7 @@ def callargs(args):
 
 
 def main():
-    raw, rows = load_universe(EXE)
+    raw, rows = load_universe(EXE, W.image_base(EXE, TABLE, IMAGE))
     print('fpmodes: exe sha256 %s  universe.tsv md5 %s  entries %d' % (hashlib.sha256(open(EXE, 'rb').read()).hexdigest()[:12], hashlib.md5(raw).hexdigest()[:12], len(rows)))
     kind = {a: k for a, e, k in rows}; ext = {a: e for a, e, k in rows}
     res = {}
@@ -574,8 +576,8 @@ def main():
 if __name__ == '__main__':
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import cli
-    _U = 'usage: fpmodes.py --exe FILE --facts DIR --retn RETN.tsv --out DIR   x87/SSE control-mode facts of the exe: the exe, the facts directory (universe.tsv, ehtables.json) and the output directory are explicit inputs'
-    _o = cli.parse(_U, sys.argv[1:], (0, 0), {'--exe': True, '--facts': True, '--out': True, '--retn': True})[1]
-    if len(_o) != 4: sys.exit(_U)
-    EXE, OUT, RETN = _o['--exe'], _o['--out'], _o['--retn']; W.configure(_o['--facts'])
+    _U = 'usage: fpmodes.py --exe FILE --facts DIR --retn RETN.tsv --out DIR --table MODULES_TSV --image NAME   x87/SSE control-mode facts of the exe: the exe, the facts directory (universe.tsv, ehtables.json) and the output directory are explicit inputs'
+    _o = cli.parse(_U, sys.argv[1:], (0, 0), {'--exe': True, '--facts': True, '--out': True, '--retn': True, '--table': True, '--image': True})[1]
+    if len(_o) != 6: sys.exit(_U)
+    EXE, OUT, RETN = _o['--exe'], _o['--out'], _o['--retn']; TABLE, IMAGE = _o['--table'], _o['--image']; W.configure(_o['--facts'])
     main()

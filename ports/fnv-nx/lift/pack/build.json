@@ -13,7 +13,7 @@
   "asm": []
  },
  "include": [
-  "/ext/liftpack/inc"
+  "ports/fnv-nx/lift/pack/inc"
  ],
  "units": "all",
  "uses": [
@@ -24,6 +24,10 @@
   {
    "root": "ports/fnv-nx/loader",
    "output": "IMPORTED_TSV"
+  },
+  {
+   "root": "ports/fnv-nx/loader",
+   "output": "MODULES_TSV"
   },
   {
    "root": "ports/fnv-nx/lift/rt",
@@ -4171,6 +4175,7 @@
     "/ext/liftpack/entries.tsv",
     "/stage/imp_entries.tsv",
     "/uses/ports/fnv-nx/bridgefacts/BRIDGE",
+    "/uses/ports/fnv-nx/loader/MODULES_TSV",
     "/out/entries.tsv"
    ],
    "inputs": [
@@ -4187,8 +4192,10 @@
    "tool": "ports/fnv-nx/lift/tools/packstage.py",
    "args": [
     "disp",
+    "--rows",
+    "/out/disp_rows.tsv",
     "/stage/entries.tsv",
-    "/out/disp.S"
+    "/out/disp.cc"
    ],
    "inputs": [
     {
@@ -4197,12 +4204,53 @@
     }
    ],
    "outputs": [
-    "disp.S"
+    "disp.cc",
+    "disp_rows.tsv"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/packstage.py",
+   "args": [
+    "inc",
+    "fnvl_prelude.h",
+    "/out/inc/fnvl_prelude.h",
+    "/in/ports/fnv-nx/lift/rt",
+    "/in/ports/fnv-nx/platform/include",
+    "/uses/ports/fnv-nx/lift/rt/GEN"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/rt/fmath.h",
+    "ports/fnv-nx/lift/rt/fnvl.h",
+    "ports/fnv-nx/lift/rt/fnvl_abi.h",
+    "ports/fnv-nx/lift/rt/fnvl_x87.h",
+    "ports/fnv-nx/lift/rt/x87.h",
+    "ports/fnv-nx/platform/include/fnvl_host.h"
+   ],
+   "outputs": [
+    "inc/fnvl_prelude.h"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/packstage.py",
+   "args": [
+    "inc",
+    "imp.h",
+    "/out/inc/imp.h",
+    "/in/ports/fnv-nx/lift/rt",
+    "/in/ports/fnv-nx/platform/include",
+    "/uses/ports/fnv-nx/lift/rt/GEN"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/rt/imp.h"
+   ],
+   "outputs": [
+    "inc/imp.h"
    ]
   }
  ],
  "outputs": {
-  "ENTRIES": "entries.tsv"
+  "ENTRIES": "entries.tsv",
+  "DISP_ROWS": "disp_rows.tsv"
  },
  "link": null,
  "external": [

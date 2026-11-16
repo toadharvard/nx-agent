@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """`import fnvlift` and `import fnvlift.dsl` read no file of lift/rt: a child interpreter (python3 -I) imports both with an audit hook that raises on any open() of a
-path below rt/ (the prelude is built only by fnvlift.prelude(rt_dir), called by the generator).  Also checks prelude() reads exactly rt_dir/fnvl.h and what it includes.
+path below rt/ (the runtime headers are inlined only by tools/prelude.py, a stage of lift/pack).  Also checks that fnvlift has no prelude() or inline().
     python3 -I import_reads_no_rt_test.py"""
 import os
 import subprocess
@@ -19,14 +19,10 @@ sys.path.insert(0, %r)
 sys.addaudithook(hook)
 import fnvlift, fnvlift.dsl
 assert not hasattr(fnvlift, 'PRELUDE')
-try:
-    fnvlift.prelude(RT, '/nonexistent-gen')       # the first read, rt/fnvl.h, is the one the hook reports
-except RuntimeError:
-    print('prelude-reads-rt')
-else:
-    raise SystemExit('the audit hook did not see prelude() read rt/')
+assert not hasattr(fnvlift, 'prelude') and not hasattr(fnvlift, 'inline')
+print('no-prelude')
 '''
 
 p = subprocess.run([sys.executable, '-I', '-c', CHILD % (RT, LIFT)], capture_output=True, text=True)
-assert p.returncode == 0 and p.stdout.strip() == 'prelude-reads-rt', (p.returncode, p.stdout, p.stderr[-400:])
-print('import fnvlift, fnvlift.dsl: no rt read; prelude(rt_dir) reads rt: ok')
+assert p.returncode == 0 and p.stdout.strip() == 'no-prelude', (p.returncode, p.stdout, p.stderr[-400:])
+print('import fnvlift, fnvlift.dsl: no rt read; fnvlift has no prelude: ok')

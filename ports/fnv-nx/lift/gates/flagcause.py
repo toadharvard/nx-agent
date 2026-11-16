@@ -28,6 +28,8 @@ NF = g.NF
 Gl = {}
 
 
+JOBS_DEFAULT = 4      # worker processes when the stage does not set JOBS (a count, not a path)
+
 def wide(r, pb, W):
     """-> (keep mask, add mask) of the instruction row r in the wide layout"""
     keep = add = 0
@@ -207,7 +209,7 @@ def main(argv):
     path, facts = argv[0], argv[1]
     base, rows = g.load_ranges(os.path.join(facts, 'ranges.tsv'))
     uni = g.load_universe(os.path.join(facts, 'universe.tsv'))
-    inst, res, seed, pb, W = solve(path, base, rows, uni, int(os.environ.get('JOBS', '4')))
+    inst, res, seed, pb, W = solve(path, base, rows, uni, int(os.environ.get('JOBS', str(JOBS_DEFAULT))))
     jt = frozenset(t for r in json.load(open(os.path.join(facts, 'ehtables.json'))).get('jtab_tables', ()) for t in (int(w, 16) for w in r['targets']))
     out = report(rows, uni, inst, res, seed, pb, W, jt)
     d = os.environ.get('GATE_OUT')

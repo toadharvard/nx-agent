@@ -69,12 +69,15 @@
    "args": [
     "--prefix",
     "fnvnx_native",
+    "--rows",
+    "/out/native_disp_rows.tsv",
     "/uses/ports/fnv-nx/contract/facts/native",
-    "/out/native_disp.S"
+    "/out/native_disp.cc"
    ],
    "inputs": [],
    "outputs": [
-    "native_disp.S"
+    "native_disp.cc",
+    "native_disp_rows.tsv"
    ]
   },
   {
@@ -167,6 +170,19 @@
    "outputs": [
     "gen/x87.h"
    ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/gen_copy.py",
+   "args": [
+    "/in/ports/fnv-nx/lift/rt/fnvl_entry.h",
+    "/out/gen/fnvl_entry.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/rt/fnvl_entry.h"
+   ],
+   "outputs": [
+    "gen/fnvl_entry.h"
+   ]
   }
  ],
  "uses": [
@@ -188,6 +204,7 @@
   }
  ],
  "outputs": {
-  "GEN": "gen"
+  "GEN": "gen",
+  "NATIVE_DISP_ROWS": "native_disp_rows.tsv"
  }
 }

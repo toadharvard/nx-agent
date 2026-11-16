@@ -79,7 +79,7 @@ static int gcall(u32 fn, u32 ecx_v, int set_ebp, u32 ebp_v, const u32 *a, u32 n,
     for (u32 i = n; i--; ) { esp -= 4; M32(esp) = a[i]; }
     esp -= 4; M32(esp) = RET_SENT;
     ecx = ecx_v; if (set_ebp) ebp = ebp_v;
-    REGS(); void (*f)(void) = fnvl_dispatch(fn); f(); REGS();
+    REGS(); fnvnx_entry_fn f = fnvl_dispatch(fn); f(); REGS();
     if (c->ra != RET_SENT) return 0;
     *res = eax; ebx = sv_ebx; esi = sv_esi; edi = sv_edi; ebp = sv_ebp; esp = sv_esp;
     return 1;

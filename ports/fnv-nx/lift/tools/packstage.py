@@ -3,7 +3,8 @@
     packstage.py copy ...      packcopy.py   the bodies u/*.cpp of the external
     packstage.py imp ...       impgen.py     imp.cpp and the import rows from the loader's BRIDGE_TSV
     packstage.py entries ...   packentries.py entries.tsv = the external's rows + the import rows + table_id
-    packstage.py disp ...      dispgen.py    disp.S from entries.tsv
+    packstage.py disp ...      dispgen.py    disp.cc from entries.tsv
+    packstage.py inc ...       prelude.py    inc/fnvl_prelude.h and inc/imp.h: the runtime's headers inlined, from the declared rt headers (never a copy in the external)
 Each name runs the named tool's own main with the remaining arguments, unchanged."""
 import os
 import sys
@@ -12,7 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))      # the tool r
 
 
 def main(argv):
-    if not argv or argv[0] not in ('copy', 'imp', 'entries', 'disp') or argv[0] in ('-h', '--help'):
+    if not argv or argv[0] not in ('copy', 'imp', 'entries', 'disp', 'inc') or argv[0] in ('-h', '--help'):
         sys.stderr.write(__doc__ + '\n'); return 2
     sub, rest = argv[0], argv[1:]
     if sub == 'copy':
@@ -20,7 +21,10 @@ def main(argv):
         (a, b), _ = cli.parse('usage: packstage.py copy PACK OUT', rest, (2, 2)); packcopy.main(a, b); return 0
     if sub == 'entries':
         import cli, packentries
-        (a, b, c, d), _ = cli.parse('usage: packstage.py entries PACK_ENTRIES IMP_ENTRIES BRIDGE_TSV OUT', rest, (4, 4)); packentries.main(a, b, c, d); return 0
+        (a, b, c, m, d), _ = cli.parse('usage: packstage.py entries PACK_ENTRIES IMP_ENTRIES BRIDGE_TSV MODULES_TSV OUT', rest, (5, 5)); packentries.main(a, b, c, m, d); return 0
+    if sub == 'inc':
+        import prelude
+        return prelude.main(rest)
     if sub == 'disp':
         import dispgen
         dispgen.main(rest); return 0

@@ -3,13 +3,14 @@ import json
 import os
 import shutil
 import sys
+import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..'))
 from proof import certs_build, shape, symform
 
-WORK = os.environ.get('FNVNX_TEST_WORK', '/home/user/l3work/proof/test_work')
+WORK = tempfile.mkdtemp()    # this test's own scratch directory
 MD = shape.decoder()
 
 

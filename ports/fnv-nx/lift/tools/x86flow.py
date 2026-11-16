@@ -4,11 +4,23 @@
 events, x87 stack-depth dataflow. No clocks, no entropy; every iteration order is sorted."""
 import os, struct, bisect, itertools
 from collections import defaultdict
+import sys
 import capstone
+from fnvlift.image import Image as _FImage
 from capstone import x86 as X
 
 M32 = 0xffffffff
 FACTS = UNI = EHJ = None      # set by configure(): the facts root of the image under analysis, passed explicitly by the program (no environment variable, no default)
+
+
+def image_base(path, table, name):
+    """the load base of an image, from its declared source: `exe` = the PE's own ImageBase (the exe is mapped at it, never relocated), else the assigned base of the row `name` (with or without .dll) of the loader's module table."""
+    if name == 'exe':
+        d = open(path, 'rb').read(); return struct.unpack_from('<I', d, struct.unpack_from('<I', d, 0x3c)[0] + 52)[0]
+    import pemod
+    r = pemod.modules(table); n = name.lower(); n = n if n in r else n + '.dll'
+    if n not in r: sys.exit('x86flow.image_base: %s is not a row of %s' % (name, table))
+    return r[n].base
 
 
 def configure(facts):
@@ -34,50 +46,11 @@ RETN, ALLOCA = {}, []          # entry -> callee-popped bytes (None = several di
 IATADDR = {}                   # IAT slot address -> import name
 
 
-class Image:
-    def __init__(s, path):
-        d = s.d = open(path, 'rb').read()
-        pe = struct.unpack_from('<I', d, 0x3c)[0]
-        n = struct.unpack_from('<H', d, pe + 6)[0]
-        opt = struct.unpack_from('<H', d, pe + 20)[0]
-        s.base = struct.unpack_from('<I', d, pe + 52)[0]
-        s.secs, s.pe = [], pe
-        o = pe + 24 + opt
-        for i in range(n):
-            name = d[o:o + 8].rstrip(b'\0').decode()
-            vs, va, rs, ro = struct.unpack_from('<IIII', d, o + 8)
-            s.secs.append((name, s.base + va, vs, ro, rs, struct.unpack_from('<I', d, o + 36)[0]))
-            o += 40
-        rr, rsz = struct.unpack_from('<II', d, pe + 24 + 96 + 40)
-        rel = []
-        p = s.off(s.base + rr)
-        end = p + rsz
-        while p < end:
-            page, bs = struct.unpack_from('<II', d, p)
-            if not bs:
-                break
-            for i in range((bs - 8) // 2):
-                e = struct.unpack_from('<H', d, p + 8 + 2 * i)[0]
-                if e >> 12 == 3:
-                    rel.append(s.base + page + (e & 0xfff))
-            p += bs
-        rel.sort()
-        s.rset = frozenset(rel)
-        s.taken = sorted(s.u32(r) for r in rel)
-
-    def off(s, a):
-        for n, va, vs, ro, rs, ch in s.secs:
-            if va <= a < va + vs and a - va < rs:
-                return ro + a - va
-        return None
-
-    def u32(s, a):
-        o = s.off(a)
-        return struct.unpack_from('<I', s.d, o)[0] if o is not None else 0
-
-    def bytes(s, a, n):
-        o = s.off(a)
-        return s.d[o:o + n]
+class Image(_FImage):
+    """The one image loader is fnvlift.image.Image(path, base): the image as the Windows loader maps it at the module table's assigned base (every image has a base from its module-table row; there is no default)."""
+    def __init__(s, path, base):
+        super().__init__(path, base)
+        s.pe = struct.unpack_from('<I', s.d, 0x3c)[0]
 
 
 def explore(img, lo, hi, code):
@@ -135,11 +108,13 @@ def memslot(i, o, sz):
     return ('s', m.disp, sz) if b == 'esp' else ('b', m.disp, sz) if b == 'ebp' else ('g', m.disp & M32) if b is None else None
 
 
-def load_universe(exe):
+def load_universe(exe, base):
     global IMG
-    IMG = Image(exe)
+    IMG = Image(exe, base)
     raw = open(UNI, 'rb').read()
     rows = []
+    hd = raw.split(b'\n', 1)[0].decode()
+    if hd.startswith('# base=0x') and int(hd[9:hd.index(':')], 16) != base: sys.exit('x86flow: universe.tsv is stated at base %s, the image was given base %08x' % (hd[7:hd.index(':')], base))      # the facts and the image speak one base
     for ln in raw.decode().splitlines():
         f = ln.split('\t')
         if len(f) >= 3 and f[2].isdigit() and int(f[2]) > 0:

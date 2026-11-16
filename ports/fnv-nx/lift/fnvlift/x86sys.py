@@ -6,6 +6,9 @@ PATH = inputs.get('x86sys')       # explicit: the platform X86SYS output, passed
 REC = json.load(open(PATH))
 assert REC['format'] == 'fnvnx-x86sys/2', REC['format']
 SEL = {n: v['value'] for n, v in REC['selectors'].items() if 'value' in v}          # name -> selector (cs ds es ss fs tr; gs is undecided)
+INT_EXCLUDED = {int(k): v for k, v in REC['int_ring3']['excluded'].items()}                # vectors a documented gate excludes at the declared OS: each carries its own status (undecided: no body)
+INT_OTHER = REC['int_ring3']['other_vectors']                                          # what a user-mode `int n` at every vector that is neither a gate nor excluded does (fault, exception code, parameters, address, eip_advance)
+NULL_SEG = REC['null_seg_access']                                                       # a memory operand through a null ds/es/fs/gs: fault row + privileged-opcode check (Wine 9.0 is_privileged_instr)
 INT_VECTORS = tuple(REC['int_ring3']['vectors'])                                        # the ring-3 gates; every other vector is undecided (int_ring3.other_vectors)
 MOV_TO_SREG = {r: (tuple(REC['mov_to_sreg'][r]['selectors']), REC['mov_to_sreg'][r]['null']) for r in ('es', 'ds', 'fs', 'gs', 'ss')}      # register -> (loadable non-null selectors, null loadable)
 UNDECIDED = sorted(k for k, v in REC.items() if isinstance(v, dict) and v.get('status') == 'undecided') + ['selectors.' + n for n, v in REC['selectors'].items() if 'value' not in v] \

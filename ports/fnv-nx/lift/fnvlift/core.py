@@ -1,7 +1,7 @@
 """Decode, recursive descent, jump tables, emit loop, the per-function context and the handler registry.
 
 Dispatch order per instruction (same as the PoC): mnemonic handler (@op); a handler may return SKIP to fall
-through; then the fallbacks in registration order (@fallback(pred): x87 by opcode byte, SSE by xmm operand);
+through; then the shape handlers in registration order (@shape_handler(pred): x87 by opcode byte, SSE by xmm operand);
 then Unsupported('insn ...')."""
 import bisect
 import re
@@ -37,7 +37,7 @@ CC = {'o': 'of', 'no': '!of', 'b': 'cf', 'ae': '!cf', 'e': 'zf', 'ne': '!zf', 'b
 
 SKIP = object()      # a handler returns this when its extra condition fails: dispatch continues
 OPS = {}             # mnemonic -> handler(cx, ins)
-FALLBACKS = []       # (pred(cx, ins), handler(cx, ins)), tried in order when no mnemonic handler took the insn
+SHAPE_HANDLERS = []       # (pred(cx, ins), handler(cx, ins)), tried in order when no mnemonic handler took the insn
 
 
 def op(*names):
@@ -48,9 +48,9 @@ def op(*names):
     return deco
 
 
-def fallback(pred):
+def shape_handler(pred):
     def deco(fn):
-        FALLBACKS.append((pred, fn))
+        SHAPE_HANDLERS.append((pred, fn))
         return fn
     return deco
 
@@ -266,7 +266,7 @@ def dispatch(cx, ins):
     h = OPS.get(cx.m)
     if h is not None and h(cx, ins) is not SKIP:
         return
-    for pred, fn in FALLBACKS:
+    for pred, fn in SHAPE_HANDLERS:
         if pred(cx, ins):
             fn(cx, ins)
             return
@@ -316,13 +316,48 @@ def gs_guard(cx, ins):
         # wine-9.0: err == 0 and not is_privileged_instr -> rec.ExceptionCode = EXCEPTION_ACCESS_VIOLATION, NumberParameters = 2, ExceptionInformation[0] = 0, [1] = 0xffffffff); the same row as f_sys.gp_cond. Nothing was modified yet.
         cx.em(f_sys.gp_cond(cx, '1'))
         return
-    g = [o for o in ins.operands if o.type == X.X86_OP_MEM and o.mem.segment == X.X86_REG_GS]
+    # the null_seg_access row of x86sys (L5): an access through an effective segment register S (prefix, or the default) that may hold the null selector raises the row at this instruction; PRIV vs AV by the
+    # row's opcode set. S may hold null in this image iff the SEGWRITES fact (tools/segwrites.py) does not prove it non-null: its initial selector is null, or a write of S loads a selector not proven non-null; ss and cs never
+    # hold it (loading null is #GP, x86sys mov_to_sreg). lea and the NO_ACCESS mnemonics have no access (returned above); a prefixed instruction without a memory operand has no operand here.
+    from . import x86sys
+    SEGI = {X.X86_REG_ES: 0, X.X86_REG_DS: 3, X.X86_REG_FS: 4, X.X86_REG_GS: 5}
+    eff = set()
+    for o in ins.operands:
+        if o.type == X.X86_OP_MEM:
+            sg = o.mem.segment or (X.X86_REG_SS if o.mem.base in (X.X86_REG_ESP, X.X86_REG_EBP) else X.X86_REG_DS)
+            if sg in SEGI: eff.add(SEGI[sg])
+    if ins.mnemonic.split(' ')[-1] == 'xlatb': eff.add(3)             # implicit ds:[ebx+al]
+    g = sorted(i for i in eff if may_null(i))
     if not g:
         return
-    cond = 'SELK(c->sel[SEG_GS])==0'
-    if any(o.access & capstone.CS_AC_WRITE for o in g):
-        cond += '||SELK(c->sel[SEG_GS])==SELK(SEL_CS)'
-    cx.em(f_sys.gp_cond(cx, cond))
+    r = x86sys.NULL_SEG
+    cond = '||'.join('SELK(c->sel[%d])==0' % i for i in g)
+    if f_sys.row_privileged(ins.bytes, r):
+        cx.nonlocal_ = True
+        cx.raises.add(cx.a)
+        cx.em('if(%s){ SYNC_OUT; REGS(); FNVL_RAISE(FNVL_PRIV,0x%xu); REGS(); SYNC_IN; goto nonlocal; }' % (cond, cx.a))
+    else:
+        if not (r['exception_code'] == 0xC0000005 and r['parameters'] == [0, 0xffffffff] and r['flags'] == 0 and r['eip_advance'] == 0 and r['address'] == 'the faulting instruction'):
+            raise Unsupported('null_seg_access row is not the access violation the runtime raises')
+        cx.em(f_sys.gp_cond(cx, cond))
+    if any(o.type == X.X86_OP_MEM and o.mem.segment == X.X86_REG_GS and o.access & capstone.CS_AC_WRITE for o in ins.operands):
+        cx.em(f_sys.gp_cond(cx, 'SELK(c->sel[SEG_GS])==SELK(SEL_CS)'))
+
+
+_SEGW = {}
+
+
+def may_null(i):
+    """may the data segment register with state index i (0 es, 3 ds, 4 fs, 5 gs) hold the null selector in the image being lifted (see gs_guard)"""
+    import json
+    from . import inputs, x86sys
+    n = {0: 'es', 3: 'ds', 4: 'fs', 5: 'gs'}[i]
+    if n not in x86sys.SEL:
+        raise Unsupported('%s: the initial selector is undecided in x86sys selectors' % n)
+    path = inputs.get('segwrites')
+    if path not in _SEGW:
+        d = json.load(open(path)); assert d['format'] == 'fnvnx-segwrites/2', d['format']; _SEGW[path] = d['images']
+    return _SEGW[path][inputs.get('image')][n]['guard']
 
 
 def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):

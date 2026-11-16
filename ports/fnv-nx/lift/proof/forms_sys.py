@@ -32,8 +32,13 @@ handler(*_PRIV)(privileged)
 @handler('int')
 def int_(c):
     v = c.ops[0].val & 0xff
-    assert v in INT_KIND, 'int 0x%x: the gate is undecided in platform/declared/x86sys.json' % v
-    c.F.fault(INT_KIND[v], C(1, 1))
+    if v in INT_KIND:                                     # a gate of the record: its trap row
+        c.F.fault(INT_KIND[v], C(1, 1)); return
+    assert v not in x86sys.INT_EXCLUDED, 'int 0x%x: undecided on the declared OS (x86sys int_ring3)' % v
+    o = x86sys.INT_OTHER                                  # every other vector: the record's other_vectors row is the access violation {0, 0xffffffff} at the int (error code vector*8+2)
+    assert (o['fault'] == '#GP' and o['exception_code'] == int(_FT['AV']['status'], 16) and o['flags'] == 0 and o['eip_advance'] == 0 and o['address'] == 'the int instruction'
+            and o['error_code'] == 'vector*8+2' and o['parameters'] == [0, 0xffffffff]), 'int 0x%x: the other_vectors row of x86sys int_ring3 is not the access violation the runtime raises' % v
+    c.F.fault(K_AV, C(1, 1))
 @handler('into')
 def into(c): c.F.fault(K_INTO, V('of', 1))
 @handler('int1')
