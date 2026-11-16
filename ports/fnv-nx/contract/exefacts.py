@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """exefacts - the one fact base read from the player's executable (L1 CONTRACT, M0).
 
-    exefacts.py --exe FalloutNV.exe --units units.json --out facts.json [--jobs N]
+    exefacts.py --exe FalloutNV.exe --out facts.json [--jobs N]
 
 Everything a boundary needs is a fact of the exe: base relocations, imports, RTTI vftables, and per function
 the `ret N` set, direct and indirect calls, vptr stores (in order, with base and
@@ -12,11 +12,12 @@ Facts (store.py kind `facts`, canonical JSON, one dict; the result does not depe
   meta      sha256 of the exe and of this file, counts
   base, secs{name: (va, vsize, raw_off, raw_size)}, relocs[sorted va]
   imports   {iat_slot_va: (dll, name)}
-  vft       {vftable_va: (rtti_name, col_offset, [slot targets], col_va)}; a vftable without RTTI that the
-            decomp names has (its `??_7` symbol, 0, slots, 0)
+  vft       {vftable_va: (rtti_name, col_offset, [slot targets], col_va)}  (the RTTI vftables; no source of the decomp is read)
   ptrs      [(va, target)]   every relocated code pointer held in data (slots, callbacks, __xc ...)
   xc        [target ...]     the C++ initializer table, in order
-  fn        {va: F}          F as returned by analyze() plus 'sym', 'decomp', 'unit'
+  fn        {va: F}          F as returned by analyze(); the entries are the PE entry point, every relocated code pointer in data and the
+                             direct call/jump targets reachable from them (no function list of the decomp is read; a function ends
+                             before the next known entry)
 """
 import argparse, bisect, collections, hashlib, json, os, struct, sys
 import capstone
@@ -26,7 +27,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from contract import store
 from contract import exepin
 
-VERSION = 8
+VERSION = 9
 
 
 class Image:
@@ -41,6 +42,7 @@ class Image:
         nsec, = struct.unpack_from('<H', d, pe + 6)
         opt, = struct.unpack_from('<H', d, pe + 20)
         self.base, = struct.unpack_from('<I', d, pe + 24 + 28)
+        self.entry = self.base + struct.unpack_from('<I', d, pe + 24 + 16)[0]   # AddressOfEntryPoint
         self.dd = [struct.unpack_from('<II', d, pe + 24 + 96 + 8 * i) for i in range(16)]
         self.secs = {}
         o = pe + 24 + opt
@@ -155,28 +157,6 @@ def rtti_vftables(img):
     return vft
 
 
-def named_vftables(img, units, vft):
-    """Add the vftables the decomp names (`??_7...` in units.json) that carry no RTTI: (symbol, 0, slots, 0)."""
-    names = {}
-    for un in units['units']:
-        for sym, a in un.get('symbols', {}).items():
-            if sym.startswith('??_7'):
-                names.setdefault(int(a, 16), sym)
-    starts = set(vft) | set(names)
-    out = dict(vft)
-    for v, sym in names.items():
-        if v in vft:
-            continue
-        slots = []
-        a = v
-        while a in img.rset and img.intext(img.u32(a)) and (a == v or a not in starts):
-            slots.append(img.u32(a))
-            a += 4
-        if slots:
-            out[v] = (sym, 0, slots, 0)
-    return out
-
-
 def data_code_pointers(img):
     """Every relocated word outside .text whose value is an address in .text."""
     t0, ts = img.text
@@ -209,14 +189,14 @@ class Analyzer:
         self.t0, self.ts = img.text
         self.traw = img.secs['.text'][2]
 
-    def analyze(self, a, size, bound):
-        """size: decomp size or 0 (then the function ends before `bound`, the next known entry)."""
+    def analyze(self, a, bound):
+        """The function at A ends before BOUND, the next known entry."""
         img, md = self.img, self.md
-        lo, hi = a, (a + size if size else bound)
+        lo, hi = a, bound
         d, t0, traw, relocs = img.d, self.t0, self.traw, img.relocs
         ins = {}          # addr -> size
         work = [a]
-        F = dict(a=a, size=size, ret=set(), calls=[], tails=[], icalls=[], itails=[], stores=[], vrefs=[],
+        F = dict(a=a, ret=set(), calls=[], tails=[], icalls=[], itails=[], stores=[], vrefs=[],
                  data=[], codeptrs=[], imports=[], jt=[], fs=0, x87=0, bad=0)
         pend = {}         # reg bit -> vftable loaded by `mov reg, imm`
         last = {}         # reg id -> displacement of the last `mov reg, [reg2+disp]`
@@ -356,45 +336,36 @@ class Analyzer:
 _AN = None
 
 
-def _init(exe, units):
+def _init(exe):
     global _AN
     img = Image(exe)
-    _AN = Analyzer(img, named_vftables(img, json.load(open(units)), rtti_vftables(img)))
+    _AN = Analyzer(img, rtti_vftables(img))
 
 
 def _run(job):
     return [_AN.analyze(*j) for j in job]
 
 
-def build(exe, units, jobs=4, log=print):
+def build(exe, jobs=4, log=print):
     import multiprocessing
     img = Image(exe)
-    u = json.load(open(units))
-    rtti = rtti_vftables(img)
-    vft = named_vftables(img, u, rtti)
+    vft = rtti_vftables(img)
     ptrs = data_code_pointers(img)
     xc, xc_va = xc_table(img, ptrs)
-    dec = {}
-    for un in u['units']:
-        for f in un['functions']:
-            dec[int(f['address'], 16)] = (f['size'], f['symbol'], un['source'])
-    known = dict.fromkeys(dec, 0)
-    for a in dec:
-        known[a] = dec[a][0]
     fn = {}
-    todo = set(dec)
+    todo = {img.entry}
     for _, v in ptrs:
         todo.add(v)
     rnd = 0
-    with multiprocessing.Pool(jobs, _init, (exe, units)) as pool:
+    with multiprocessing.Pool(jobs, _init, (exe,)) as pool:
         while todo:
             rnd += 1
-            starts = sorted(set(known) | todo | set(fn))
+            starts = sorted(set(todo) | set(fn))
             jobs_ = []
             for a in sorted(todo):
                 k = bisect.bisect_right(starts, a)
                 bound = starts[k] if k < len(starts) else img.text[0] + img.text[1]
-                jobs_.append((a, known.get(a, 0), bound))
+                jobs_.append((a, bound))
             chunks = [jobs_[i:i + 400] for i in range(0, len(jobs_), 400)]
             new = set()
             for res in pool.imap(_run, chunks):   # ordered: the merge order is the chunk order
@@ -404,21 +375,9 @@ def build(exe, units, jobs=4, log=print):
                         if img.intext(t) and t not in fn and t not in todo:
                             new.add(t)
             log('round %d: analyzed %d, new targets %d' % (rnd, len(jobs_), len(new)))
-            # a target inside an already analyzed decomp function is a mid-function entry, not a function
-            ds = sorted(dec)
-            keep = set()
-            for t in new:
-                k = bisect.bisect_right(ds, t) - 1
-                if k >= 0 and t < ds[k] + dec[ds[k]][0]:
-                    continue
-                keep.add(t)
-            todo = keep
-    for a, F in fn.items():
-        F['decomp'] = a in dec
-        F['sym'] = dec[a][1] if a in dec else ''
-        F['unit'] = dec[a][2] if a in dec else ''
+            todo = new
     meta = dict(version=VERSION, exe_sha256=img.sha256, tool_sha256=hashlib.sha256(open(__file__, 'rb').read()).hexdigest(),
-                relocs=len(img.relocs), vftables=len(vft), vftables_rtti=len(rtti), functions=len(fn), decomp=len(dec), ptrs=len(ptrs),
+                relocs=len(img.relocs), vftables=len(vft), functions=len(fn), ptrs=len(ptrs),
                 xc=len(xc), xc_va=xc_va, imports=len(img.imports))
     return dict(meta=meta, base=img.base, secs=img.secs, relocs=img.relocs, imports=img.imports, vft=vft, ptrs=ptrs,
                 xc=xc, fn=fn)
@@ -427,12 +386,11 @@ def build(exe, units, jobs=4, log=print):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--exe', required=True)
-    ap.add_argument('--units', required=True)
     ap.add_argument('--out', required=True)
     ap.add_argument('--jobs', type=int, default=4)
     ap.add_argument('--vft-out', help='also write the sorted list of vftable addresses (input of objfacts_one.py)')
     a = ap.parse_args()
-    facts = build(a.exe, a.units, a.jobs, log=lambda s: print(s, file=sys.stderr))
+    facts = build(a.exe, a.jobs, log=lambda s: print(s, file=sys.stderr))
     store.save(a.out, 'facts', facts)
     if a.vft_out:
         with open(a.vft_out, 'w') as fh:

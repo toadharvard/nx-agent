@@ -14,9 +14,9 @@ def check(what, got, want):
         fails.append('%s: got %r want %r' % (what, got, want))
 
 
-def fn(size=0x40, calls=(), tails=(), icalls=(), data=(), decomp=True):
+def fn(size=0x40, calls=(), tails=(), icalls=(), data=()):
     return dict(size=size, calls=[(0, t) for t in calls], tails=[(0, t) for t in tails], icalls=list(icalls),
-                data=[(0, d) for d in data], imports=[], decomp=decomp)
+                data=[(0, d) for d in data], imports=[])
 
 
 def ob(data=(), calls=(), other=(), vcall=()):
@@ -90,13 +90,13 @@ check('vcall fail', sorted(v.items()), [(0x40, 'other')])
 check('vcall fail list', gate_vcall.run(F, O, tmp)['fail'], ['other'])
 
 # ---- xc
-F = {'fn': {0x400100: fn(), 0x400200: fn(decomp=True), 0x400300: fn(decomp=False)}, 'secs': secs,
+F = {'fn': {0x400100: fn(), 0x400200: fn(), 0x400300: fn()}, 'secs': secs,
      'xc': [0x400100, 0x400200, 0x400300]}
 O = {('a', 0x400100): ob(), ('b', 0x400100): ob(), ('a', 'ztv'): ob()}
 r = gate_xc.run(F, O, tmp)
-check('xc counts', dict(r['counts']), {'native': 1, 'missing_decomp': 1, 'missing_other': 1})
-check('xc rows', sorted((a, vv) for a, vv, _ in r['rows']), [(0x400200, 'missing_decomp'), (0x400300, 'missing_other')])
-check('xc fail', r['fail'], ['missing_decomp', 'missing_other'])
+check('xc counts', dict(r['counts']), {'native': 1, 'missing': 2})
+check('xc rows', sorted((a, vv) for a, vv, _ in r['rows']), [(0x400200, 'missing'), (0x400300, 'missing')])
+check('xc fail', r['fail'], ['missing'])
 
 for f in fails:
     print('FAIL', f)

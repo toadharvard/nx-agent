@@ -16,7 +16,6 @@ def run(facts, obj, link):
         if a in bound:
             counts['native'] += 1
             continue
-        v = 'missing_decomp' if facts['fn'].get(a, {}).get('decomp') else 'missing_other'
-        counts[v] += 1
-        rows.append((a, v, 'no native body'))
-    return {'counts': dict(counts), 'rows': rows, 'fail': ['missing_decomp', 'missing_other'], 'judged': len(facts['xc'])}
+        counts['missing'] += 1
+        rows.append((a, 'missing', 'no native body'))
+    return {'counts': dict(counts), 'rows': rows, 'fail': ['missing'], 'judged': len(facts['xc'])}
