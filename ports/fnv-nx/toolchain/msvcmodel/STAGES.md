@@ -60,5 +60,5 @@ cl 15.00 names a function type by how each parameter was DECLARED, and GCC hash-
 grokdeclarator `cdk_function`, cp-tree.h `DECL_FUNCTION_PARAMETER_P`) therefore records the forms as the type attribute `fnvnx_parmform` (per parameter `p`/`a`/`f`, then the cv digit), only when some
 parameter is not plain; the names plugin reads it. Its certified domain is the forms that names.expect (f8) records for cl: plain, array, const pointer, and a function-typed parameter of a
 declaration. Outside it the row is the typed fact `nodecor:fnparmform:<form>`; these forms **need a cl reference** before a name is written: a function-typed parameter inside a function type, a
-volatile or restrict pointer parameter inside a function type, a const non-pointer parameter inside a function type, and a parameter declared through a typedef of a function type (taken as written
-as a function; unchecked against cl). tests/names/fnparm_domain.cpp pins the class.
+volatile or restrict pointer parameter inside a function type, a const non-pointer parameter inside a function type, and a parameter declared through a typedef of a function type (form `t`, DECL_FUNCTION_TYPEDEF_PARAMETER_P; it is no longer taken as written
+as a function: the certified function-typed parameter is the declarator form `f`). tests/names/fnparm_domain.cpp pins the class.

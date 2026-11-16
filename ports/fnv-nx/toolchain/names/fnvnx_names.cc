@@ -200,7 +200,7 @@ static char ptr_letter(int q)
  * does not matter). GCC keeps only the last declaration's PARM_DECLs, so the first is recorded when it is declared, by the
  * uid of the declaration that survives the merge (a template instance: of its most general template's pattern). A function
  * whose first declaration is its definition, or that was never declared before (no record), has its own. */
-struct ParmForm { int quals; bool array; bool fn; };
+struct ParmForm { int quals; bool array; bool fn; bool tdef; };
 static std::map<UidKey, std::vector<ParmForm>> first_parms;
 static UidKey parm_key(tree f)
 {
@@ -215,7 +215,7 @@ static std::vector<ParmForm> parm_forms(tree f)
 {
   std::vector<ParmForm> v;
   for (tree p = DECL_ARGUMENTS(f) ? FUNCTION_FIRST_USER_PARM(f) : NULL_TREE; p; p = DECL_CHAIN(p))
-    v.push_back({cp_type_quals(TREE_TYPE(p)), (bool)DECL_ARRAY_PARAMETER_P(p), (bool)DECL_FUNCTION_PARAMETER_P(p)});
+    v.push_back({cp_type_quals(TREE_TYPE(p)), (bool)DECL_ARRAY_PARAMETER_P(p), (bool)DECL_FUNCTION_PARAMETER_P(p), (bool)DECL_FUNCTION_TYPEDEF_PARAMETER_P(p)});
   return v;
 }
 struct ArgKey { tree type; int quals; bool array; bool fn; std::string enc; };
@@ -513,14 +513,16 @@ struct M {
         q = cp_type_quals(TREE_TYPE(parm));
         is_array = DECL_ARRAY_PARAMETER_P(parm);
         fn = DECL_FUNCTION_PARAMETER_P(parm);
-        if (first) { q = (*first)[pi].quals; is_array = (*first)[pi].array; fn = (*first)[pi].fn; }
+        bool tdef = DECL_FUNCTION_TYPEDEF_PARAMETER_P(parm);
+        if (first) { q = (*first)[pi].quals; is_array = (*first)[pi].array; fn = (*first)[pi].fn; tdef = (*first)[pi].tdef; }
+        if (tdef) { fail("fnparmform:a parameter declared through a typedef of a function type"); return; }
         parm = DECL_CHAIN(parm);
       } else if (pf) {
         if (strlen(pf) <= 2 * pi + 1) { fail("fnparmform:the forms of the parameters are not those of the type"); return; }
         char f = pf[2 * pi];
         q = pf[2 * pi + 1] - '0';
         is_array = f == 'a';
-        fn = f == 'f';
+        fn = f == 'f' || f == 't';
         if (fn) { fail("fnparmform:a parameter written as a function inside a function type"); return; }
         if (q && !(q == TYPE_QUAL_CONST && TREE_CODE(t) == POINTER_TYPE && !is_array)) {
           fail("fnparmform:a cv-qualifier other than const on a pointer parameter inside a function type"); return;
