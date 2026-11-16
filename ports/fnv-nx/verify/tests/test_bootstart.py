@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/hostabi/include/fnvnx/placement.h ports/fnv-nx/verify
 """Tests of verify/bootstart.py: the loader's start rules S1..S8 as assertions over a boot trace. Hand-built trace documents of a hand-laid
 tiny PE (memory laid out page by page here, not by the checker's functions); one pass and at least one fail per rule. Exit 0 on pass."""
 import copy

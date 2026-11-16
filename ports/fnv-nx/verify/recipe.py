@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/verify ports/fnv-nx/toolchain @admitted-recipes
 """recipe: build a product root from its recipe `build.json` ("fnvnx-recipe/1", contract in RECIPE.md) on the stage machinery:
 every step is a sandbox stage (sandbox.py) keyed by its declared inputs, cached in the store (cas.py).
     python3 -I recipe.py build --root ports/fnv-nx/X --store S --out DIR [--jobs N]     (cwd = checkout root; exit 0 green, 2 red)
@@ -180,7 +181,7 @@ LANG_X = {"c": "c", "cxx": "c++", "asm": "assembler-with-cpp"}   # the driver's 
 # diagnostics, defines, the language standard, the optimisation level (-O0..-O3, -Os, -Og: not -Ofast, which switches FP semantics), debug info,
 # section splitting. -Wa, -Wl, -Wp are driver pass-throughs, not warnings. `--param` with the compiler's own garbage-collector knobs
 # (ggc-min-expand, ggc-min-heapsize): they change when the compiler collects its memory, never the code it emits (the gcstress variant).
-PER_ROOT = re.compile(r"--param|ggc-min-(?:expand|heapsize)=[0-9]+|-W(?![alp],)[^\s]*|-D[^\s]+|-std=[^\s]+|-O[0-3sg]|-g[^\s]*|-ffunction-sections|-fdata-sections|-ftime-report")
+PER_ROOT = re.compile(r"--param|ggc-min-(?:expand|heapsize)=[0-9]+|-W(?![alp],)[^\s]*|-D[^\s]+|-std=[^\s]+|-O[0-3sg]|-g[^\s]*|-ffunction-sections|-fdata-sections|-ftime-report|-f(?:no-)?schedule-insns")
 # The options of every link, fixed by the rule (RECIPE.md "Link"): the specs of the gcc driver for the ILP32 PIE multilib, no gc-sections, no id.
 AUX_FLAGS = ["-fstack-usage"]   # build --stack-usage 1: the CC stage also writes unit.su (documented: one line per function, its frame size and whether it is static); no code generation changes
 LD_FIXED = ["--build-id=none", "-pie", "--no-dynamic-linker", "-z", "text", "-z", "now", "-z", "pack-relative-relocs", "-z", "max-page-size=0x1000",
@@ -428,12 +429,16 @@ def merge_inputs(base, extra, store, ws):
     return sorted(out, key=lambda i: i["at"])
 
 
-def outside_files(text, at):
+SANDBOX_TMP = "/tmp"   # the tmpfs every hermetic stage mounts (sandbox.py): the temporary directory of a driver run in a stage
+
+
+def outside_files(text, at, tmp=SANDBOX_TMP):
     """The `.o` files of the driver's link command TEXT that lie outside the runtime external mounted at AT, the program's own object (the driver's
-    temporary /tmp/cc*.o) excepted: a start or end file the pinned runtime's driver names from elsewhere. Empty when every one is the runtime's."""
+    temporary TMP/cc*.o; TMP is the temporary directory of the process that ran the driver: the stage's tmpfs by default) excepted: a start or end file the pinned runtime's driver names from elsewhere. Empty when every one is the runtime's."""
     line = [ln for ln in text.splitlines() if ln.strip() and not ln.startswith("COLLECT_GCC_OPTIONS=")][-1]
     toks = [posixpath.normpath(t.strip('"')) for t in line.split() if t.strip('"').endswith(".o") and t.strip('"').startswith("/")]
-    return sorted(t for t in toks if not t.startswith(at + "/") and not re.fullmatch(r"/tmp/cc[^/]*\.o", t))
+    tmp = posixpath.normpath(tmp)
+    return sorted(t for t in toks if not t.startswith(at + "/") and not re.fullmatch(re.escape(tmp) + r"/cc[^/]*\.o", t))
 
 
 def entry_object(objs, entry):
@@ -3391,7 +3396,7 @@ def build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True, shard=N
     in a shard build, its objects.json says `shard`. -> the objects dict; raises RecipeError for an invalid recipe."""
     env_blocked(repo)   # BEFORE any stage: nothing below runs or stores on a machine that is not the declared one
     spec = root
-    j = Job(repo, spec, store, jobs, ext or os.path.join(store, "external"))
+    j = Job(repo, spec, store, jobs, ext or os.environ.get("FNVNX_EXTCACHE") or os.path.join(store, "external"))   # FNVNX_EXTCACHE: the cache a test gate mounts (gate_tests.fetch_guest)
     j.shard = shard
     if shard:
         link = False

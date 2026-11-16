@@ -109,7 +109,7 @@ def build(sources, plugins=None, lifted=False, flags=()):
         os.environ['ARTIFACTS_URL'] = pack
     else:
         for n, text in sources.items():
-            _w(repo, ROOT + '/%s.cc' % n, text)
+            _w(repo, ROOT + '/' + (n if os.path.splitext(n)[1] in recipe.CC_EXT + recipe.CXX_EXT + recipe.ASM_EXT else n + '.cc'), text)   # a name with a unit suffix is the unit; a bare name is a C++ unit
         root['cxx_origin'] = 'native'
     _w(repo, ROOT + '/build.json', json.dumps(rec, indent=1))
     _w(repo, T + 'verify/guest_compiler.json', json.dumps(pin))

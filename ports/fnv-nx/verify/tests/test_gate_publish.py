@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/hostabi ports/fnv-nx/manifest ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Every write into GATE_CACHE is a publication (spec: verify/RECIPE.md "Externals in a shared store", the rule of publish_dir / cas.publish_file).
 Real processes on the real checkout: two processes run gate_build.ensure of one product root on ONE cache at the same moment; both are green, both read the
 same published objects dir, no temporary name is left, and the content of the cache (store objects, stage results, objects.json after the cache path is
@@ -16,7 +17,7 @@ REPO = os.path.realpath(os.path.join(VERIFY, "..", "..", ".."))
 sys.path.insert(0, VERIFY)
 import cas  # noqa: E402
 
-ROOT = "ports/fnv-nx/lib/sha256"
+ROOT = "ports/fnv-nx/hostabi/product"
 FAILS = 0
 
 
@@ -60,8 +61,7 @@ def listing(cache):
     return got
 
 
-def main():
-    tmp = tempfile.mkdtemp(prefix="gate-publish-")
+def main(tmp):
     shared, fresh, go = [os.path.join(tmp, x) for x in ("shared", "fresh", "go")]
     code = CHILD % (VERIFY, ROOT)
     kids = [subprocess.Popen([sys.executable, "-I", "-c", code, shared, go], cwd=REPO, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) for _ in range(2)]
@@ -92,5 +92,14 @@ def main():
     return 1 if FAILS else 0
 
 
+def run():
+    import shutil
+    tmp = tempfile.mkdtemp(prefix="gate-publish-")
+    try:
+        return main(tmp)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(run())

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """gate_admit.judge: every tracked file under a root (the nearest one), the class of the root one of CLASSES, no row naming gates."""
 import os
 import sys

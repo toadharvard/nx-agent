@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/lib/sha256/sha256.c ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for the lib/sha256 body selection: the guest root (console_cpu.features has crypto, so the compiler defines __ARM_FEATURE_SHA2 from the generated
 -march) compiles the Arm SHA2 body; the host variant (x86) compiles the portable body. The choice is the feature macro, nothing else.
 Plain script: PASS/FAIL lines, exit 0 on pass. Needs the pinned compiler (fetched by recipe into the store)."""
