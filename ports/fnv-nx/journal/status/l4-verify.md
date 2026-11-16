@@ -457,3 +457,10 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - w8: redoing.
   - Reported to L1: 37e483aa6 and w28 are a second L1 lineage; land them in the next candidate.
 - bottleneck: w8 redo; L1 next candidate (w28) for .gamedata_pins; the L3a post-cand3 pack store | w8 working, no farms
+- 06:00: done: w8 fea5bdc34, merged into the lead branch. L1 paths equal the trunk fac693694; the only exceptions are L4's own boot*.py, test_boot*.py, icount and boot_job.sh, plus the owner-head admit rows. link.entry is declared (bootguest_entry, icfx_start).
+  - recipe.check at fea5bdc34: valid for boot, tests/bootguest, verify/tests/icount, render/gl4, gl4shim and nxgpu; red for render/d3d9.
+  - render/d3d9 (owner L6): gen:file-escape. state_gen.py, gen_impl.py and envq.py read bridgefacts/d3d9/d3d9_spec.json; envq.py reads shim d3d9types.h; gen_wine_ids.py reads verify/wine_fixme.tsv. Also, `uses: shim` has no INCLUDE output (owner L1).
+  - gl4 build: 17 objects compiled. The link is red because hostabi/build.host.json does not fit the trunk's host-variant schema (include list, units "all"); owner L5.
+  - Blocked on L1 cand4 (w28): gamedata_fetch with .gamedata_pins, for boot_job.
+  - w8 archived (idle).
+- bottleneck: L5 hostabi schema (gl4 link); L6 d3d9 inputs; L1 cand4; the L3a post-cand3 pack store | no workers, no farms
