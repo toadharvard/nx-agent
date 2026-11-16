@@ -4,17 +4,15 @@ goes through origins/mkx/frame_offsets without an exception, and the machine-cod
 address with known origins is judged for EVERY origin (F only if every one passes), an unknown origin is never F; a crash of the scan is a red
 row naming the object (gate_order.scan_object). Hand-assembled ILP32 objects, no network. Run: python3 -I <this file>."""
 import os
-import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
-import os
 import subprocess
 import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..'))
+sys.path.insert(0, os.path.join(HERE, '..', '..', 'contract'))
 import a64order as A
-from lift.gates import gate_order
+import gate_order
 
 fails = []
 tmp = tempfile.mkdtemp(prefix='ordertags-')

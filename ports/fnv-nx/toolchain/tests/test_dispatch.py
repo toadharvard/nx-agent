@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/platform/include
 """Test of toolchain/dispatch/fnvnx_dispatch.cc (DISPATCH1), built from the tracked source with the argv of the recipe's plugin
 stage (plugbuild.py), loaded after the sdd and names plugins as in the product flag set. Every indirect call (function pointer,
 virtual call, delete-expression, tail call, calls in a loop) checks its own site and calls fnvnx_dispatch on a miss; a direct

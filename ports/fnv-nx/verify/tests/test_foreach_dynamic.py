@@ -67,6 +67,9 @@ if os.geteuid() != 0:
     print("SKIP: needs root and the declared environment")
     sys.exit(0)
 td = tempfile.mkdtemp(prefix="fed-")
+import atexit  # noqa: E402
+import shutil  # noqa: E402
+atexit.register(shutil.rmtree, td, ignore_errors=True)   # the scratch directory goes with the run, whatever the outcome
 store = os.path.join(td, "store")
 os.makedirs(store)
 r1, o1 = build(make(td, "a", "shape\tclass\nadd\tint\nmul\tint\n"), store, "1")

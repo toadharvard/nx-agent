@@ -58,6 +58,9 @@ recipe.deb_pins = lambda: {"base-files": {"version": "1", "sha256": "1" * 64}}
 recipe.Job._deb_tree = lambda self, tmp, name, pin: os.makedirs(os.path.join(tmp, "deb-" + name))
 recipe.env_blocked = lambda repo: None
 td = tempfile.mkdtemp(prefix="sref-")
+import atexit  # noqa: E402
+import shutil  # noqa: E402
+atexit.register(shutil.rmtree, td, ignore_errors=True)   # the scratch directory goes with the run, whatever the outcome
 repo = os.path.join(td, "r")
 os.makedirs(repo)
 git(repo, "init", "-q")

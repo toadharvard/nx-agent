@@ -46,6 +46,7 @@ for f in tracked:
         t = open(os.path.join(ROOT, f), errors="ignore").read()
     except OSError:
         continue
+    t = "\n".join(ln.split(" #")[0] for ln in t.splitlines() if not ln.lstrip().startswith("#"))   # a comment spells nothing: only the shell text does
     if any(re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(x), t) for x in flags):
         spell.append(f)
 check("no tracked build script spells a runtime_cflags flag", not spell, spell)

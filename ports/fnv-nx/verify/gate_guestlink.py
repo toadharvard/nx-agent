@@ -32,8 +32,8 @@ def derive(repo, cache):
     if pin is None:
         raise ValueError("verify/guest_compiler.json is required")
     guests = [r for r in gate_build.buildable_roots(repo) if recipe.entry_of(admit, r).get("target") == "guest"]
-    if not guests:
-        raise ValueError("no guest root")
+    if not guests:   # no guest root links nothing: no runtime libs are derived (universe 0, by construction), not an input error
+        return {}, [], pin
     rootdef = set()
     for r in guests:
         res, _ = gate_build.ensure(r, cache, repo)

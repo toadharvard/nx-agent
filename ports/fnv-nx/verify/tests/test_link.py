@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/contract ports/fnv-nx/hostabi/product/build.json ports/fnv-nx/link
-# reads: ports/fnv-nx/shim/build.json ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
+# reads: ports/fnv-nx/contract ports/fnv-nx/link
+# reads: ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for the guest ELF link through verify/recipe.py (RECIPE.md "Link"): link.roots, link.libs, the options fixed by the rule and the
 `ldcheck` post stage (link/ldcheck.py). Toy product roots in temp git repos, built with the real compiler and linker of env.json in the real
 sandbox stages; fixtures are those of test_recipe.py (the toy root is an ILP32 PIE guest linked with the tree's own link/guest.ld).
