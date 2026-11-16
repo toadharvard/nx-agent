@@ -2534,7 +2534,7 @@ class Job:
             for d, home in ROOTFS_MEMO[mkey][2].items():
                 if not os.path.lexists(os.path.join(tmp, "deb-" + d)):
                     os.symlink(home, os.path.join(tmp, "deb-" + d))   # exec_unresolved and deb_resolve read the unpacked trees under tmp
-            return ROOTFS_MEMO[mkey][0], ROOTFS_MEMO[mkey][1]
+            return list(ROOTFS_MEMO[mkey][0]), list(ROOTFS_MEMO[mkey][1])   # copies: the caller appends its own inputs
         union, owner = os.path.join(tmp, "rootfs"), {}
         os.makedirs(union)
         for d in sorted(g["debs"]):
@@ -2573,7 +2573,7 @@ class Job:
                 shutil.move(os.path.join(tmp, "deb-" + d), home)
                 os.symlink(home, os.path.join(tmp, "deb-" + d))
             homes[d] = home
-        ROOTFS_MEMO[mkey] = (ins, links, homes)
+        ROOTFS_MEMO[mkey] = (list(ins), list(links), homes)
         return ins, links
 
     def _one_file(self, tmp, name, path, base):
