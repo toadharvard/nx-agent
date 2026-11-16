@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Gate "d3d9total" (fnvnx-gate/1, VERDICT class 7): the D3D9 -> backend translation is total by construction.
-    GATE_OUT=<dir> [GATE_CACHE=<dir>] [ARTIFACTS_URL=<git url>] python3 -I ports/fnv-nx/render/total/gate_d3d9total.py
+    GATE_OUT=<dir> GATE_CACHE=<dir> ARTIFACTS_URL=<git url> python3 -I ports/fnv-nx/render/total/gate_d3d9total.py
 Run in the checkout root (verify/verdict.py does). Writes GATE_OUT/d3d9total.json; exit 0 iff green, 2 red.
 Universe = every (enumeration, enumerator) of the enumerations the translation consumes by switch (SWITCHED of
-render/d3d9/front/gen_enums.py, enumerators from bridgefacts/d3d9/d3d9_spec.json plus VENDOR_FOURCC for D3DFORMAT), ids "enum:E:N",
-+ every row of render/shaders/total/sm_table.json (the SM1-3 commands, (stage, opcode form)), ids "sm:K".
+render/d3d9/env/gen_enums.py, enumerators from the interface table that bridgefacts/d3d9/d3d9_spec.py generates plus the vendor FOURCC of the pinned Wine mirror for D3DFORMAT), ids "enum:E:N",
++ every row of the generated sm_table.json of render/shaders/total (the SM1-3 commands, (stage, opcode form)), ids "sm:K".
 
 Declared inputs (nothing else is read): the tracked files (git ls-files) of INPUTS below (the d3d9 and translator recipes and the d3d9 root's include lists), copied into GATE_OUT/d3d9total.work;
 the external "mojoshader" of the translator root's recipe (render/shaders/translator/build.json: fnv-nx-build commit + tree_sha256, fetched by exact commit from
-ARTIFACTS_URL, default the fnv-nx-build repository, into GATE_CACHE/external/<commit> or the work dir; its tree hash, the hash of
+ARTIFACTS_URL (required, no default), into GATE_CACHE/external/<commit>; its tree hash, the hash of
 verify/cas.py, must equal tree_sha256); the programs /usr/bin/gcc, /usr/bin/clang, git of verify/env.json (absolute paths, compile only:
 nothing is linked or run) with the C headers of the pinned /usr/include tree and clang's resource headers.
 
@@ -23,7 +23,7 @@ front over E exists) and must compile without the switch flags (so that is the o
 matches for all enumerations, the front builds and E is sensitive.
 
 SM rule. The external is the translator root's own pinned MojoShader tree (the patched mirror; the pin is read from the recipe, nothing
-is applied or restated here); fnvnx_sm_rows.h (gen_sm_rows.py --check: equal to the generator's output for sm_table.json) is put next to fnvnx_sm_check.h.
+is applied or restated here); fnvnx_sm_rows.h (the same generator run as sm_table.json, read with it through recipe.stage_output) is put next to fnvnx_sm_check.h.
 The translator sources (mojoshader.c, the glsl profile; the profile set is the -DSUPPORT_PROFILE_* of the translator recipe) must compile: that evaluates
 the _Static_asserts every row expands to. The row of command K is located by the generator's layout (one comment line, then per K in
 sorted order its FNVNX_SM_OP or FNVNX_SM_TOKEN line, then its FNVNX_SM_CMP line if it has a comparison); each line is checked to start
@@ -41,6 +41,11 @@ REPO = os.path.normpath(os.path.join(PORT, "..", ".."))
 PORT_REL = os.path.relpath(PORT, REPO)
 D3D9_REC, TRANSLATOR_REC = "render/d3d9/build.json", "render/shaders/translator/build.json"
 PORT_PFX = "ports/fnv-nx/"
+TOTAL_ROOT = PORT_PFX + "render/shaders/total"
+sys.path.append(os.path.join(PORT, "verify"))
+import recipe  # noqa: E402
+from hostprofile import HOST  # noqa: E402
+GCC, CLANG, GIT = (os.path.join(HOST["bindir"], x) for x in ("gcc", "clang", "git"))   # the host programs of verify/env.json (record `host`)
 
 
 def recipe_includes(path):
@@ -52,10 +57,8 @@ def recipe_includes(path):
 INCLUDES = recipe_includes(D3D9_REC)
 TR_GEN = {os.path.dirname(os.path.dirname(TRANSLATOR_REC) + "/" + o) for g in json.load(open(os.path.join(PORT, TRANSLATOR_REC))).get("generated", []) for o in g["outputs"]}   # build outputs: no tracked files
 TR_INCLUDES = [i for i in recipe_includes(TRANSLATOR_REC) if i not in TR_GEN]   # the translator's own tracked include dirs (the patched MojoShader includes fnvnx_dk_layout.h from them)
-INPUTS = ["render/d3d9/front", "bridgefacts/d3d9/d3d9_spec.json", D3D9_REC, TRANSLATOR_REC,
-          "render/shaders/total/sm_table.json", "render/shaders/total/gen_sm_rows.py", "render/shaders/total/fnvnx_sm_rows.h", "contract/treehash.py"] + INCLUDES + [i for i in TR_INCLUDES if i not in INCLUDES]
-GCC, CLANG, GIT = "/usr/bin/gcc", "/usr/bin/clang", "/usr/bin/git"
-ARTIFACTS_URL = "https://github.com/toadharvard/fnv-nx-build"
+INPUTS = ["render/d3d9/front", "render/d3d9/env", "bridgefacts/d3d9", D3D9_REC, TRANSLATOR_REC,
+          "contract/treehash.py"] + INCLUDES + [i for i in TR_INCLUDES if i not in INCLUDES]
 STRICT = ["-Wall", "-Wextra", "-Werror", "-Werror=switch", "-Werror=switch-enum"]
 PLAIN = ["-Wall", "-Wextra", "-Werror", "-Wno-switch", "-Wno-switch-enum"]
 SM_CC_BASE = [GCC, "-fsyntax-only", "-Wall", "-fmax-errors=0", "-fdiagnostics-format=json"]
@@ -221,19 +224,40 @@ def front_build(front, incs, flags):
     return ok, errs
 
 
-def enum_part(inp, work):
+def vendor_fourcc(inp, work, cache, specp):
+    """the vendor FOURCC list of the enum generator: ITS rule (gen_enums.vendor_fourcc over the pinned Wine mirror of the d3d9 recipe), loaded from the checkout; (list, mirror tree_sha256)"""
+    exts = [x for x in json.load(open(os.path.join(inp, D3D9_REC)))["external"] if x.get("name") == "wine-d3d9-formats"]
+    if len(exts) != 1 or exts[0].get("repo") != "fnv-nx-build":
+        raise Red("%s: exactly one external wine-d3d9-formats of fnv-nx-build is required" % D3D9_REC)
+    tree = os.path.join(work, "ext", "wine-d3d9-formats")
+    h = fetch_external(exts[0], cache, tree, work)
+    env = os.path.join(inp, "render", "d3d9", "env")
+    sys.path.insert(0, env)
+    try:
+        import gen_enums
+        return gen_enums.vendor_fourcc(tree, specp), h
+    finally:
+        sys.path.remove(env)
+
+
+def enum_part(inp, work, cache):
     front, backend = os.path.join(inp, "render", "d3d9", "front"), [os.path.join(inp, i) for i in INCLUDES]
-    gen = module_lists(os.path.join(front, "gen_enums.py"), ["SWITCHED", "INDEXED", "VENDOR_FOURCC"])
-    spec = json.load(open(os.path.join(inp, "bridgefacts", "d3d9", "d3d9_spec.json")))["enums"]
+    gen = module_lists(os.path.join(inp, "render", "d3d9", "env", "gen_enums.py"), ["SWITCHED", "INDEXED"])
+    os.makedirs(work)
+    # the interface table is a build output (bridgefacts D9_SPEC): the gate runs the same generator on the same tree
+    specp = os.path.join(work, "d3d9_spec.json")
+    if run([sys.executable, "-E", "-s", "-B", os.path.join(inp, "bridgefacts", "d3d9", "d3d9_spec.py"), specp, os.path.join(work, "d9bridge_rows.tsv"), os.path.join(inp, "shim", "include")]).returncode:
+        raise Red("d3d9_spec.py failed")
+    gen["VENDOR_FOURCC"], wine_hash = vendor_fourcc(inp, work, cache, specp)
+    spec = json.load(open(specp))["enums"]
     names = gen["SWITCHED"] + gen["INDEXED"]
     want_names = {e: list(spec[e]) for e in names}
     want_names["D3DFORMAT"] = want_names["D3DFORMAT"] + ["D3DFMT_" + s.strip() for s in gen["VENDOR_FOURCC"]]
-    os.makedirs(work)
     # the header is a build output (render/d3d9/build.json generated stage): the gate runs the same generator on the same tree
     gdir = os.path.join(work, "gen")
     os.makedirs(gdir)
     hpath = os.path.join(gdir, "d3d9_enums.gen.h")
-    if run([sys.executable, "-I", os.path.join(front, "gen_enums.py"), hpath, os.path.join(inp, "bridgefacts", "d3d9", "d3d9_spec.json")]).returncode:
+    if run([sys.executable, "-I", os.path.join(inp, "render", "d3d9", "env", "gen_enums.py"), hpath, specp, os.path.join(work, "ext", "wine-d3d9-formats")]).returncode:
         raise Red("gen_enums.py failed")
     inc = ["-m32", "-ffreestanding", "-I", gdir, "-I", os.path.join(inp, "shim", "include")]
     ginc = [gdir, os.path.join(inp, "shim", "include")]
@@ -306,7 +330,7 @@ def enum_part(inp, work):
             if not good:
                 uncert.append("enum:%s:%s" % (e, n))
     info = {"header_mismatch": header_bad, "front_builds": built, "front_errors": [d.get("message", "") for d, _ in berrs][:5],
-            "sensitivity": sens}
+            "sensitivity": sens, "wine_formats_tree_sha256": wine_hash}
     return universe, uncert, info
 
 
@@ -314,7 +338,7 @@ def enum_part(inp, work):
 def fetch_external(e, cache, dest, scratch):
     """the recipe form: bare EXTCACHE/<commit> fetched by exact commit, checked out by read-tree + checkout-index"""
     bare = os.path.join(cache, e["commit"])
-    url = os.environ.get("ARTIFACTS_URL", ARTIFACTS_URL)
+    url = os.environ["ARTIFACTS_URL"]   # the artifacts repository: an argument of the run, no default
     if not os.path.isdir(bare):
         tmp = bare + ".tmp"
         if os.path.isdir(tmp):
@@ -370,10 +394,21 @@ def sm_compile(tree, defs, extra=(), incs=()):
     return ok, errs
 
 
+def total_output(out, gate_cache=None):
+    """the declared output OUT of the generator of the root render/shaders/total (the SM1-3 language definition), built by verify/recipe.py in
+    the gate cache: the table and the rows header are products of ONE generator run, so the header is the table's by construction"""
+    path, _ = recipe.stage_output(TOTAL_ROOT, {"stage": TOTAL_ROOT + ":gen:0", "path": out}, os.getcwd(), gate_cache or os.environ["GATE_CACHE"])
+    return path
+
+
 def sm_part(inp, work, cache):
-    ops = json.load(open(os.path.join(inp, "render", "shaders", "total", "sm_table.json")))["opcodes"]
+    try:
+        ops = json.load(open(total_output("gen/sm_table.json")))["opcodes"]
+        rows_text = read(total_output("gen/inc/" + ROWS))
+    except (ValueError, OSError, KeyError, recipe.RecipeError) as x:
+        return [], [], {"error": "render/shaders/total stage output: " + str(x)[:300], "killed": {}}
     universe = ["sm:" + k for k in sorted(ops)]
-    info = {"rows_header_equals_generated": False, "baseline_compiles": False, "layout": False, "killed": {}, "error": ""}
+    info = {"baseline_compiles": False, "layout": False, "killed": {}, "error": ""}
     os.makedirs(work)
     try:
         exts = [x for x in json.load(open(os.path.join(inp, TRANSLATOR_REC)))["external"] if x.get("name") == "mojoshader"]
@@ -383,9 +418,6 @@ def sm_part(inp, work, cache):
         tree = os.path.join(work, "ext", "mojoshader")
         info["tree_sha256"] = fetch_external(exts[0], cache, tree, work)
         info["commit"] = exts[0]["commit"]
-        gen_rows = os.path.join(inp, "render", "shaders", "total", "gen_sm_rows.py")
-        info["rows_header_equals_generated"] = run([sys.executable, "-I", gen_rows, "--check"]).returncode == 0
-        rows_text = read(os.path.join(inp, "render", "shaders", "total", ROWS))
         rows = os.path.join(tree, ROWS)
         write(rows, rows_text)
         write(os.path.join(tree, "mojoshader_version.h"), '#define MOJOSHADER_VERSION -1\n#define MOJOSHADER_CHANGESET "gate"\n')  # cmake-generated
@@ -429,8 +461,6 @@ def sm_part(inp, work, cache):
             if sorted(killed[ln]) != sorted(need[ln]):
                 ok_rows.discard(k)
                 info["killed"]["%s:%d" % (kind, ln)] = {"row": k, "killed": sorted(killed[ln]), "need": sorted(need[ln])}
-        if not info["rows_header_equals_generated"]:
-            ok_rows = set()
     except Red as x:
         info["error"] = str(x)
         ok_rows = set()
@@ -438,33 +468,18 @@ def sm_part(inp, work, cache):
 
 
 def main():
-    """The gate ends in a result file with reasons whatever happens: an exception of any part (a tool that cannot run, a file that cannot be read) is a red result
-    that names it, never an exit without a file (the verdict runner turns a missing result into red too, but the reason belongs here)."""
-    try:
-        return run()
-    except Exception:   # noqa: BLE001  the total rule: every failure is a finding
-        import traceback
-        out = os.environ["GATE_OUT"]
-        shutil.rmtree(os.path.join(out, "d3d9total.work"), ignore_errors=True)
-        write(os.path.join(out, "d3d9total.json"), json.dumps({
-            "format": "fnvnx-gate/1", "name": "d3d9total", "status": "red", "universe": 0, "certified": 0, "uncertified": [],
-            "detail": ("gate crashed: " + " | ".join(traceback.format_exc().strip().splitlines()[-6:]))[:900]}, sort_keys=True, indent=1) + "\n")
-        return 2
-
-
-def run():
     out = os.environ["GATE_OUT"]
     work = os.path.join(out, "d3d9total.work")
     if os.path.isdir(work):
         shutil.rmtree(work)
     os.makedirs(work)
-    cache = os.path.join(os.environ["GATE_CACHE"], "external") if os.environ.get("GATE_CACHE") else os.path.join(work, "external")
+    cache = os.path.join(os.environ["GATE_CACHE"], "external")
     os.makedirs(cache, exist_ok=True)
     inp = os.path.join(work, "in")
     parts, universe, uncert, err = {}, [], [], ""
     try:
         materialize(inp)
-        eu, ec, einfo = enum_part(inp, os.path.join(work, "enum"))
+        eu, ec, einfo = enum_part(inp, os.path.join(work, "enum"), cache)
     except Red as x:
         err, eu, ec, einfo = str(x), [], [], {}
     su, sc, sinfo = sm_part(inp, os.path.join(work, "sm"), cache) if not err else ([], [], {})
@@ -475,12 +490,12 @@ def run():
     res = {"format": "fnvnx-gate/1", "name": "d3d9total", "status": "green" if green else "red", "universe": len(universe),
            "certified": len(universe) - len(uncert), "uncertified": sorted(uncert)[:50],
            "detail": "enum values %d of %d certified (header mismatch %s, front builds %s, sensitive %d of %d enumerations); "
-                     "SM commands %d of %d certified (external mojoshader %s, rows header generated %s, translator compiles %s, "
+                     "SM commands %d of %d certified (external mojoshader %s, translator compiles %s, "
                      "mutations not killed %d)%s"
                      % (len(eu) - len(ec), len(eu), einfo.get("header_mismatch"), einfo.get("front_builds"),
                         sum(1 for s in einfo.get("sensitivity", {}).values() if s["located_in_front"] and s["compiles_without"]),
                         len(einfo.get("sensitivity", {})), len(su) - len(sc), len(su), sinfo.get("tree_sha256"),
-                        sinfo.get("rows_header_equals_generated"), sinfo.get("baseline_compiles"), len(sinfo.get("killed", {})),
+                        sinfo.get("baseline_compiles"), len(sinfo.get("killed", {})),
                         ("; error: " + (err or sinfo.get("error", "")))[:400] if (err or sinfo.get("error")) else ""),
            "parts": parts}
     write(os.path.join(out, "d3d9total.json"), json.dumps(res, sort_keys=True, indent=1) + "\n")
