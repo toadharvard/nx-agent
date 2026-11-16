@@ -17,9 +17,6 @@
   {
    "path": "ports/fnv-nx/contract",
    "class": "tool",
-   "imports": [
-    "ports/fnv-nx/link"
-   ],
    "entry": [
     "ports/fnv-nx/contract/exefacts.py",
     "ports/fnv-nx/contract/n1.py",
@@ -612,6 +609,13 @@
     "ports/fnv-nx/link/gate_abs.py",
     "ports/fnv-nx/link/gate_disp.py"
    ]
+  },
+  {
+   "path": "ports/fnv-nx/contract/target",
+   "class": "tool",
+   "target": "host",
+   "entry": [],
+   "recipe": "ports/fnv-nx/contract/target/build.json"
   },
   {
    "path": "ports/fnv-nx/loader/include",

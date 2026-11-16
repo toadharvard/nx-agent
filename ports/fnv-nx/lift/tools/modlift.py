@@ -488,22 +488,44 @@ def run(arg, cfg):
     """R3 refined to its fixed point, with ONE refinement (ruling 2026-11-16): X = {relocation sites that are only the displacement of a non-lea memory operand of an instruction of the flow} (residue.disp_only).
     Soundness: if every relocated word targeting t is such a displacement, the CPU uses t only to address a load or store, so t is never a register or memory value and no transfer can receive it from that word.
     Value occurrences (an imm operand, a lea displacement, a relocated data word) root their target. The flow depends on the entries and the entries on the value sites (not in X). Round k runs the producer with X_k excluded and
-    yields X_{k+1} = X(flow of round k); X_0 = empty. Done when X_{k+1} == X_k. A cycle is an error. The reloc-misfit refusal and the on-data drop are deleted: they were heuristics (a decoding that disagrees with the
+    yields X_{k+1} = X(flow of round k); X_0 = empty. Done when X_{k+1} == X_k, or (the map is antitone, so it can alternate between a lower and an upper bound) when the rounds have settled into a 2-cycle {L, U}: the answer is L, which satisfies L <= G(L) = U (every excluded site is displacement-only in the flow computed without it). Any other cycle is an error. The reloc-misfit refusal and the on-data drop are deleted: they were heuristics (a decoding that disagrees with the
     relocations, or bytes of a relocation slot, is not proof that the bytes are never executed)."""
     import io, contextlib
-    X = frozenset(); seen = []; k = -1
-    while True:      # terminates: the states X are finite and a state seen twice is a cycle, an error (below); no round cap
-        k += 1; buf = io.StringIO()
+
+    def step(X):
+        buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             code, Xo, Ro, PMF, nE, nC, nh = _run(arg, cfg, X, frozenset())
+        return frozenset(Xo), (buf.getvalue(), nE, nC)
+    X, (out, nE, nC), k, fixed = r3_settle(step)
+    sys.stdout.write(out); print('R3 refinement: %s after %d rounds, %d displacement-only relocation sites excluded from the entry rule (all justified in the flow computed without them)' % ('fixed point' if fixed else 'settled at the least fixed point of the two-round map', k + 1, len(X)))
+    print('universe: entries %d (candidates %d)' % (nE, nC))
+    od = cfg.facts_out + '/' + os.path.splitext('exe' if getattr(cfg, 'exe', None) else pemod.locate(arg, cfg.modules, cfg.moddirs)[1].name)[0]
+    bad = residue.entries_on_data(od)      # roots by rule whose bytes are also data-reloc words: reported, never dropped (the invariant is L1's to change)
+    open(od + '/entries_on_data.tsv', 'w').write('# columns: root address, proof id of the data-reloc byte; roots (by a value occurrence) whose bytes are also a relocation-named data word\n' + ''.join('%08x\t%s\n' % (a, residue.data_proof(od, a)) for a in sorted(bad)))
+    print('entries on class-3 data bytes (roots by rule): %d' % len(bad))
+    return 0
+
+
+def r3_settle(step):
+    """The R3 refinement loop of run(), over an abstract round step(X) -> (Xo, result): X is the exclusion set of the round, Xo the displacement-only sites of the flow it produced, result that round's output.
+    -> (X, result, k, fixed): the answer's exclusion set, its round's result, its round index, and whether it is a fixed point.
+    G(X) = Xo is antitone, so the rounds can alternate between a lower and an upper bound. The answer X must satisfy X <= Xo of its own round (every excluded site is displacement-only in the flow computed
+    without it). The least fixed point L of G o G does (L <= U = G(L)); a fixed point is L = U. When the sequence settles (S[k+1] == S[k-1]) the answer is the smaller of the two, with at most one extra round.
+    Any other cycle is an error. Terminates: the sets are finite and a set seen at distance other than 1 or 2 is an error; no round cap."""
+    X = frozenset(); S = []; k = -1; final = None      # S[k] = the exclusion set of round k
+    while True:
+        k += 1; S.append(X)
+        Xo, res = step(X)
         print('round %d: X %d (%d displacement-only sites)' % (k, len(X), len(Xo)), file=sys.stderr, flush=True)
-        if frozenset(Xo) == X:
-            sys.stdout.write(buf.getvalue()); print('R3 refinement: fixed point after %d rounds, %d displacement-only relocation sites excluded from the entry rule' % (k + 1, len(X)))
-            print('universe: entries %d (candidates %d)' % (nE, nC))
-            od = cfg.facts_out + '/' + os.path.splitext('exe' if getattr(cfg, 'exe', None) else pemod.locate(arg, cfg.modules, cfg.moddirs)[1].name)[0]
-            bad = residue.entries_on_data(od)      # roots by rule whose bytes are also data-reloc words: reported, never dropped (the invariant is L1's to change)
-            open(od + '/entries_on_data.tsv', 'w').write('# columns: root address, proof id of the data-reloc byte; roots (by a value occurrence) whose bytes are also a relocation-named data word\n' + ''.join('%08x\t%s\n' % (a, residue.data_proof(od, a)) for a in bad))
-            print('entries on class-3 data bytes (roots by rule): %d' % len(bad))
-            return 0
-        seen.append(X); X = frozenset(Xo)
-        if X in seen: raise RuntimeError('R3 refinement does not converge (cycle at round %d)' % k)
+        if Xo == X or (final is not None and X == final):
+            if not X <= Xo: raise RuntimeError('R3 refinement: the final exclusion set is not displacement-only in its own flow (round %d)' % k)
+            return X, res, k, Xo == X
+        if k >= 1 and Xo == S[k - 1]:      # settled: S[k-1] and S[k] are L and U in some order
+            lo, hi = (S[k - 1], X) if S[k - 1] <= X else (X, S[k - 1])
+            if not lo <= hi: raise RuntimeError('R3 refinement: the two settled exclusion sets are not nested (round %d)' % k)
+            final = lo
+            if lo == X: return X, res, k, False      # this round is already the answer: lo <= Xo = hi
+            X = final; continue      # one more round with L, whose own Xo must contain it
+        if Xo in S: raise RuntimeError('R3 refinement does not converge (a cycle of length other than 1 or 2 at round %d)' % k)
+        X = Xo
