@@ -2963,3 +2963,8 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - L6 rechecked b80203aca: 0 bare or relative sibling imports in render/ and bridgefacts/. The 7 at w28-c5 come from its stale copy. cand5 takes render/ and bridgefacts/ whole from b80203aca.
 - L2 cand4b c8a00b66a: rules/ bare sibling imports are 39 -> 0 (045fe3d4d), and w3's rt.sh 165619a86 is merged. The 7 rules tests are green. This is the cand5 head for toolchain/ and rules/.
 - L5 w42 d35647fb: manifest/ bare sibling imports are 36 -> 0. L5's remaining finds in L1 are gate_hostapi:283 and toolflags:25, both to fnvnx.* (w28). The dnfile import leaves with w41 9199431.
+- w28-c5: done.
+  - gate_pure has no empty --lib, and universe 0 over .py is red (tests).
+  - 919f09277: Wine and declared rows are root-owned (objstub.read_root_tables, duplicate ids red, orphan findings, verify/ tables deleted).
+  - The rows return with their roots: L6 render/d3d9 (wine 2, 3, 10-15, 20-25, 40-54); L5 platform (wine 200-202, dm 2-12).
+  - Admit at 4eb5a2bd4 is 1064 of 1064. Bare cross-root imports are 15 (lift/proof 11, manifest 3, lift/gates 1), sent to their owners.
