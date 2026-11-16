@@ -62,7 +62,8 @@
    "args": [
     "/out/gen",
     "/uses/ports/fnv-nx/bridgefacts/D9_SPEC",
-    "/in/ports/fnv-nx/bridgefacts/d3d9"
+    "/in/ports/fnv-nx/bridgefacts/d3d9",
+    "/uses/ports/fnv-nx/bridgefacts/D9_ROWS"
    ],
    "inputs": [
     "ports/fnv-nx/bridgefacts/d3d9"
@@ -147,6 +148,10 @@
   {
    "root": "ports/fnv-nx/bridgefacts",
    "output": "D9_SPEC"
+  },
+  {
+   "root": "ports/fnv-nx/bridgefacts",
+   "output": "D9_ROWS"
   },
   {
    "root": "ports/fnv-nx/render/gl4shim",
