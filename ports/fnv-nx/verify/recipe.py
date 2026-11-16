@@ -763,35 +763,51 @@ def foreach_dynamic(g, rec):
 
 
 def foreach_consume(g, fan):
-    """Step G with its `"rows": "all"` inputs expanded (see expand_foreach)."""
-    ins = g.get("inputs")
-    if not isinstance(ins, list) or not any(isinstance(r, dict) and r.get("rows") == "all" for r in ins):
-        if isinstance(g.get("args"), list) and "@rows" in g["args"]:
-            raise ValueError("run %r: the arg @rows needs an input {stage, path, rows: all}" % g.get("name"))
+    """Step G with its `"rows": "all"` inputs expanded (see expand_foreach). A rows input may carry `"as": NAME`; the arg `@rows:NAME` is then that group's mounts in row
+    order, and the bare `@rows` is the group of the step's only rows input. Two groups need names (unique); an `@rows[:NAME]` with no such input is red."""
+    ins, nm0 = g.get("inputs"), g.get("name")
+    is_rows = lambda r: isinstance(r, dict) and r.get("rows") == "all"   # noqa: E731
+    args = g.get("args") if isinstance(g.get("args"), list) else []
+    if not isinstance(ins, list) or not any(is_rows(r) for r in ins):
+        if any(isinstance(a, str) and (a == "@rows" or a.startswith("@rows:")) for a in args):
+            raise ValueError("run %r: an @rows arg needs an input {stage, path, rows: all}" % nm0)
         return g
-    new, at = [], []
+    new, groups = [], {}   # groups: {name or None: [mounts]}
+    nrows = sum(1 for r in ins if is_rows(r))
     for r in ins:
-        if not (isinstance(r, dict) and r.get("rows") == "all"):
+        if not is_rows(r):
             new.append(r)
             continue
-        if set(r) != {"stage", "path", "rows"} or not all(isinstance(r[k], str) for k in ("stage", "path")):
-            raise ValueError("run %r: a rows input is exactly {stage: ROOT:run:NAME, path: TEMPLATE, rows: \"all\"}" % g.get("name"))
-        if at:
-            raise ValueError("run %r: one `rows: all` input per step (the arg @rows names its mounts)" % g.get("name"))
+        if set(r) not in ({"stage", "path", "rows"}, {"stage", "path", "rows", "as"}) or not all(isinstance(r[k], str) for k in set(r) - {"rows"}):
+            raise ValueError("run %r: a rows input is exactly {stage: ROOT:run:NAME, path: TEMPLATE, rows: \"all\"[, as: NAME]}" % nm0)
+        label = r.get("as")
+        if label is None and nrows > 1:
+            raise ValueError("run %r: with several rows inputs each needs `as`" % nm0)
+        if label is not None and not FOREACH_NAME.fullmatch(label):
+            raise ValueError("run %r: rows input name %r is no plain name" % (nm0, label))
+        if label in groups:
+            raise ValueError("run %r: rows input name %r twice" % (nm0, label))
         _, _, step = r["stage"].partition(":")
         kind, _, nm = step.partition(":")
         if kind != "run" or nm not in fan:
-            raise ValueError("run %r: rows input %s names no foreach step of this recipe" % (g.get("name"), r["stage"]))
+            raise ValueError("run %r: rows input %s names no foreach step of this recipe" % (nm0, r["stage"]))
         tmpl, rows, key = fan[nm]
         if r["path"] not in step_outputs(tmpl):
-            raise ValueError("run %r: rows input path %r is no output of foreach step %s as written (%s)" % (g.get("name"), r["path"], nm, step_outputs(tmpl)))
+            raise ValueError("run %r: rows input path %r is no output of foreach step %s as written (%s)" % (nm0, r["path"], nm, step_outputs(tmpl)))
+        groups[label] = []
         for row in rows:
-            at.append("/in/%d" % (len(new) + 1))
+            groups[label].append("/in/%d" % (len(new) + 1))
             new.append({"stage": "%s:run:%s.%s" % (r["stage"].partition(":")[0], nm, row[key]), "path": foreach_subst(r["path"], row, "run %r row %s" % (nm, row[key]))})
-    args = g.get("args")
-    if isinstance(args, list):
-        args = [m for a in args for m in (at if a == "@rows" else [a])]
-    return dict(g, inputs=new, args=args if args is not None else g.get("args"))
+    out = []
+    for a in args:
+        if isinstance(a, str) and (a == "@rows" or a.startswith("@rows:")):
+            label = None if a == "@rows" else a[len("@rows:"):]
+            if label not in groups:
+                raise ValueError("run %r: %s names no rows input%s" % (nm0, a, "" if label else " (a bare @rows needs exactly one rows input without `as`)"))
+            out += groups[label]
+        else:
+            out.append(a)
+    return dict(g, inputs=new, args=out)
 
 
 def effective(rec, name):
