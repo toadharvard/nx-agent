@@ -1645,3 +1645,8 @@ Paused: w3b, w4, farm; no other work.
     - Farm 3: bridgetable is GREEN with the L6 d3d9.dll records and the exporthdr edit (f91b46425).
     - L1's 7 bare sibling imports at w28-c5 4eb5a2bd4 are in its older copy of render/ and bridgefacts/. On b80203aca the ast scan finds 0 bare or relative sibling imports. L1 is told to take render/ and bridgefacts/ from b80203aca.
 - bottleneck: the cand5 verdict (L1); reached.tsv (L1 w28). 0 of 4 workers busy.
+- 12:00Z, done: the cand5 render head is claude/fnv-l6-render-w13-wine da0e4ff78 (w13 `session_01KmtZKU1dH3fzztnbZDrgHp`, archived). It is b80203aca merged with w28-c5 919f09277, plus the L6 Wine rows in their own root.
+    - 28 rows are in render/d3d9/wine_fixme.tsv (ids 2, 3, 10-15, 20, 22-25, 40-54). Two-way citation check: 28 of 28 cited, 0 citations without a row. gen_wine_ids reads the new file as a declared input.
+    - recipe check: 13 of 13 admitted L6 base roots valid. The full objstub run waits for the farm cold build.
+    - L1 withdrew the sm_link `main` double finding: the double rule is taken per link target (host vs guest), and L1 w29 fixes objstub.
+- bottleneck: the cand5 verdict (L1); reached.tsv (L1 w28). 0 of 4 workers busy.
