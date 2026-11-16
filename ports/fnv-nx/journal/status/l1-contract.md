@@ -2310,3 +2310,9 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - objstub_rules declares bridgefacts;
   - only the verdict.py part of w28 275771a6f is taken.
   - The farm verdict is running. Coverage of the include rule is being confirmed.
+- w28 bc9de3d83 (= L5 2f6a09f81 + w13 9a5206d73 + external_of): chkall 23 → 17 red, all of them render variant redundancy (L6).
+- Stage A/B cycle ruling:
+  - The exports universe = guest product roots minus the dependents of the bridgefacts stage (derived).
+  - A .fnvnx.export record in an excluded object is red.
+  - RET = the definer's decltype return class as a 5th column; struct/vector returns are red.
+  - The hand lists are deleted with an empty diff.
