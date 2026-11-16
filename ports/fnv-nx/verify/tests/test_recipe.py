@@ -27,8 +27,6 @@ import scratch  # noqa: E402
 
 scratch.install()  # removed synchronously at exit (the stores are ~50 MB)
 BASE = tempfile.mkdtemp(prefix="recipe-test-")
-os.environ["FNVNX_CAS_POOL"] = BASE + "/pool"   # every store of this file (and of the gates it runs) links the one copy of an object: the compiler closure is on disk once
-cas.POOL = os.environ["FNVNX_CAS_POOL"]
 FAILED = []
 LOCK = threading.Lock()
 T = "ports/fnv-nx/"

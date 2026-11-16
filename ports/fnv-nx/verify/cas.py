@@ -83,25 +83,30 @@ def _put(store, kind, name, data=None, mode=0o444):
     _publish(tmp, final)
     return final
 
-# POOL (env FNVNX_CAS_POOL, a store directory on the same filesystem as every store that uses it): the one copy of every object. Objects are
-# immutable and named by their content, so a store that has a POOL does not hold its own bytes: the object is made once in the POOL and each
-# store links it (a hard link, MAX_LINKS replicas as for placement). Which store, scratch or cache holds an object changes nothing but where the
-# bytes are: tests that build many stores of the same compiler closure hold it once. Unset: every store holds its own objects.
-POOL = os.environ.get("FNVNX_CAS_POOL") or None
+# POOL: the one copy of every object of the stores that lie in one directory D is D/pool (beside the store, so on the same filesystem by
+# construction). Objects are immutable and named by their content, so a store does not hold its own bytes: the object is made once in
+# D/pool and the store hard-links it (an inode serves MAX_LINKS names, then a replica is made: the placement rule). A link that fails
+# (EXDEV, a read-only pool) is an error naming the path; there is no copy of the bytes into the store. A store that is itself a pool
+# (basename "pool") holds its objects.
+def pool_of(store):
+    return os.path.join(os.path.dirname(os.path.abspath(store)), "pool")
 
 def _ingest_file(path, store, x):
-    if POOL and os.path.realpath(POOL) != os.path.realpath(store):
-        hx = _ingest_obj(path, POOL, x)
-        name = hx + (".x" if x else "")
-        final = os.path.join(store, "obj", hx[:2], name)
-        if not os.path.exists(final):
-            os.makedirs(os.path.dirname(final), exist_ok=True)
-            try:
-                _link_obj(os.path.join(POOL, "obj", hx[:2], name), final)
-            except FileExistsError:
-                pass
-        return hx
-    return _ingest_obj(path, store, x)
+    pool = pool_of(store)
+    if os.path.realpath(pool) == os.path.realpath(store):
+        return _ingest_obj(path, store, x)
+    hx = _ingest_obj(path, pool, x)
+    name = hx + (".x" if x else "")
+    final = os.path.join(store, "obj", hx[:2], name)
+    if not os.path.exists(final):
+        os.makedirs(os.path.dirname(final), exist_ok=True)
+        try:
+            _link_obj(os.path.join(pool, "obj", hx[:2], name), final)
+        except FileExistsError:
+            pass
+        except OSError as ex:
+            raise CasError("cannot hardlink the pool object %s into store %s: %s" % (name, store, ex))
+    return hx
 
 def _ingest_obj(path, store, x):
     st = os.lstat(path)
