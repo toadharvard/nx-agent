@@ -47,31 +47,5 @@
    "root": "ports/fnv-nx/lift/rt",
    "output": "GEN"
   }
- ],
- "generated": [
-  {
-   "tool": "ports/fnv-nx/lift/tools/fpcuniverse.py",
-   "args": [
-    "--lift",
-    "/in/ports/fnv-nx/lift",
-    "--gen",
-    "/uses/ports/fnv-nx/lift/rt/GEN",
-    "--out",
-    "/out/gen/fpc_helpers.json"
-   ],
-   "inputs": [
-    "ports/fnv-nx/lift/fnvlift",
-    "ports/fnv-nx/lift/proof/__init__.py",
-    "ports/fnv-nx/lift/proof/forms.py",
-    "ports/fnv-nx/lift/proof/forms_simd.py",
-    "ports/fnv-nx/lift/proof/forms_ssefp.py"
-   ],
-   "outputs": [
-    "gen/fpc_helpers.json"
-   ]
-  }
- ],
- "outputs": {
-  "HELPERS": "gen/fpc_helpers.json"
- }
+ ]
 }
