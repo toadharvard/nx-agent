@@ -15,7 +15,6 @@
  },
  "include": [
   "ports/fnv-nx/lift/tests/guest/imptest/lifted/inc",
-  "ports/fnv-nx/lift/tests/guest/imptest/lifted/inc",
   "ports/fnv-nx/shim/include"
  ],
  "units": "all",

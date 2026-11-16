@@ -20,7 +20,9 @@
   ],
   "asm": []
  },
- "include": [],
+ "include": [
+  "ports/fnv-nx/platform/include"
+ ],
  "units": "all",
  "link": {
   "output": "libfpchost.so",
@@ -40,6 +42,10 @@
   {
    "root": "ports/fnv-nx/lift/rt",
    "output": "GEN"
+  },
+  {
+   "root": "ports/fnv-nx/platform",
+   "output": "INCLUDE"
   }
  ],
  "include_uses": [

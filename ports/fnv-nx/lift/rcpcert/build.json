@@ -17,7 +17,9 @@
   ],
   "asm": []
  },
- "include": [],
+ "include": [
+  "ports/fnv-nx/platform/include"
+ ],
  "units": "all",
  "generated": [
   {
@@ -47,6 +49,10 @@
   {
    "root": "ports/fnv-nx/lift/rt",
    "output": "GEN"
+  },
+  {
+   "root": "ports/fnv-nx/platform",
+   "output": "INCLUDE"
   }
  ],
  "include_uses": [
