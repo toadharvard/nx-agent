@@ -353,7 +353,7 @@ def _run(arg, cfg, XEX, REF=frozenset()):
     def residual(p, q):
         """[p, q) offsets of one residue run: tools/residue.py (closure complete -> data, else UNEXPLAINED with the closure reason); the sweep is a breakdown, it decides nothing"""
         brk[residue.sweep(md, text, T0, TN, relocs, rsl, cov, p, q)] += q - p
-        if closure_complete: cl[p:q] = bytes([residue.DATA]) * (q - p)
+        if closure_complete: cl[p:q] = bytes(5 if rsl[k] else residue.DATA for k in range(p, q))      # relocation-named bytes no instruction covers are class data-reloc (the exe's class 3: the byte of a relocated slot, the proof is the relocation); the rest is data-unreached
         else: cl[p:q] = b'\x08' * (q - p); unx.append((T0 + p, q - p, closure_reason))
     for m in re.finditer(rb'\x00+', bytes(cl)):
         s, e = m.span(); p = s
@@ -483,7 +483,7 @@ def run(arg, cfg):
             sys.stdout.write(buf.getvalue()); print('R3 refinement: fixed point after %d rounds, %d displacement-only relocation sites excluded from the entry rule' % (k + 1, len(X)))
             print('reloc-consistency: entries %d (candidates %d); refused (unproven, decoding has a relocation-misfit) %d; proven entries with a misfit %d%s' % (nE, nC, len(R), len(PMF), ' RED: ' + ' '.join('%08x' % a for a in PMF[:8]) if PMF else ''))
             od = cfg.facts_out + '/' + os.path.splitext(pemod.locate(arg, cfg.modules, cfg.moddirs)[1].name)[0]
-            open(od + '/refused.tsv', 'w').write('# columns: entry, relocation-misfit instructions in its decoding, reason; unproven candidate entries refused by reloc-consistency (the bytes go to data, the relocated pointer is a data fact)\n' + ''.join('%08x\t%d\treloc-misfit\n' % (e, refinfo[e]) for e in sorted(R)))
+            open(od + '/refused.tsv', 'w').write('# columns: entry, relocation-misfit instructions in its decoding, reason; unproven candidate entries refused by reloc-consistency (the bytes go to data, the relocated pointer is a data fact)\n' + ''.join('%08x\t%d\treloc-misfit\n' % (e, refinfo[e]) for e in sorted(R - DD)))
             bad = residue.entries_on_data(od)
             dn = frozenset(bad) - R - DD
             if dn:      # the same invariant the gate reads: a pointer-only entry on proven data (codemap class data-reloc) is not an entry; it is refused, and the next round rebuilds the facts without it
