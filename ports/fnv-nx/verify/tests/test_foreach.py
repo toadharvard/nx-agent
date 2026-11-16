@@ -88,5 +88,23 @@ with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as td:
         r, rc = make(td, "bad%d" % len(os.listdir(td)), **kw)
         e = recipe.check(rc, R, recipe.tracked(r), recipe.load_admit(r), None, r)
         check("%s is red at check time" % what, any(want in x for x in e), e)
+# {range: N}: rows i = 0..N-1, n = N; a consumer's `rows: all` input is one stage ref per row in row order, and @rows its mounts
+sh = {"name": "shard", "foreach": {"range": 3}, "exec": "/usr/bin/sh", "args": ["/in/1", "{i}", "{n}"], "inputs": [R + "/p.sh"], "debs": ["toybb"], "outputs": ["part/{i}.txt"]}
+cons = {"name": "sum", "exec": "/usr/bin/sh", "args": ["/in/1", "@rows"], "inputs": [R + "/p.sh", {"stage": R + ":run:shard", "path": "part/{i}.txt", "rows": "all"}], "debs": ["toybb"], "outputs": ["sum.txt"]}
+rr = {"format": "fnvnx-recipe/1", "run": [sh, cons]}
+ex = recipe.expand_foreach(rr, None)["run"]
+check("range: three steps shard.0..2 with i and n in args and the row in the output", [g["name"] for g in ex[:3]] == ["shard.0", "shard.1", "shard.2"] and ex[2]["args"] == ["/in/1", "2", "3"] and ex[1]["outputs"] == ["part/1.txt"], ex[:3])
+check("rows: all is one stage ref per row in row order, @rows the mounts", ex[3]["inputs"][1:] == [{"stage": R + ":run:shard.%d" % k, "path": "part/%d.txt" % k} for k in range(3)] and ex[3]["args"] == ["/in/1", "/in/2", "/in/3", "/in/4"], ex[3])
+for what, mut, want in (("a range of 0", lambda: dict(rr, run=[dict(sh, foreach={"range": 0}), cons]), "range must be"),
+                        ("a boolean range", lambda: dict(rr, run=[dict(sh, foreach={"range": True}), cons]), "range must be"),
+                        ("a rows input naming no foreach step", lambda: dict(rr, run=[sh, dict(cons, inputs=[R + "/p.sh", {"stage": R + ":run:nope", "path": "part/{i}.txt", "rows": "all"}])]), "names no foreach step"),
+                        ("a rows path that is no output as written", lambda: dict(rr, run=[sh, dict(cons, inputs=[R + "/p.sh", {"stage": R + ":run:shard", "path": "part/0.txt", "rows": "all"}])]), "no output of foreach step"),
+                        ("@rows with no rows input", lambda: dict(rr, run=[sh, dict(cons, inputs=[R + "/p.sh"])]), "@rows needs")):
+    try:
+        recipe.expand_foreach(mut(), None)
+        msg = ""
+    except ValueError as e:
+        msg = str(e)
+    check("%s is red" % what, want in msg, msg)
 print("fails: %d" % fails)
 sys.exit(1 if fails else 0)

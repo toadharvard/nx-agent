@@ -698,34 +698,54 @@ def foreach_subst(text, row, where):
     return out
 
 
+def foreach_spec_rows(g, repo):
+    """(rows, key) of the foreach of step G: `{table, key}` (a tracked TSV file) or `{range: N}` (N rows with the columns i = 0..N-1 and n = N, key i)."""
+    fe, name = g["foreach"], g.get("name")
+    if isinstance(fe, dict) and set(fe) == {"range"}:
+        n = fe["range"]
+        if not (isinstance(n, int) and not isinstance(n, bool) and n >= 1):
+            raise ValueError("run %r: foreach range must be an integer >= 1 (an empty fan-out is red)" % name)
+        return [{"i": str(i), "n": str(n)} for i in range(n)], "i"
+    if not (isinstance(fe, dict) and set(fe) == {"table", "key"} and isinstance(fe["table"], str) and isinstance(fe["key"], str) and rel_ok(fe["table"])):
+        raise ValueError("run %r: foreach must be {table: tracked file path, key: column} or {range: N}" % name)
+    if repo is None:
+        raise ValueError("run %r: foreach needs the checkout to read its table" % name)
+    try:
+        with open(os.path.join(repo, fe["table"]), encoding="utf-8") as f:
+            text = f.read()
+    except (OSError, UnicodeDecodeError) as e:
+        raise ValueError("run %r: foreach table %s cannot be read: %s" % (name, fe["table"], e))
+    return foreach_rows(fe["table"], fe["key"], text), fe["key"]
+
+
 def expand_foreach(rec, repo):
-    """REC with every `run` step that has `foreach: {table, key}` replaced by one step per row of the table (a tracked TSV file of the checkout REPO): the step is the
-    template with {COLUMN} replaced in its `args`, `outputs`, `dirs` and `env` values, named NAME.<key field>. The table is read here and is no stage input, so a changed
-    row changes only the steps whose expanded text changed, and the key of a step is a function of its own row, tool and inputs. This is the one place a foreach is
-    expanded: read_recipe and check call it, so every other reader sees plain static steps. ValueError on a malformed form, table or duplicate output."""
+    """REC with every `run` step that has `foreach: {table, key}` or `foreach: {range: N}` replaced by one step per row (a row of a tracked TSV file of the checkout REPO,
+    or i = 0..N-1 with n = N): the step is the template with {COLUMN} replaced in its `args`, `outputs`, `dirs` and `env` values, named NAME.<key field>. The table is read
+    here and is no stage input, so a changed row changes only the steps whose expanded text changed, and the key of a step is a function of its own row, tool and inputs.
+    A consumer's input {"stage": "ROOT:run:NAME", "path": TEMPLATE, "rows": "all"} (TEMPLATE = an output or dir of the foreach step as written) becomes one stage ref per row in
+    row order, and the arg "@rows" becomes the mount paths /in/K of those inputs in that order. This is the one place a foreach is expanded: read_recipe and check call it,
+    so every other reader sees plain static steps. ValueError on a malformed form, table or duplicate output."""
     rs = rec.get("run")
-    if not isinstance(rs, list) or not any(isinstance(g, dict) and "foreach" in g for g in rs):
+    if not isinstance(rs, list) or not any(isinstance(g, dict) and ("foreach" in g or any(isinstance(r, dict) and r.get("rows") == "all" for r in (g.get("inputs") if isinstance(g.get("inputs"), list) else []))) for g in rs):
         return rec
-    out, outputs = [], {}
+    out, outputs, fan = [], {}, {}   # fan: {NAME: (template step, rows, key)}
     for g in rs:
         if not (isinstance(g, dict) and "foreach" in g):
+            continue
+        rows, key = foreach_spec_rows(g, repo)
+        fan[g.get("name")] = (g, rows, key)
+    for g in rs:
+        if not isinstance(g, dict):
             out.append(g)
             continue
-        fe = g["foreach"]
-        name = g.get("name")
-        if not (isinstance(fe, dict) and set(fe) == {"table", "key"} and isinstance(fe["table"], str) and isinstance(fe["key"], str) and rel_ok(fe["table"])):
-            raise ValueError("run %r: foreach must be {table: tracked file path, key: column}" % name)
-        if repo is None:
-            raise ValueError("run %r: foreach needs the checkout to read its table" % name)
-        try:
-            with open(os.path.join(repo, fe["table"]), encoding="utf-8") as f:
-                text = f.read()
-        except (OSError, UnicodeDecodeError) as e:
-            raise ValueError("run %r: foreach table %s cannot be read: %s" % (name, fe["table"], e))
-        for row in foreach_rows(fe["table"], fe["key"], text):
-            where = "run %r row %s" % (name, row[fe["key"]])
+        if "foreach" not in g:
+            out.append(foreach_consume(g, fan))
+            continue
+        name, (_, rows, key) = g.get("name"), fan[g.get("name")]
+        for row in rows:
+            where = "run %r row %s" % (name, row[key])
             st = {k: v for k, v in g.items() if k != "foreach"}
-            st["name"] = "%s.%s" % (name, row[fe["key"]])
+            st["name"] = "%s.%s" % (name, row[key])
             for k in ("args", "outputs", "dirs"):
                 if isinstance(st.get(k), list):
                     st[k] = [foreach_subst(x, row, where) if isinstance(x, str) else x for x in st[k]]
@@ -733,10 +753,42 @@ def expand_foreach(rec, repo):
                 st["env"] = {k: foreach_subst(v, row, where) if isinstance(v, str) else v for k, v in st["env"].items()}
             for o in step_outputs(st):
                 if o in outputs:
-                    raise ValueError("%s: output %s is also an output of %s (an output of a foreach step must name the row: {%s})" % (where, o, outputs[o], fe["key"]))
+                    raise ValueError("%s: output %s is also an output of %s (an output of a foreach step must name the row: {%s})" % (where, o, outputs[o], key))
                 outputs[o] = st["name"]
-            out.append(st)
+            out.append(foreach_consume(st, fan))
     return dict(rec, run=out)
+
+
+def foreach_consume(g, fan):
+    """Step G with its `"rows": "all"` inputs expanded (see expand_foreach)."""
+    ins = g.get("inputs")
+    if not isinstance(ins, list) or not any(isinstance(r, dict) and r.get("rows") == "all" for r in ins):
+        if isinstance(g.get("args"), list) and "@rows" in g["args"]:
+            raise ValueError("run %r: the arg @rows needs an input {stage, path, rows: all}" % g.get("name"))
+        return g
+    new, at = [], []
+    for r in ins:
+        if not (isinstance(r, dict) and r.get("rows") == "all"):
+            new.append(r)
+            continue
+        if set(r) != {"stage", "path", "rows"} or not all(isinstance(r[k], str) for k in ("stage", "path")):
+            raise ValueError("run %r: a rows input is exactly {stage: ROOT:run:NAME, path: TEMPLATE, rows: \"all\"}" % g.get("name"))
+        if at:
+            raise ValueError("run %r: one `rows: all` input per step (the arg @rows names its mounts)" % g.get("name"))
+        _, _, step = r["stage"].partition(":")
+        kind, _, nm = step.partition(":")
+        if kind != "run" or nm not in fan:
+            raise ValueError("run %r: rows input %s names no foreach step of this recipe" % (g.get("name"), r["stage"]))
+        tmpl, rows, key = fan[nm]
+        if r["path"] not in step_outputs(tmpl):
+            raise ValueError("run %r: rows input path %r is no output of foreach step %s as written (%s)" % (g.get("name"), r["path"], nm, step_outputs(tmpl)))
+        for row in rows:
+            at.append("/in/%d" % (len(new) + 1))
+            new.append({"stage": "%s:run:%s.%s" % (r["stage"].partition(":")[0], nm, row[key]), "path": foreach_subst(r["path"], row, "run %r row %s" % (nm, row[key]))})
+    args = g.get("args")
+    if isinstance(args, list):
+        args = [m for a in args for m in (at if a == "@rows" else [a])]
+    return dict(g, inputs=new, args=args if args is not None else g.get("args"))
 
 
 def effective(rec, name):
