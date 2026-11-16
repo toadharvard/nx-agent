@@ -1763,3 +1763,8 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - formgate is red: the pinned pack db2aaf6d4 has no shapes.tsv.
   - Fix: the relifted pack (the density run's final head, via xferpub, with shapes.tsv) becomes the lift/pack pin.
   - L3b splits 1,098 ValueError pack-only keys by family.
+- The safepoint ABI is decided with L5.
+  - The field c->susp is ours (w13 adds it).
+  - fnvnx_safepoint(c, pc) is L5's (platform/win32/thread.cpp).
+  - P = back-edge targets ∪ function entries. Every p ∈ P is an escape in flaglive.
+  - L5 deletes the arbitrary-instruction kernel pause.
