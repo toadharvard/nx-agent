@@ -194,6 +194,13 @@
    "recipe": "ports/fnv-nx/contract/exports/build.json"
   },
   {
+   "path": "ports/fnv-nx/contract/target",
+   "class": "tool",
+   "target": "host",
+   "entry": [],
+   "recipe": "ports/fnv-nx/contract/target/build.json"
+  },
+  {
    "path": "ports/fnv-nx/tests/bootrt",
    "class": "test",
    "target": "host",
