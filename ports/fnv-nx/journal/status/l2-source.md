@@ -654,3 +654,7 @@ After the first frame:
   - test_plugins (verify/tests) runs on the farm.
 - 2026-11-16 03:50Z: L1 ruling: d1a92e26 (old path) is a measurement and does not enter guest_compiler.json. The pin that enters is the recipe-path build, in one commit with proof (b) and the deletion of the old path; the trunk stays at 84f0883e. w2's guest_compiler.json change is withdrawn. w3: gcc1/rt green on the recipe path first. L3a measures on d1a92e26 only. w2 c76891e22 fixed the d4 key; keys from the symtab are still owed.
 - bottleneck: COMPILER-STAGE recipe path gcc1 green (w3). It blocks the pin, so lift/rt and the ELF.
+- 2026-11-16 03:55Z: w2 aced480fd. The test keys come from the symtab: test_names 212 ok, test_dispatch 67 ok, measured on the d1a92e26 scratch. The platform root on d1a92e26 is red at audio/backend.cpp:163:83 with `.fnvnx.decltype: a referenced symbol has no declaration line (fnvnx_dispatch)`. Over 96 objects: 14105 sympair rows, 0 nodecor; 7 of the 24 fnparm rows are measured. test_plugins is red against L1 recipe drift (check 2, and the toy fixture missing -fno-devirtualize). New items for w2:
+  - DECLTYPE-REF-PLUGSYM: a plugin-defined symbol takes reason `plugin` from the one plugsym registry;
+  - the test_plugins fixtures take their flags from recipe.py's profile.
+- bottleneck: COMPILER-STAGE recipe path gcc1 green (w3); then the platform root decltype (w2).
