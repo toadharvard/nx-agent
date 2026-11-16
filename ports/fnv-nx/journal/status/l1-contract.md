@@ -2014,3 +2014,17 @@ bottleneck: cand3b (w15: the toolchain revert and the facts input).
     2. makes declared `imports` roots in admit.json, keyed by the ast import closure only (an unused declaration is red);
     3. writes the admit rows toolchain = product and toolchain-stage1.
 bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
+
+## 2026-11-16: w28 declared imports and scratch class
+
+- done (w28, claude/fnv-l1-contract-w28):
+  - 22af0d841: the w12L2 exec-step merge, declared `imports` in admit.json (closure mounted at /imp and keyed; gen:unused-import), admit rows. stamp.py and require_under are deleted.
+  - 1aa024320: scratch class closed. merge_inputs uses a private mkdtemp, and test_recipe_scratch judges every function of recipe.py that takes `ws`, with no method list. Forwarded to L6 to confirm sm_link store is green on its farm.
+- doing:
+  - w15: cand3b head, verdict and merge.
+  - w28: jtab-guard verifier (waiting for w13's sample); deb pin rows for toolchain-stage1 (from w3's farm); rebase onto the final cand3.
+  - L2 w3: run-only toolchain root keys, deb pins, test_toolstep on its farm.
+  - L3a: lift/fnvlift declared inputs for factsimg/exe, retn, fpfacts and the guest tests; link.entry for the native guest test roots.
+  - L3b: the rcp host root on 82ff5eb86; delete the gcc calls.
+- open: the tests/bootguest/build.json admit red is not examined yet.
+- bottleneck: cand3b (w15).
