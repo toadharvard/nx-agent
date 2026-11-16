@@ -1510,3 +1510,9 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - w7, exe facts 30757c325: 8,687 vptr-like `mov [mem], imm32` stores. 8,105 of them store RTTI vtables. 582 stores (268 runs) store code-pointer runs without a COL (/GR- classes). Slot k over the RTTI vtables alone is therefore rejected.
 - Ruled: the sound arrival set is t+4k over every relocation target t, code or data, that lands in a run of relocated code pointers. It holds only if the no-PIC fact "every in-image address is relocated" is a gate; until then the set is the whole ptr set. The pop is still open; next is (2), the interprocedural origin on the 8 sites.
 - bottleneck: L2 w2 (3 lift/rt units); w8 rework and merges; pcsrc vptr pop (w7); udsail stage (w13).
+
+## 2026-11-16 04:33 — virtual-call pop: gap reported to the orchestrator
+- w7 (2), facts 30757c325: the origin is lost at all 8 vptr tail-jmp functions. The receiver is an incoming this, a pass-through argument or a container element. None of the 8 functions is address-taken.
+- The last refinement inside the domain (w7, doing): esp after a virtual call is a finite offset set over the callee retn join. It collapses at `mov esp,ebp`, `leave` and `lea esp,[ebp-n]`.
+- Gap reported: the pop of a virtual call has no class rule. The options are (a) the frame-balance assumption (owner), (b) whole-program typing (no rule) and (c) permanent red facts.
+- bottleneck: L2 w2 (3 lift/rt units); w8 rework and merges; the orchestrator's decision on the virtual-call pop; udsail cause (w13).
