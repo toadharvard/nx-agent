@@ -466,3 +466,16 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - red (owner L3a w13): udsail at 183e1ebef. All 6 baddecode sequences are GAP: isla returns no path on the ctrs vector spelling. w13 is to read the IR via formgate.ir_path (8b711fba) and rerun once.
 - doing: SIMD shards 1 and 2 (farms 1 and 3).
 - next: the prover as a recipe stage over ISLA/MODEL, with a pinned deterministic bound in place of the TIMEOUT wall clock.
+
+## 2026-11-16 04:35Z (claude/fnv-l3b-lift 38b25ee43)
+- done (7fc353a5e, 6ca68da31, 38b25ee43, worker a263326f7dfe45d17): no clock decides any prover verdict.
+  - z3 rlimit is pinned in lift/proof/bounds.py (Z3_RLIMIT = 2^32-1, which bounds only non-termination; REFINE 2^24 only splits the bisection).
+  - The class `timeout` becomes `bound` (red). isla runs with no clock, and a run that never ends is killed with its stage (no verdict).
+  - The SIMD path is the same.
+  - lift/proof/tests: 39 files, 216 ran, 39 skipped, 0 failed.
+- done (825bf19d6, worker a3994d45035f1f412): the x86ir pin lives only in lift/proof/sailmodel/build.json; formgate.ir_file reads it through the recipe. external_of and include_of taken from L1 (987dbde31, 94058b16b).
+- done (w4, efef73cbe): integer aggregation of the 4 new shards, 3 certificates. Model gaps: 501, of which 444 are inside the pack universe (SHAPES union l3b-lift/shapes @77524556, 26,500 shapes) and 368 of those are unimplemented in x86isa.
+  - v3 migration: stamped 0 of 18,187 (prover_sha differs). All go to one re-prove on the recipe stage.
+- blocked (owner L1 w28): foreach reading a stage-output table. The prover queue is derived from the exe, so it cannot be a tracked file. It blocks the prover root and the re-prove.
+- asked (L3a lead): reachability of the 368 unimplemented-opcode keys (arpl, bound, ins/outs, mov sreg, call far). If unreachable, the code-range rule removes them; otherwise the orchestrator rules on the SDM source.
+- doing: farm 2 runs L3a facts jobs (w7, w13); SIMD shards 1 and 2 (farms 1 and 3, prover eb53b3aa7, wall clock: a measurement).
