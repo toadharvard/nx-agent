@@ -739,3 +739,6 @@ After the first frame:
   - core-math.patch: tint_tod reports undecided; the callers use atan2_mpfr. emin/emax are set to binary64's, with subnormalize.
   - Blocked on L1: (1) units from a run step's dir output (proposed: a `sources` `<stage>:<dir>` line); (2) MPFR's configure linking libgmp (proposed: a stage input {"archive": ROOT}).
   - Citation 798eacad4 (semantics_cite README:173) is on cand4b.
+- 2026-11-16 06:55Z: L1 accepted both recipe mechanisms with conditions, for cand5. w2 implements them in recipe.py, each with tests and a RECIPE.md section:
+  - `sources <step>:<dir>`: same root only; a unit is its text alone (the OPERATION_* compiles become wrapper units);
+  - `{"archive": ROOT}`: ROOT in `uses`; run steps only; the probes may compile and link only, and a run probe is reported.
