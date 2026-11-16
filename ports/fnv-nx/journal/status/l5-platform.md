@@ -5,6 +5,7 @@ Lead: Opus 5.5, session_01KmtZKTGM2tLun8zgoE6X44 (from 2026-11-11 22:35; replace
 Branch: claude/fnv-l5-platform. Workers: Sonnet 5.5, branches claude/fnv-l5-platform-w<N>.
 
 ## RESTART 2026-11-12 08:23Z (orchestrator): ONE task, the platform product root
+- 2026-11-16 10:55: The L1 derived_imports rule makes gen_combridge.py red (sys.path, bare sibling import). The root name platform collides with stdlib; L1 rule: every root imports as fnvnx.<rel>, at /imp/fnvnx/<rel>, landing on w28-c5. w40 is rewriting the imports to the fnvnx.* form (doing), for the cand5 head. bottleneck: the w28-c5 prefix head. workers 1 (w40).
 - 2026-11-16 09:47: L3a base3 b9359142f fixes gen_cpuref purity and holds 6d67261e (imptest x86sys). w40 takes lift/ whole from it, then re-tries loader, contract/exports and bridgetable and their 30-root closure. bottleneck: w40 c5 integration. workers 1 (w40).
 - 2026-11-16 09:46: c5 @920338542bf3 (eea21fad4 + lift/rt re-admitted) verdict RED 17/47, tree 8d7277105ade, 793 s warm. objstub 6934/7084, pure 86/90 (gen_cpuref.py sent to L3a). Next: merge w28-c5 99f6eb846 and the constants.tsv stage (w40 doing). bottleneck: w40 merge + constants stage, cand5. workers 1 (w40).
 - 2026-11-16 09:33: L1 decisions: synth_names e116876ab accepted; guest.ld split (layout script for ldsynth, guest_image.ld for the crt0 ASSERTs); pure l2sections/gate_abs/gate_disp taken. All three on w28-c5. Next: re-run the c5 verdict on that head when it lands. bottleneck: w28-c5 head, cand5. workers 1 (w40).
