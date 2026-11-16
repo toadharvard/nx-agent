@@ -16,8 +16,8 @@ EXTERNAL inputs (key "external", RECIPE.md): fetched only by exact commit from t
   the external). The tree is a declared input at "at" of EVERY stage (the tool runtime lists it), so stage keys cover its hash. A tree
   is the content-pinned INPUT, not a build output: sharing the fetch between two cold builds shares nothing that a build computes.
   compiler {"external": N, cc, cxx}: the tree is declared to runtime.py tool as HOST@AT (loader closure resolved as inside the sandbox, RECIPE.md).
-Outputs in --out: objects.json ("fnvnx-objects/1": root, objects[{unit,object,sha256,os_layer}], elf, constants, defined [{symbol,bind,type,object}] and undefined [symbol] (ELF .symtab of the objects, struct), stage_keys, stages
-  {run,hit}, status green|red, failure {stage,exit,stderr tail 20} / failed_units when red), obj/<unit>.o, <name>.elf, constants.tsv.
+Outputs in --out: objects.json ("fnvnx-objects/1": root, objects[{unit,object,sha256,os_layer}], elf, defined [{symbol,bind,type,object}] and undefined [symbol] (ELF .symtab of the objects, struct), stage_keys, stages
+  {run,hit}, status green|red, failure {stage,exit,stderr tail 20} / failed_units when red), obj/<unit>.o, <name>.elf.
 Assumptions: the compiler and ld are deterministic given the flags of unitstage/toolflags (A-env); the sandbox leaves the channels of (ASM-038, ASM-039)
   sandbox.OPEN_CHANNELS open (see gate_determinism.py for which of them two cold builds expose)."""
 import argparse
@@ -138,7 +138,7 @@ def _plugin_cxx():
 
 
 PLUGIN_CXX = _plugin_cxx()
-KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_layer", "game", "constants", "contract_names", "link", "external",
+KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_layer", "game", "contract_names", "link", "external",
         "plugins", "variants", "profile", "outputs", "uses", "include_uses", "sources", "error_abi", "empty_handlers", "external_errors", "tests", "run"}
 VARIANT_KEYS = {"compiler", "flags", "link", "flags_add", "defines_add"}   # the keys a variant may replace (whole: a sanitizer variant names its own link.libs.system) and its two deltas
 VARIANT_DELTAS = {"flags_add", "defines_add"}   # appended to the base flags of the root (RECIPE.md, "Profiles")
@@ -384,7 +384,7 @@ def link_file(rec_file, root, mine, roots, files):
 
 
 def link_generated(rec_file, mine, seen):
-    """REC_FILE is a generated output of the root (SEEN: the outputs of its generated and run stages, as for `constants`) and not a tracked file:
+    """REC_FILE is a generated output of the root (SEEN: the outputs of its generated and run stages, as for `contract_names`) and not a tracked file:
     the link script or version script a generator writes. The ld stage mounts it from the root's view, so its content is in the stage key."""
     return isinstance(rec_file, str) and rel_ok(rec_file) and rec_file in seen and rec_file not in mine
 
@@ -2214,7 +2214,7 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
     gm = rec.get("game")
     if gm is not None and not (isinstance(gm, str) and rel_ok(gm) and any(u.startswith(gm.strip("/") + "/") for u in units)):
         err.append("game %r is not a root-relative directory holding units" % (gm,))
-    for key in ("constants", "contract_names"):
+    for key in ("contract_names",):
         c = rec.get(key)
         if c is not None and not (isinstance(c, str) and rel_ok(c) and (c in mine or c in seen)):
             err.append("%s %r is neither a tracked file of the root nor a generated output" % (key, c))
@@ -3887,7 +3887,7 @@ class Job:
         lb, pre, post, search, libs, sysin = lk.get("libs"), [], [], [], [], []
         if lb and lb.get("derive"):     # a guest link: the libraries are the pinned driver's answer, derived here (keyed), never stored
             rootdef = set().union(*(undefset.object_symbols(open(p, "rb").read())[0] for _, objs in groups for _, p in objs))
-            lb = dict(self.guest_libs(ws, rootdef, open(os.path.join(sd, os.path.basename(lk["script"]))).read())[0], external=lb["external"])
+            lb = dict(self.guest_libs(ws, rootdef, "".join(open(os.path.join(sd, os.path.basename(lk[k]))).read() + "\n" for k in ("script", "image_script") if k in lk))[0], external=lb["external"])
         if lb and "system" in lb:
             # the shared libraries of env.json packages: their content is the input, mounted at /syslib under their own file names
             yd = os.path.join(pv, "syslib")
@@ -4045,7 +4045,7 @@ class Job:
     def guest_libs(self, ws, rootdef, script_text):
         """The guest link's libraries, derived (keyed stages, nothing stored): the driver's `-###` link command read by parse_driver_link, minus the start
         and end files that the one-definition rule (onedef over ROOTDEF, the symbols the product roots define) or the entry rule (entry_object, the ENTRY
-        of SCRIPT_TEXT) excludes. Every derived file must lie under the pinned runtime external and in the multilib the guest semantic flags select
+        of SCRIPT_TEXT, the text of the link's scripts together) excludes. Every derived file must lie under the pinned runtime external and in the multilib the guest semantic flags select
         (-print-multi-directory). -> ({dirs, names, startfiles, endfiles}, [excluded objects]); BuildRed otherwise."""
         pin = load_pin(self.repo)
         text, at = self.link_probe(ws)
@@ -4163,7 +4163,7 @@ class Job:
         doc = {"format": "fnvnx-stage/1", "stage": "ldcheck:" + self.root, "class": "build", "tool": "python", "cwd": "/work",
                "argv": [py["python"], "-s", "-B", "-m", tool_module(LD_TOOL)[0], "--elf", "/linked/" + name, "--objs", "/objs", "--out", "/out", "--name", name, "--kind", lk.get("kind", "pie")]
                + (["--version-script", "/ld/" + os.path.basename(lk["version_script"])] if "version_script" in lk else [])
-               + (["--script", "/ld/" + os.path.basename(lk["script"])] if "script" in lk else [])
+               + [x for k in ("script", "image_script") if k in lk for x in ("--script", "/ld/" + os.path.basename(lk[k]))]
                + (["--entry", lk["entry"]] if "entry" in lk else [])
                + ["--lib=/syslib/" + os.path.basename(p) for p in lk.get("libs", {}).get("system", [])]
                + (["--loader-defs", "/loader/defs.txt"] if loader_defs is not None else []),
@@ -4281,7 +4281,7 @@ def map_members(text):
 
 
 def objects_digest(res):
-    """sha256 of the CONTENT of an objects.json dict: its fields without the machine paths (object, plugin, ELF, constants files: their
+    """sha256 of the CONTENT of an objects.json dict: its fields without the machine paths (object, plugin, ELF, contract_names files: their
     sha256 stands for them) and without the cache counters, so two builds of the same sources give the same digest."""
     keep = {k: res.get(k) for k in ("format", "root", "status", "defined", "undefined", "units", "stage_keys", "pp_keys", "failure")}
     keep["link_roots"] = [{"root": x["root"], "sha256": x["sha256"]} for x in res["link_roots"]]
@@ -4290,7 +4290,7 @@ def objects_digest(res):
     keep["analysis_plugin"] = (res.get("analysis_plugin") or {}).get("sha256")
     keep["link_archives"] = [{k: m[k] for k in ("archive", "member", "sha256")} for m in res.get("link_archives", [])]
     keep["elf"] = res["elf"] and res["elf"]["sha256"]
-    for k in ("constants", "contract_names"):
+    for k in ("contract_names",):
         keep[k] = res[k] and hashlib.sha256(open(res[k], "rb").read()).hexdigest()
     return hashlib.sha256(json.dumps(keep, sort_keys=True).encode()).hexdigest()
 
@@ -4757,7 +4757,7 @@ def _build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True, shard=
     if errs:
         raise RecipeError(errs)
     units = units_of(j.rec, root, j.files, j.roots, repo)
-    res = {"format": OBJ_FORMAT, "root": spec, "objects": [], "tests": [], "elf": None, "link_roots": [], "constants": None, "contract_names": None, "defined": [], "undefined": [], "plugins": [],
+    res = {"format": OBJ_FORMAT, "root": spec, "objects": [], "tests": [], "elf": None, "link_roots": [], "contract_names": None, "defined": [], "undefined": [], "plugins": [],
            "link_archives": [], "stage_keys": [], "status": "green"}
     ws = tempfile.mkdtemp(prefix="recipe-")
     os.makedirs(out, exist_ok=True)
@@ -4977,11 +4977,11 @@ def _build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True, shard=
                     fu["findings"] = ["static undefined set not computed: %s" % e]
                 res["link_undefined"] = fu.get("undefined")
             res["failed_units"].append(fu)
-        for key in ("constants", "contract_names"):
+        for key in ("contract_names",):
             if j.rec.get(key):
                 shutil.copyfile(os.path.join(ws, "root", j.rec[key]), os.path.join(out, key + ".tsv"))
                 res[key] = os.path.abspath(os.path.join(out, key + ".tsv"))
-    except BuildRed as r:   # a stage of the root's own that is not keep-going (a constants file ...): red, nothing else known
+    except BuildRed as r:   # a stage of the root's own that is not keep-going (a contract_names file ...): red, nothing else known
         j.red.append(dict(r.args[0]))
     except (sandbox.SbxError, OSError, cas.CasError, runtime.RtError, unitstage.UnitError) as e:
         # a store or sandbox failure (EMLINK, ENOSPC, EXDEV ...) is a red build naming its stage: objects.json is always written

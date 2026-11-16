@@ -66,7 +66,7 @@ Wine 9.0 does, with one log line at the call. The source of the behaviour is Win
   and value. Each row names the contract method and its Wine 9.0 reference `wine-9.0:<path>:<function>`: data, not a list of places in
   code. A body that also does real work is `wine-fixme-in-real-body`; a wrong or unknown `id`, a non-constant `id` and a taken address
   are findings.
-- Result kinds: `void`, `u32`, `u64`, `addr` (the address of an ELF symbol, as in the constants table) and `u32nz<N>` (the result depends only on whether the pointer argument x<N> is zero, `this`
+- Result kinds: `void`, `u32`, `u64`, `addr` (the address of an ELF symbol, written as `SYMBOL` or `SYMBOL+OFFSET`) and `u32nz<N>` (the result depends only on whether the pointer argument x<N> is zero, `this`
   being 0; value `<result when zero>,<result otherwise>`). The first rows are the two real ones from the Wine 9.0 source,
   `SetClipStatus` and `GetClipStatus` (`0x8876086C,0`). `ProcessVertices` is implemented for real in Wine;
   only its branch FIXMEs are under kind `branch`.

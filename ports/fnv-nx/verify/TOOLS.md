@@ -1352,7 +1352,7 @@ compares a warm and a cold build).
 Keep going (RECIPE.md): a red root lists every red unit and stage and every blocked unit; all that was buildable is built and kept.
 Hand-over to later gates: verdict.py gives EVERY gate its own GATE_OUT, so a later gate cannot
 read this gate's GATE_OUT. objects.json of a root is therefore also kept at GATE_CACHE/objects/<tree>/<root name>/objects.json (with
-obj/, the ELF and constants.tsv beside it; <tree> = git tree of the commit under test, <root name> = path with / as __), and later
+obj/, the ELF beside it; <tree> = git tree of the commit under test, <root name> = path with / as __), and later
 gates call ensure() (build or cache hits, same result). Without GATE_CACHE nothing outlives the gate except GATE_OUT/objects/<root name>.json.
 ```
 
@@ -1614,7 +1614,7 @@ Relies on the owner-accepted item "the compiler is correct": the pinned compiler
 Gate "objstub" (fnvnx-gate/1, classes 1 and 2 of VERDICT.md): no built function holds a trap/abort path or is vacuous (rules and proofs: objstub.py).
     python3 -I gate_objstub.py [--jobs N]     cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/objstub.json
 Roots come from verify/admit.json, never from arguments: for every product root the gate calls gate_build.ensure(root, GATE_CACHE) (build or
-cache hits) and judges what the recipe says (RECIPE.md): the objects (os_layer ones may hold SVC), the constants table (key (unit, symbol))
+cache hits) and judges what the recipe says (RECIPE.md): the objects (os_layer ones may hold SVC; their `.fnvnx.const` records are the declared constants, there is no constants table)
 and the terminator set DERIVED from the recipe's compiler: objstub.unit_terminators runs the compiler's own plugin over the preprocessed text
 of every C/C++ unit (the stage result unit.ii of the build, found by the pp_key in objects.json), so the set is a function of the compiler,
 its flags and every header the unit really includes (a function of the compiler and the header set; the finer key is the preprocessor stage
@@ -1893,8 +1893,8 @@ Both print `L1 <green|red> <tree> <seconds>s gates:<n> over_budget:<bool> vacuou
 
 ```text
 objstub: decide on MACHINE CODE whether built AArch64 objects contain (T) a trap/abort path or (V) a vacuous function.
-    objstub.py check --terminators FILE [--constants FILE] [--facts FILE] [--os-layer OBJ]... [--wine-fixme FILE] [--declared-machine FILE] [--fail SYMBOL] [--op-cover FILE --op-syntax FILE] [--cache DIR] [--jobs N] [--json OUT] OBJ...
-        (the object id and the `unit` of a constants row are the path as given)
+    objstub.py check --terminators FILE [--facts FILE] [--os-layer OBJ]... [--wine-fixme FILE] [--declared-machine FILE] [--fail SYMBOL] [--op-cover FILE --op-syntax FILE] [--cache DIR] [--jobs N] [--json OUT] OBJ...
+        (the object id is the path as given)
     objstub.py terminators --cc CC [--cflag F]... [--lang c|c++] --header H... -o FILE
 Inputs: ELF relocatable objects, ELF32 (ILP32; SHT_RELA with Elf32_Rela, R_AARCH64_P32_* kinds) or ELF64, AArch64, little endian. Decoder: ONE source, verify/a64access.cc (built with
 the host g++ against LLVM 18's MC layer): per word the registers read and written
@@ -1918,12 +1918,14 @@ runs off the end after a call the compiler knew not to return), except a BL of `
 a caller of a flagged function is not flagged for it. Assumption: every terminating routine of the toolchain is declared noreturn (ASM-044)
 in the headers given. TERMINATOR RULE (what is a terminator): a routine that ENDS THE PROCESS. Resuming or starting the propagation of
 an exception is not process end: it transfers control to a handler (or on to the caller), and whether a handler exists is the EH
-class, not class 1. The plugin applies GCC's own flags (TREE_THIS_VOLATILE = noreturn, TREE_NOTHROW) and its own EH lowering: (1) the
+class, not class 1. The plugin applies GCC's own flags (TREE_THIS_VOLATILE = noreturn, read while the unit is parsed: the DECLARED noreturn; a function that GCC's pure-const pass later finds to never return, because it ends in a longjmp or an exit, is not declared noreturn and is not a terminator; TREE_NOTHROW) and its own EH lowering: (1) the
 EH-resume routines are the explicit builtins GCC's RESX lowering emits (`builtin_decl_explicit` of BUILT_IN_UNWIND_RESUME and
 BUILT_IN_CXA_END_CLEANUP: `_Unwind_Resume` on AArch64, whatever the target uses); (2) in a C++ TU a noreturn function that is not
 nothrow may raise an exception by the language (`__cxa_throw`, `__cxa_rethrow`, the `std::__throw_*` helpers), so it is not process
-end; in a C TU every noreturn function is a terminator (C has no exceptions). Terminators = the remaining noreturn functions
-(`abort`, `exit`, `_Exit`, `quick_exit`, `std::terminate`, `longjmp`, a noreturn nothrow user function; a C user function declared
+end; in a C TU, and in a C++ TU compiled with -fno-exceptions (GCC's flag_exceptions is 0: no handler exists, so a throw ends the process),
+every noreturn function is a terminator. A function declared by <setjmp.h> (ISO C 7.13: longjmp, siglongjmp, _longjmp) is a control
+transfer to the caller of a setjmp, not process end: an unwinder. Terminators = the remaining noreturn functions
+(`abort`, `exit`, `_Exit`, `quick_exit`, `std::terminate`, a noreturn nothrow user function; a C user function declared
 noreturn). The others are UNWINDERS, written to the set as `~name`: a call of one is no T2, and a direct BL of one at the end of a
 function is no `T2-noreturn-tail` (a landing pad ends in `bl _Unwind_Resume`; a `throw` ends in `bl __cxa_throw`). NOT EXACT (stated):
 the headers declare `__cxa_pure_virtual`, `__cxa_deleted_virtual` and `pthread_exit` noreturn but not nothrow, and the compiler's flags
@@ -1933,23 +1935,21 @@ A C++ user function declared noreturn without noexcept is an unwinder by the sam
 (GCC's noreturn flag) by assembler name. No header text is read.
 
 INDIRECT TAIL. A last instruction BLR (a call through a pointer, nothing after it) cannot be judged by a symbol: it is the finding
-`indirect-noreturn-tail`, unless the function is `fnvnx_reach_violation` or has a constants row of kind `exit`, AND every path of it ends
+`indirect-noreturn-tail`, unless the function is `fnvnx_reach_violation`, `fnvnx_assume_violation` or a cited process-end/thread-end body, AND every path of it ends
 that way (exit_tail: the last word is a reachable BLR; no reachable RET, BR, ERET, SVC or trap word; no branch leaves the function).
-A row of kind `exit` on any other function is `exit-mismatch`. Why a table row and not a per-site exception: the rows are the exe's own
-process-exit imports, generated by the owner's manifest (one per import); a hand-written site list would be the forbidden allow-list.
 NOT PROVEN: that the pointer called is the host exit slot (the contract row says so); an infinite loop is class `nodeadlock`.
 `fnvnx_reach_violation` is also `reach-not-exit` if its definition does not end that way.
 
-(A) ASSUME. `fnvnx_assume_violation(asm_id, value)` (C linkage; noreturn; like `fnvnx_reach_violation` its definition ends in the call through the
-host exit slot on every path, else `assume-not-exit`) is the exit of a miss of a total domain that an ACCEPTED assumption (verify/ASSUMPTIONS.json
+(A) `ASSUME`. `fnvnx_assume_violation(asm_id, value)` (C linkage; noreturn; like `fnvnx_reach_violation` its definition ends in the call through the
+host exit slot on every path, else `assume-not-exit`) is the exit of a miss of a total domain that an ACCEPTED OWNER record (`verify/ASSUMPTIONS.json`,
 status OWNER) declares. It is the second contract symbol of an assertion, not a trap path. Polarity holds by construction: the ONLY caller is a
 check function that a generator stage of the root's recipe writes (`fnvnx_dom_<name>[]` and `fnvnx_dom_<name>_check(v)`: hit returns v, miss
-calls ASSUME with the id the generator writes from its declared input); the generator is the one place the polarity is written and its test
+calls `ASSUME` with the id the generator writes from its declared input); the generator is the one place the polarity is written and its test
 proves hit -> return, miss -> violation. A call is accepted iff, per site: (a) it lies in an object of a unit that a generator stage outputs
-(`recipe.generated_outputs`; else `assume-direct-call`: hand-written code never calls it); (b) w0 is a literal, an integer c (id `ASM-%03d` % c)
-or a pointer to a C string in a data section of the object (its text), and the record of that id has status OWNER (`assume-id-nonliteral`;
+(`recipe.generated_outputs`; else `assume-direct-call`: hand-written code never calls it); (b) w0 is an integer constant c decided in the object
+(the same constant on every path to the call; id `ASM-%03d` % c; a string or any computed value is not accepted), and the record of that id has status OWNER (`assume-id-nonliteral`;
 `assume-id-not-owner`: REMOVE, missing or unknown). A reference that is not a call is `assume-address-taken`. The gate result holds
-"assume_calls": {sites, accepted, red, by_id} over all objects.
+`"assume_calls": {sites, accepted, red, by_id}` over all objects.
 
 (W) WINE FIXME. `fnvnx_wine_fixme(uint32_t id)` (C linkage, defined by the runtime's owner; writes one line and RETURNS) marks a body that
 does exactly what Wine 9.0's simplified implementation of an API does (nothing, or a fixed value). For V the BL of it is transparent: it
@@ -1985,8 +1985,14 @@ of (W) with no call to read: it is analysed with the input rule replaced by the 
 result (`declared-machine-mismatch` / `wine-fixme-mismatch`); not V => `declared-machine-in-real-body` / `wine-fixme-in-real-body`, except a row of kind
 noreturn (below). Exactly one record per body (`cite-mismatch`), the row's contract name is a name of the body (`...-name-mismatch`), the id is a row
 (`...-unknown-id`), and every dm row is cited by some record (`declared-machine-uncited`). Stated limit: V cannot know which result is "success" of a network
-call, so a row saying success is not rejected; only a body that differs from its row is. A body with no record that is V needs a constants row as before.
+call, so a row saying success is not rejected; only a body that differs from its row is. A body with no record that is V needs a `.fnvnx.const` record.
 The gate result counts records per id ("declared_machine"). The calls of `fnvnx_wine_fixme` keep rule (W).
+
+(O) OWNER DECISION (CLAUDE.md "GL keeps its branch ..."). `FNVNX_CITE(fn, "od:<id>")` cites a body that an owner decision keeps although the stub gate would flag it.
+`<id>` must be an anchor line of the CLAUDE.md of the tree under test, `<!-- fnvnx-owner-decision: ID | class: CLASS | root: ROOT -->` (read_owner_decisions: the only
+source, no list in the gate; a duplicate or malformed anchor is an error, red). The decision names the class of the branch; the body's object must lie under ROOT
+(`owner-decision-wrong-root`), the id must be an anchor (`owner-decision-unknown-id`), and the record is the body's only one (`cite-mismatch`). Then every finding of
+that body is accepted; the gate result counts them as "owner_decision". An uncited body keeps its findings.
 
 TERMINATING BODIES AND T2 (replaces "a reference to a terminator is a finding"). A REAL terminator is a function declared noreturn in a header of the unit that
 is either cited by a record whose row has fact process-end/thread-end (kind noreturn), or a library routine that no object of the root defines (documented by the
@@ -1997,7 +2003,7 @@ point), or it is `fnvnx_reach_violation` / `fnvnx_assume_violation` (class R); e
 a terminator) are findings only when EVERY path of the function ends in a call of a real terminator (nr_ends) and the function is not a declared-noreturn
 definition (covered above): a body with at least one returning path is a MIXED body, its terminator paths are real control paths and are not a fixed failure by
 termination. The returning paths of a mixed body are judged by the V rules: the analysis treats a call of a declared-noreturn callee as the end of the path, so
-a constant or vacuous result of the returning paths is V, needs a constants row or a record, and is otherwise red (`constants-mismatch`).
+a constant or vacuous result of the returning paths is V, needs a `.fnvnx.const` record, and is otherwise red (`const-missing`).
 
 (R) REACH. A call (BL, or B as a tail call, with a CALL26/JUMP26 relocation) of the symbol `fnvnx_reach_violation` is not a T2 and not a
 T2-noreturn-tail; it is judged by the reach rule: w0 at the call must be a constant of objstub's own forward constant propagation (the
@@ -2026,7 +2032,7 @@ cycles do not count) else `error-abi-flag` (also without DWARF). STATED SUBSET: 
 kinds read the code of the object: the compiler's code generation is ASM-001.
 
 (H) EMPTY HANDLERS BY RECORDS. A table of handlers selects functions by their address stored in a data section (an instruction table). A V function
-(empty or constant body) with no constants row is certified iff the root's generated records justify it (`--op-cover FILE --op-syntax FILE --table
+(empty or constant body) with no record is certified iff the root's generated records justify it (`--op-cover FILE --op-syntax FILE --table
 SLOT=SYMBOL:FIELD`; recipe `empty_handlers: {"cover": PATH, "syntax": PATH, "tables": {SLOT: {"symbol": TABLE, "field": FIELD}}}`, tracked files;
 read_handler_records, an unparseable record is an error): (1) the layout-derived join: the handler of entry k of the table of slot S is the target of the
 data relocation at sym + k*sizeof(entry) + offsetof(entry, FIELD), with sizeof and offsetof from the object's DWARF (the array variable SYM, its element
@@ -2039,9 +2045,24 @@ empty body is not accepted for it (the body must be a call of fnvnx_reach_violat
 finding V with the reason. The gate result holds "handler_justified": {a: n, b: n}. The records carry no handler name: a name copied from source text
 would need its own proof, the layout of the object is the proof.
 
+COST. Decoding: one decoder run per section (per function for the image), and a run is fed only the bytes of its ranges, so the decode cost of an
+object is linear in its code size (an earlier version fed the whole object to every run: quadratic in sections). The per-function analyses
+are independent of each other and of the object size; each is a worklist fixed point over the function's own words (liveness: a 32-bit mask per
+word, monotone OR). No object and no function is skipped by size or by -g: the work is the same rule on every object. Measured at eba704601 +
+this change, platform root, 114 objects, warm cache: total 49 s, maximum 8.9 s (com/combridge.gen.cpp, 2.8 MB, 1011 sections).
+
+(I) IMAGE. For a root with a link stage the gate also reads the FINAL ELF (image_check): every STT_FUNC symbol with a size in an executable section of the image
+is a body, so a weak definition that a strong one replaced is not in the image and is not judged, and the archive members the linker pulled are judged as
+they stand. A body is FIXED-FAILURE iff, by the V rules with the root's errno accessor (DERIVED, `errno_probe`: the function the libc errno macro calls; no recipe key) transparent, it
+stores only constants through the pointer that a call of the accessor returned (at least one such store), reads nothing but its own frame, and returns one
+constant on every path: its whole effect is `errno = K1; return K2`. Finding `fixed-failure` (id <root>/<link output>, name the function). Stated limits: a constant
+return without an errno store is the V class (a `.fnvnx.const` record); an errno held in a thread register or inlined (no call of the accessor) is not seen; a body with a
+data island or another call is not judged by this class (cfg has no result); exemptions (a call-graph certificate of unreachability per function, a declared-machine
+citation per function for an archive body) have no fact form yet and are not accepted.
+
 CACHE. Per object, CACHE/objstub/<key>.json, key = sha256 of (analysis version = objstub.py + a64access.cc, object sha256, os_layer
 flag, the terminators the object's own symbols mention, the probe = the root's error_abi and empty_handlers.tables): the analysis reads the terminator set only through the object's symbol names, so
-the key is exact and a changed header does not invalidate objects that do not mention the new terminator. Constants rows and reach facts
+the key is exact and a changed header does not invalidate objects that do not mention the new terminator. Records and reach facts
 are applied after the analysis (judge), so they are not in the key. Objects without an entry run in --jobs processes.
 
 (V) VACUOUS CLASS. Forward dataflow to a fixed point over the CFG of direct branches inside the function. Values: E(r) entry value
@@ -2053,10 +2074,12 @@ the function or into a data island; (c) no SVC/atomic/system word (not in the wh
 of x19..x30 into the frame and RET of x30 = E(30): no argument, x8 or vector argument is read, loads read only frame slots stored
 earlier; (e) at every reachable RET each of x0, x1, v0 is never written (void) or is K or A. So effects stay in the frame and the
 result is a function of immediates and link-time addresses: V => result and effects are input-independent (merges give I or D,
-never K). Limits: (1) never-written x0 means void OR identity (`ret` is both), so such a function is V-flagged and needs a `void`
-row; (2) not complete: a body that logs and returns a constant is not V (class `oracle`). `--constants` rows (unit, symbol, kind
-void/u32/u64/addr/exit, value, ref): a V function is certified iff the row of (its unit, its symbol) equals the result (u32: low 32 bits
-of x0; addr: canonical address; x1 and v0 unwritten); a row that matches nothing, or differs, is `constants-mismatch` (`exit`: above).
+never K). Limits: (1) never-written x0 means void OR identity (`ret` is both), so such a function is V-flagged and needs a LEN 0
+record; (2) not complete: a body that logs and returns a constant is not V (class `oracle`). DECLARED CONSTANTS come from the compile itself: the object's
+non-alloc section `.fnvnx.const` (contract/l2consts.py; no constants table). A record is an ABS relocation to the function, u32 LEN and LEN bytes holding the
+value as an object of the row's type (LEN 0: void; a relocation at the value: the address of that symbol). A V function is certified iff it has exactly one
+record and it equals the result bit for bit (the low 8*LEN bits of x0; x1 and v0 unwritten): `const-missing`, `const-duplicate`, `const-mismatch` (also a
+record on a body that is not V), `const-malformed` (a record with no relocation, a bad length, a relocation of another kind: with its offset).
 ```
 
 ## verify/objstub_plugin.cc
@@ -2213,8 +2236,8 @@ Input refs (the one reader is recipe.resolve_input(root, ref, repo, cache, rec) 
 Run stages (RECIPE.md "Run stages"): `run` executes the linked output of another admitted host root in the sandbox with declared inputs, debs (env.json
   debs.packages) and /out; the key holds the artifact, input contents, deb sha256s and argv; a PT_INTERP must be provided by a declared deb; optional
   "host_cpu": "cpuref" puts verify/cpuref.json in the key and refuses a non-matching host (cache hits are served anywhere).
-Outputs in --out: objects.json ("fnvnx-objects/1": root, objects[{unit,object,sha256,os_layer}], elf, constants, defined [{symbol,bind,type,object}] and undefined [symbol] (ELF .symtab of the objects, struct), stage_keys, stages
-  {run,hit}, status green|red, failure {stage,exit,stderr tail 20} / failed_units when red), obj/<unit>.o, <name>.elf, constants.tsv.
+Outputs in --out: objects.json ("fnvnx-objects/1": root, objects[{unit,object,sha256,os_layer}], elf, defined [{symbol,bind,type,object}] and undefined [symbol] (ELF .symtab of the objects, struct), stage_keys, stages
+  {run,hit}, status green|red, failure {stage,exit,stderr tail 20} / failed_units when red), obj/<unit>.o, <name>.elf.
 Assumptions: the compiler and ld are deterministic given the flags of unitstage/toolflags (A-env); the sandbox leaves the channels of (ASM-038, ASM-039)
   sandbox.OPEN_CHANNELS open (see gate_determinism.py for which of them two cold builds expose).
 ```

@@ -53,7 +53,7 @@ RECIPE = {"format": "fnvnx-recipe/1", "compiler": {"cc": "aarch64-linux-gnu-gcc-
                     "cxx": ["-mabi=ilp32"], "asm": ["-mabi=ilp32"]},
           "include": [ROOT + "/inc", ROOT + "/gen"], "units": "all",
           "generated": [{"tool": T + "gen/gen.py", "args": [], "inputs": [ROOT + "/constants.tsv"], "outputs": ["gen/gen.h"]}],
-          "os_layer": ["os.S"], "constants": "constants.tsv",
+          "os_layer": ["os.S"],
           "link": {"script": "link.ld", "output": "toy.elf", "flags": ["-m", "aarch64linux32"]}}
 FILES = {
     "toy/a.c": '#include "toy.h"\n#include "gen.h"\nint f_b(void);\nint f_a(void) { return NCONST + f_b() + TOY + (int)(STAMP % 1000003L); }\n',
@@ -462,7 +462,7 @@ def main():
     cold = time.time() - t0
     print("INFO toy cold build %.1f s, stages %s" % (cold, r1.get("stages")))
     check("toy root builds green with 4 objects and an ELF", r1["status"] == "green" and len(r1["objects"]) == 4 and r1["elf"]
-          and r1["constants"], r1.get("failure"))
+         , r1.get("failure"))
     check("os_layer flag only on os.S", {o["unit"] for o in r1["objects"] if o["os_layer"]} == {"os.S"})
     check("generated header reached the unit (a.c compiled against NCONST)", any(o["unit"] == "a.c" for o in r1["objects"]))
     t0 = time.time()
@@ -483,10 +483,10 @@ def main():
     LRS = BASE + "/ss-lr"   # the link-roots scenarios run concurrently with the main flow and build other content of the same root path: a store of their own
 
     def link_roots():
-        librec = {k: v for k, v in RECIPE.items() if k not in ("generated", "os_layer", "constants", "link")}
+        librec = {k: v for k, v in RECIPE.items() if k not in ("generated", "os_layer", "link")}
         librec["include"] = []
         a_c = "int f_lib(void);\nint f_a(void) { return f_lib(); }\n"
-        lr = make_repo("lr", rec=dict(RECIPE, generated=[], constants=None, include=[], units="all",
+        lr = make_repo("lr", rec=dict(RECIPE, generated=[], include=[], units="all",
                                       link=dict(RECIPE["link"])),
                        files={"toy/a.c": a_c, "toy/b.c": None, "toy/c.c": None, "toy/constants.tsv": None, "toy/inc/toy.h": None,
                               "lib/l.c": "int f_lib(void) { return 1; }\n", "lib/build.json": json.dumps(librec)})

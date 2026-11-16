@@ -37,9 +37,9 @@ def build(src, ext="c", flags=("-O2",)):
     return o
 
 
-def judged(objs, rows=None, **kw):
+def judged(objs, **kw):
     objs = objs if isinstance(objs, list) else [objs]
-    items, finds = objstub.run_check([(p, p) for p in objs], set(), rows or {}, set(), **kw)
+    items, finds = objstub.run_check([(p, p) for p in objs], set(), set(), **kw)
     return {(n, k) for _, n, k, _ in finds}, finds
 
 
@@ -78,7 +78,7 @@ check("T-B: the failure function itself raises no trap-body finding", ("fail", "
 k0, _ = judged([ofail, ouser])
 check("T-B: no error_abi in the recipe: no trap-body finding", not any(kk == "trap-body" for _, kk in k0), k0)
 st = {}
-objstub.run_check([(p, p) for p in (ofail, ouser, ouser2)], set(), {}, set(), abi=FLAG, stats=st)
+objstub.run_check([(p, p) for p in (ofail, ouser, ouser2)], set(), set(), abi=FLAG, stats=st)
 check("T-B: the gate counts the trap bodies (4: tail, branch, loads, call)", st.get("trap_body") == 4, st)
 o_alias = build(CTX + "void fail(struct ctx *c, int code);\nvoid a1(struct ctx *c, int x) { fail(c, x); }\nvoid a2(struct ctx *c, int x) __attribute__((alias(\"a1\")));\n", flags=G)
 k6, f6 = judged([ofail, o_alias], abi=FLAG)
@@ -112,10 +112,8 @@ check("error_abi flag: the same with a path that does not call failf is red", ("
 NR = {"fail": "die", "kind": "noreturn"}
 DIE = "void die(void (*h)(void)) __attribute__((noreturn));\nvoid die(void (*h)(void)) { h(); __builtin_unreachable(); }\n"
 ex = {}
-def die_rows(o):
-    return {(o, "die"): ("exit", "", "")}
 od = build(DIE, flags=G)
-kn, fn = judged([od], rows=die_rows(od), abi=NR)
+kn, fn = judged([od], abi=NR)
 check("error_abi noreturn: a definition whose every path ends in a call through a pointer is accepted", ("die", "error-abi-noreturn") not in kn, fn)
 on = build("int die(int x) { return x; }\n", flags=G)
 kn, fn = judged([on], abi=NR)
@@ -123,11 +121,11 @@ check("error_abi noreturn: a definition that can return is red (error-abi-noretu
 kn, fn = judged([build("void die(int x) { if (x) for (;;) ; }\n", flags=G)], abi=NR)
 check("error_abi noreturn: a definition with one returning path is red", ("die", "error-abi-noreturn") in kn, fn)
 ofa = build("void die(void (*h)(void));\nvoid fatal(void (*h)(void)) __attribute__((noreturn));\nvoid fatal(void (*h)(void)) { die(h); __builtin_unreachable(); }\n", flags=G)
-kn, fn = judged([ofa, od], rows=die_rows(od), abi=dict(NR, fail="fatal"))
+kn, fn = judged([ofa, od], abi=dict(NR, fail="fatal"))
 check("error_abi noreturn: a definition ending in a call of another noreturn function of the root is accepted (fixed point)", ("fatal", "error-abi-noreturn") not in kn, fn)
 kn, fn = judged([ofa, on], abi=dict(NR, fail="fatal"))
 check("error_abi noreturn: the same ending in a function that returns is red", ("fatal", "error-abi-noreturn") in kn, fn)
-kn, fn = judged([ofa, od], rows=die_rows(od), abi={"fail": "fatal", "kind": "other"})
+kn, fn = judged([ofa, od], abi={"fail": "fatal", "kind": "other"})
 check("error_abi: a kind that is neither noreturn nor flag is red", ("fatal", "error-abi-kind") in kn, fn)
 
 # ---- (H) handlers selected by an instruction table (layout-derived)
@@ -171,48 +169,48 @@ def jh(objs, cover=GOOD_C, syn=GOOD_S, **kw):
 k, f = jh(otab)
 check("H: handlers of class a (0 dst/0 src in op_syntax) and b (covering emitter non-empty), selected through the layout of the table (emit_nop by two entries, "
       "parse_args_null by five), are certified; emit_pad (entry without a row) and emit_orphan (no entry) stay V",
-      {n for n, kk in k if kk == "V"} == {"emit_pad", "emit_orphan"}, f)
+      {n for n, kk in k if kk == "const-missing"} == {"emit_pad", "emit_orphan"}, f)
 st = {}
-objstub.run_check([(otab, otab)], set(), {}, set(), records=recs(GOOD_C, GOOD_S), tables=TB, stats=st)
+objstub.run_check([(otab, otab)], set(), set(), records=recs(GOOD_C, GOOD_S), tables=TB, stats=st)
 check("H: the gate counts the certifications per class (a: 2, b: 1)", st == {"handler_a": 2, "handler_b": 1}, st)
-check("H: without records every empty handler is V (no constants row)", {n for n, kk in judged(otab)[0] if kk == "V"} == {"emit_nop", "emit_dcl", "emit_pad", "parse_args_null", "emit_orphan"}, judged(otab)[1])
+check("H: without records every empty handler is V (no record)", {n for n, kk in judged(otab)[0] if kk == "const-missing"} == {"emit_nop", "emit_dcl", "emit_pad", "parse_args_null", "emit_orphan"}, judged(otab)[1])
 k, f = jh(otab, syn=GOOD_S.replace("ps:nop\t0\tps_2_0\t0\t0\t0", "ps:nop\t0\tps_2_0\t1\t0\t0"))
-check("H: class a with an op_syntax row that has a destination is red", ("emit_nop", "V") in k, f)
+check("H: class a with an op_syntax row that has a destination is red", ("emit_nop", "const-missing") in k, f)
 k, f = jh(otab, syn=GOOD_S.replace("\tok\n", "\tconflict\n"))
-check("H: class a with an op_syntax row whose status is not ok is red", ("emit_nop", "V") in k, f)
+check("H: class a with an op_syntax row whose status is not ok is red", ("emit_nop", "const-missing") in k, f)
 k, f = jh(otab, cover=GOOD_C.replace("emit\tsm:ps:nop\t0", "emit\tsm:ps:ghost\t0"))
-check("H: class a whose id has no op_syntax key is red", ("emit_nop", "V") in k, f)
+check("H: class a whose id has no op_syntax key is red", ("emit_nop", "const-missing") in k, f)
 k, f = jh(otab, cover=GOOD_C.replace("\tb\temit_mov\t", "\tb\temit_pad\t"))
-check("H: class b whose covering emitter is itself an empty body is red", ("emit_dcl", "V") in k, f)
+check("H: class b whose covering emitter is itself an empty body is red", ("emit_dcl", "const-missing") in k, f)
 k, f = jh(otab, cover=GOOD_C.replace("\tb\temit_mov\t", "\tb\temit_ghost\t"))
-check("H: class b whose covering emitter is defined nowhere is red", ("emit_dcl", "V") in k, f)
+check("H: class b whose covering emitter is defined nowhere is red", ("emit_dcl", "const-missing") in k, f)
 k, f = jh(otab, cover=GOOD_C.replace("\tb\temit_mov\t", "\tb\t-\t"))
-check("H: class b with no covering emitter is red", ("emit_dcl", "V") in k, f)
+check("H: class b with no covering emitter is red", ("emit_dcl", "const-missing") in k, f)
 for cls in ("c", "none", "own"):
     k, f = jh(otab, cover=GOOD_C.replace("emit\tsm:ps:nop\t0\tNOP\ta", "emit\ttable:RESERVED\t0\tRESERVED\t%s" % cls))
     check("H: class %s is no justification of an empty body (class c is the reach gate's, via fnvnx_reach_violation)" % cls,
-          ("emit_nop", "V") in k and any("class %s" % cls in x[3] for x in f if x[1] == "emit_nop"), f)
+          ("emit_nop", "const-missing") in k and any("class %s" % cls in x[3] for x in f if x[1] == "emit_nop"), f)
 k, f = jh(otab, cover=GOOD_C.replace("emit\tsm:ps:nop\t4\tNOP2\ta", "emit\tsm:ps:other\t4\tNOP2\tnone"))
-check("H: one unjustified row among the entries that select a handler makes it red", ("emit_nop", "V") in k, f)
+check("H: one unjustified row among the entries that select a handler makes it red", ("emit_nop", "const-missing") in k, f)
 k, f = jh(otab, cover="".join(l for l in GOOD_C.splitlines(True) if not l.startswith("emit\tsm:ps:nop\t4")))
-check("H: an entry that selects the handler and has no record row is red", ("emit_nop", "V") in k and any("no record row" in x[3] for x in f if x[1] == "emit_nop"), f)
+check("H: an entry that selects the handler and has no record row is red", ("emit_nop", "const-missing") in k and any("no record row" in x[3] for x in f if x[1] == "emit_nop"), f)
 k, f = jh(otab, tables={"emit": TB["emit"]})
 check("H: a slot that is not declared in the recipe tables selects nothing (parse_args_null is red, the emit handlers stay certified)",
-      ("parse_args_null", "V") in k and ("emit_nop", "V") not in k, f)
+      ("parse_args_null", "const-missing") in k and ("emit_nop", "const-missing") not in k, f)
 k, f = jh(otab, tables={"emit": {"symbol": "instructions", "field": "nope"}, "args": TB["args"]})
-check("H: a table whose entry type has no such field (the layout cannot be derived) is red", ("emit_nop", "V") in k, f)
-check("H: a table without DWARF (no -g) is red", ("emit_nop", "V") in jh(build(TABLE, flags=("-O2", "-fno-ipa-icf")))[0], jh(build(TABLE, flags=("-O2", "-fno-ipa-icf")))[1])
+check("H: a table whose entry type has no such field (the layout cannot be derived) is red", ("emit_nop", "const-missing") in k, f)
+check("H: a table without DWARF (no -g) is red", ("emit_nop", "const-missing") in jh(build(TABLE, flags=("-O2", "-fno-ipa-icf")))[0], jh(build(TABLE, flags=("-O2", "-fno-ipa-icf")))[1])
 onull = build(TABLE.replace('{"nop2", emit_nop, parse_args_null}', '{"nul", 0, 0}'), flags=G)
 k, f = jh(onull)
-check("H: an entry with no data relocation (the declared slot cannot be resolved) is red", ("emit_nop", "V") in k and any("no data relocation" in x[3] for x in f if x[1] == "emit_nop"), f)
+check("H: an entry with no data relocation (the declared slot cannot be resolved) is red", ("emit_nop", "const-missing") in k and any("no data relocation" in x[3] for x in f if x[1] == "emit_nop"), f)
 # the table in another object of the root: a global handler is selected from there; a local one is not
 oh = build("void emit_glob(void *c) { (void)c; }\n", flags=G)
 ot = build("typedef void (*H)(void *);\nstruct Instr { const char *name; H emit; };\nextern void emit_glob(void *c);\nconst struct Instr instructions[] = { {\"g\", emit_glob} };\n", flags=G)
 cglob = "emit\tsm:ps:nop\t0\tNOP\ta\t-\tev\n"
 k, f = jh([oh, ot], cover=cglob, tables={"emit": TB["emit"]})
-check("H: a global handler selected by a table of another object of the root is certified", ("emit_glob", "V") not in k, f)
+check("H: a global handler selected by a table of another object of the root is certified", ("emit_glob", "const-missing") not in k, f)
 k, f = jh([oh], cover=cglob, tables={"emit": TB["emit"]})
-check("H: the same handler with no table anywhere in the root is red", ("emit_glob", "V") in k, f)
+check("H: the same handler with no table anywhere in the root is red", ("emit_glob", "const-missing") in k, f)
 k, f = jh(otab)
 check("H: a handler with a real body (emit_mov) raises nothing", all(n != "emit_mov" for n, _ in k), f)
 # the `handler` column (the render owner's generated join key) is a claim checked against the object: it must agree with the table, and name a defined function
@@ -228,25 +226,25 @@ def jhh(cover, **kw):
 
 
 k, f = jhh(HC)
-check("H: rows with a handler column that agrees with the table and names defined functions certify as without it", {n for n, kk in k if kk == "V"} == {"emit_pad", "emit_orphan"}
+check("H: rows with a handler column that agrees with the table and names defined functions certify as without it", {n for n, kk in k if kk == "const-missing"} == {"emit_pad", "emit_orphan"}
       and not [x for x in f if x[2] == "handler-missing"], f)
 k, f = jhh(HC.replace("NOP\temit_nop\ta", "NOP\temit_mov\ta", 1))
-check("H: a row whose handler column names another function than the table entry holds is red", ("emit_nop", "V") in k and any("names handler" in x[3] for x in f if x[1] == "emit_nop"), f)
+check("H: a row whose handler column names another function than the table entry holds is red", ("emit_nop", "const-missing") in k and any("names handler" in x[3] for x in f if x[1] == "emit_nop"), f)
 k, f = jhh(HC.replace("DCL\temit_dcl", "DCL\tMISSING:emit_dcl"))
 check("H: a MISSING row is the finding handler-missing", any(x[2] == "handler-missing" for x in f), f)
 k, f = jhh(HC.replace("DCL\temit_dcl", "DCL\temit_ghost"))
 check("H: a row whose handler is not a function of the objects is the finding handler-missing", any(x[2] == "handler-missing" and "emit_ghost" in x[3] for x in f), f)
 k, f = jhh(HC.replace("NOP\temit_nop\ta", "NOP\temit_nop+emit_mov\ta", 1))
-check("H: a `+` clone list that contains the table's function is accepted", ("emit_nop", "V") not in k, f)
+check("H: a `+` clone list that contains the table's function is accepted", ("emit_nop", "const-missing") not in k, f)
 # class c: an empty handler is red; the handler that calls fnvnx_reach_violation with a certified fact is the reach gate's and is green
 RT = TABLE.replace("int emit_orphan", "void fnvnx_reach_violation(unsigned) __attribute__((noreturn));\nstatic void emit_res(void *c) { (void)c; fnvnx_reach_violation(5); }\nint emit_orphan").replace(
     "{\"nop2\", emit_nop, parse_args_null} };", "{\"nop2\", emit_nop, parse_args_null}, {\"res\", emit_res, parse_args_null} };")
 ores = build(RT, flags=G)
 CR = HC + "emit\ttable:RESERVED\t5\tRESERVED\temit_res\tc\t-\tev\nargs\ttable:RESERVED\t5\tRESERVED\tparse_args_null\tc\t-\tev\n"
 k, f = judged(ores, records=objstub.read_handler_records(write("cr.tsv", COVER_H + CR), write("cr-s.tsv", SYN_HEAD + GOOD_S)), tables=TB, facts={5})
-check("H: a class c handler that calls fnvnx_reach_violation with a certified fact is not a vacuous body", ("emit_res", "V") not in k, f)
+check("H: a class c handler that calls fnvnx_reach_violation with a certified fact is not a vacuous body", ("emit_res", "const-missing") not in k, f)
 k, f = jh(otab, cover=GOOD_C.replace("emit\tsm:ps:nop\t0\tNOP\ta", "emit\ttable:RESERVED\t0\tRESERVED\tc"))
-check("H: a class c handler with an empty body is red", ("emit_nop", "V") in k, f)
+check("H: a class c handler with an empty body is red", ("emit_nop", "const-missing") in k, f)
 # records that do not parse are an error, not evidence
 for what, cover, syn, hdr in (("a class outside a|b|c|own|none", GOOD_C.replace("\ta\t-\tev", "\tz\t-\tev", 1), GOOD_S, None),
                               ("a row with a missing field", GOOD_C + "emit\tsm:x\t1\n", GOOD_S, None),

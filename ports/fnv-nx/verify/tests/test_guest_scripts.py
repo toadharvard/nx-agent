@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """link/guest.ld and link/guest_image.ld (link/guest.json: script, image_script), read mechanically:
-  - every symbol an ASSERT of guest.ld names is assigned by guest.ld itself (the synthesised-names links read guest.ld alone, with no crt0);
-  - guest_image.ld holds nothing but ASSERT statements (they name symbols an input object defines, so only the image link, which has the objects, passes it);
+  - every symbol that guest.ld names in an ENTRY, an ASSERT or an expression is assigned by guest.ld itself (the synthesised-names links read guest.ld alone, with no crt0);
+  - guest_image.ld holds nothing but ENTRY and ASSERT statements (they name symbols an input object defines, so only the image link, which has the objects, passes it);
   - the profile names exactly these two files.
 Run: python3 -I <this file>."""
 import json
@@ -60,8 +60,18 @@ sa, _ = asserts(a)
 defined = undefset.script_defined(a)
 bad = sorted((n, s) for s in sa for n in names(s) if n not in defined)
 check("every symbol an ASSERT of guest.ld names is assigned in guest.ld", not bad, bad)
+ta = re.sub(r"/\*.*?\*/", "", a, flags=re.S)
+ent = re.findall(r"\bENTRY\s*\(\s*([A-Za-z_.$][\w.$]*)\s*\)", ta)
+check("guest.ld names no ENTRY symbol (it is a crt0 symbol: ENTRY is in guest_image.ld)", not ent, ent)
+# the identifiers of the right-hand side of every assignment: a symbol (not a function such as ADDR(...), not an output section `.name`, not a number)
+rhs = [(m.group(1), set(re.findall(r"(?<![\w.$])([A-Za-z_$][\w$]*)\b(?!\s*\()", re.sub(r"\b0[xX][0-9a-fA-F]+\b", " ", m.group(2)))))
+       for m in re.finditer(r"([A-Za-z_.$][\w.$]*)\s*(?:[-+*/&|])?=(?!=)\s*([^;]*);", ta)]
+badx = sorted((lhs, n) for lhs, ns in rhs for n in ns if n not in defined)
+check("every symbol an assignment of guest.ld uses in its expression is assigned in guest.ld", not badx, badx)
 sb, rest = asserts(b)
-check("guest_image.ld holds ASSERT statements and nothing else", sb and not rest.strip(), rest)
+rest_img = re.sub(r"\bENTRY\s*\(\s*[A-Za-z_.$][\w.$]*\s*\)", "", rest)
+check("guest_image.ld holds ENTRY and ASSERT statements and nothing else", sb and not rest_img.strip(), rest)
+check("guest_image.ld names the ENTRY of the image link", len(re.findall(r"\bENTRY\s*\(", rest)) == 1, rest)
 check("no ASSERT of guest_image.ld is in guest.ld", not [s for s in sb if re.sub(r"\s+", "", s) in {re.sub(r"\s+", "", x) for x in sa}])
 check("the image assertions name symbols that guest.ld does not assign (an input object defines them)", all(names(s) - defined for s in sb), [names(s) for s in sb])
 sys.exit(1 if fails else 0)
