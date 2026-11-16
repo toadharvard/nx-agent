@@ -101,10 +101,25 @@ def recipe_includes(inp, path):
     return [i[len(PORT_PFX):] for i in json.load(open(os.path.join(inp, path)))["include"] if i.startswith(PORT_PFX)]
 
 
+def overlay(src, dst):
+    """the files of directory SRC (repo-relative paths under ports/fnv-nx/) placed under DST, mode kept; a path two closures both hold is one file"""
+    for d, dirs, files in os.walk(src):
+        for f in sorted(files):
+            s = os.path.join(d, f)
+            rel = os.path.relpath(s, src)
+            if not rel.startswith(PORT_PFX):
+                raise Red("include closure file outside %s: %s" % (PORT_PFX, rel))
+            t = os.path.join(dst, rel[len(PORT_PFX):])
+            os.makedirs(os.path.dirname(t), exist_ok=True)
+            if not os.path.exists(t):
+                shutil.copyfile(s, t)
+                os.chmod(t, stat.S_IMODE(os.lstat(s).st_mode) | 0o200)
+
+
 def build_inp(inp):
-    """the mounted trees (--tree N=PATH: /in/N copied to inp/PATH) and the include discipline: every include of the two recipes under ports/fnv-nx/ is a mounted tree"""
+    """the mounted trees (--tree N=PATH: /in/N copied to inp/PATH) and the include closures of the d3d9 and translator roots (--include-of DIR: the recipe's own {"include_of": ROOT}
+    input, mounted by recipe.py); the -I directories are the two recipes' own `include` lists, so nothing restates them here"""
     global INCLUDES, TR_INCLUDES
-    mounted = []
     for t in ARGS.tree:
         n, rel = t.split("=", 1)
         s, d = "/in/" + n, os.path.join(inp, rel)
@@ -114,13 +129,11 @@ def build_inp(inp):
             os.makedirs(os.path.dirname(d), exist_ok=True)
             shutil.copyfile(s, d)
             shutil.copymode(s, d)
-        mounted.append(rel)
+    for src in ARGS.include_of:
+        overlay(src, inp)
     INCLUDES = recipe_includes(inp, D3D9_REC)
     gen = {os.path.dirname(os.path.dirname(TRANSLATOR_REC) + "/" + o) for g in json.load(open(os.path.join(inp, TRANSLATOR_REC))).get("generated", []) for o in g["outputs"]}
     TR_INCLUDES = [i for i in recipe_includes(inp, TRANSLATOR_REC) if i not in gen]
-    missing = [i for i in INCLUDES + TR_INCLUDES if i not in mounted]
-    if missing:
-        raise Red("recipe includes that are not mounted trees of this stage: %s" % sorted(set(missing)))
 
 
 def ast_decls(argv):
@@ -415,6 +428,7 @@ def main():
     for a in ("out", "gcc", "clang", "treehash", "wine", "mojoshader", "sm-table", "sm-rows", "work"):
         ap.add_argument("--" + a, required=True)
     ap.add_argument("--tree", action="append", required=True)
+    ap.add_argument("--include-of", action="append", required=True)
     ARGS = ap.parse_args()
     GCC, CLANG = ARGS.gcc, ARGS.clang
     SM_CC_BASE = [GCC, "-fsyntax-only", "-Wall", "-fmax-errors=0", "-fdiagnostics-format=json"]
