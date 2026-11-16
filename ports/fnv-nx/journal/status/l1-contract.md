@@ -2170,3 +2170,12 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - Model decision: the seed hive is the initial state; guest RegSetValueEx mutates the same hive at run time, as on Windows.
 - w28 pin: its newest guest_compiler.json names 84f0883e (OK).
 - bottleneck: cand3b warm verdict (w15).
+
+## 2026-11-16: L3a export records (w13 372def0cf)
+- 32 FNVNX_EXPORT records in lift/rt: 8 EH, 15 _CI*, 5 fp, _adjust_fdiv, and kernel32 RaiseException/RtlUnwind/DebugBreak.
+- The (module, name) → symbol set equals bridgetable's hand lists, with an empty diff both ways. This was measured on stock-g++ scratch objects only.
+- Pending:
+  - the recipe-built (pinned) exportgen run;
+  - the _CI* set against the bridge.tsv IAT;
+  - dispatch.c red under the pin (L3a).
+- bottleneck: cand3b warm verdict (w15).
