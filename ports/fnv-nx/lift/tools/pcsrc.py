@@ -57,7 +57,7 @@ def j(a, b):
 
 
 class Img:
-    def __init__(self, text, T0, entries, ranges, rd=None, rset=None, pops=None, imp=None):
+    def __init__(self, text, T0, entries, ranges, rd=None, rset=None, pops=None, imp=None, slots=None):
         """text: bytes of the executable span at T0; entries: {addr: set(kinds)}; ranges: sorted list of reached [start, end) byte ranges (any overlap)."""
         self.text, self.T0, self.T1 = text, T0, T0 + len(text); self.entries = entries
         self.md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); self.md.detail = True
@@ -66,7 +66,7 @@ class Img:
             if mer and a <= mer[-1][1]: mer[-1][1] = max(mer[-1][1], b)
             else: mer.append([a, b])
         self.mer = mer; self.ms = [a for a, b in mer]; self.cache = {}
-        self.rd = rd; self.rset = rset or set(); self.inp = {}; self.allcode = set(); self.dirty = set(); self.refs = None; self.tabslots = set(); self.visited = set(); self.pops = pops or {}; self.imp = imp or {}; self.jtargets = set(); self.badarr = set(); self.ijbad = set(); self.ijall = set(); self.ijwhy = {}; self.ijret = set(); self.pk = {}; self.wmemo = {}; self.calltg = {}; self.retsites = set(); self.callers = {}; self.summ = {}; self.busy = set(); self.fresh = set(); self.asm225 = 'ASM-225'; self.rows = []; self.info = Counter()
+        self.rd = rd; self.rset = rset or set(); self.inp = {}; self.allcode = set(); self.dirty = set(); self.refs = None; self.tabslots = set(); self.visited = set(); self.pops = pops or {}; self.imp = imp or {}; self.jtargets = set(); self.badarr = set(); self.ijbad = set(); self.ijall = set(); self.ijwhy = {}; self.ijret = set(); self.ijimp = set(); self.slots = frozenset(slots or ()); self.pk = {}; self.wmemo = {}; self.calltg = {}; self.retsites = set(); self.callers = {}; self.summ = {}; self.busy = set(); self.fresh = set(); self.asm225 = 'ASM-225'; self.rows = []; self.info = Counter()
     def reached(self, a):
         i = bisect.bisect_right(self.ms, a) - 1
         return i >= 0 and a < self.mer[i][1]
@@ -435,6 +435,8 @@ def analyse_entry(img, e, mode='owner', force=False):
                     for w in succ:
                         img.jtargets.add(w)
                         if not anyra and (esp != 0 or st.get(0) != ('ra', 0)) and w in img.entries and owner(img, w): img.badarr.add(w)
+                elif not anyra and not o.mem.base and not o.mem.index and not o.mem.segment and (o.mem.disp & M32) in img.slots:
+                    img.ijimp.add(a)       # a tail call through an import slot (the loader's IAT): the callee is an import, not an entry of the image, so no arrival is recorded
                 else:       # an indirect jmp through memory that is not a table of relocated words: its targets are not enumerated
                     if not anyra: img.ijall.add(a)
                     if not anyra and (esp != 0 or st.get(0) != ('ra', 0)): img.ijbad.add(a); img.ijwhy[a] = ij_why(esp, st)
@@ -813,9 +815,9 @@ def analyse(img, kinds_of, parent=None):
     return rows
 
 
-def run(text, T0, entries, ranges, outdir, name, rd=None, rset=None, parent=None, cand=None, pops=None, imp=None):
+def run(text, T0, entries, ranges, outdir, name, rd=None, rset=None, parent=None, cand=None, pops=None, imp=None, slots=None):
     """-> (red count, summary dict); writes outdir/pcsources.tsv and gate_pcsrc.json."""
-    img = Img(text, T0, entries, ranges, rd, rset, pops, imp)
+    img = Img(text, T0, entries, ranges, rd, rset, pops, imp, slots)
     rows = analyse(img, entries, parent)
     red = [r for r in rows if r[5]]
     with open(outdir + '/pcsources.tsv', 'w') as f:
@@ -830,7 +832,7 @@ def run(text, T0, entries, ranges, outdir, name, rd=None, rset=None, parent=None
     json.dump(res, open(outdir + '/gate_pcsrc.json', 'w'), sort_keys=True)
     with open(outdir + '/pcsrc_ijmp.tsv', 'w') as f:      # the indirect jmp sites of the owners' flow and how each arrives: clean, a return through the RA symbol, or the recorded reason it is not clean
         f.write('# site, status (clean | return | not-clean), reason; a not-clean site gives the whole ptr set as its dispatcher targets (arrival join)\n')
-        for a in sorted(img.ijall | img.ijret): f.write('%08x\t%s\t%s\n' % (a, 'return' if a in img.ijret else 'not-clean' if a in img.ijbad else 'clean', img.ijwhy.get(a, '-')))
+        for a in sorted(img.ijall | img.ijret | img.ijimp): f.write('%08x\t%s\t%s\n' % (a, 'import-tail' if a in img.ijimp else 'return' if a in img.ijret else 'not-clean' if a in img.ijbad else 'clean', img.ijwhy.get(a, '-')))
     json.dump({'s4_violations': res['s4_red']}, open(outdir + '/pcsrc_s4.json', 'w'), sort_keys=True)      # read by modlift's residual: no file = unchecked, N > 0 = violation
     return len(red), res
 
@@ -881,7 +883,7 @@ def run_facts(facts, name, text, T0, rd=None, rset=None, imports=None):
         for slot, nm in imports.items():
             r = keys.get(nm.lower()); p = ehflow.import_pop(*r) if r else None
             if p is not None: imp[slot] = p
-    red, res = run(text, T0, ent, rg, facts, name, rd, rset, parent, cand, pops, imp)
+    red, res = run(text, T0, ent, rg, facts, name, rd, rset, parent, cand, pops, imp, frozenset(imports or ()))
     res['input'] = pin_of(facts, name)       # the pinned gamedata external the image was read from (facts manifest.json), or None when the facts dir has no manifest
     json.dump(res, open(facts + '/gate_pcsrc.json', 'w'), sort_keys=True)
     return red, res
