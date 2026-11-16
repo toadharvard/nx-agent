@@ -2427,3 +2427,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 ## 2026-11-16 04:06
 - w13 ff086e540 (claude/fnv-l3a-lift-w13-udsailstage): lift/udsail recipe valid over w28 322698c53 (not executed: isla unbuilt). base3 must merge w28 first (w8), then w13. Generator-index stage refs are checked against declared outputs.
 - bottleneck: cand3b farm verdict at 963dce662.
+
+## 2026-11-16 04:12
+- cand3b verdict at 963dce662 (tree fb31f7ec) finished with selftests red (test_guest.py); the farm is asked for the full red list. One verdict now on cand3b head 597f2e007 (the merge candidate), warm over the same VDIR. Farm alive (session_01KmtZKTV1mniUErarfUpdJZ).
+- bottleneck: cand3b verdict at 597f2e007.
