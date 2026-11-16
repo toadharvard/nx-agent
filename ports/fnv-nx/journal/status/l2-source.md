@@ -716,3 +716,9 @@ After the first frame:
   - a recipe product root compiling the binary64 cr_exp2m1, cr_log2, cr_log2p1, cr_tan, cr_atan2, cr_sin and cr_cos with the game's compiler and every plugin, the targets of the x87 f2xm1/fyl2x/fyl2xp1/fptan/fpatan/fsin/fcos;
   - one test per function against CORE-MATH's worst cases.
   - Open: the mirror commit and the stage key.
+- 2026-11-16 06:10Z: CORE-MATH stage 1 (w2, cand4b ebfd99e9e).
+  - Mirror: fnv-nx-build tools/core-math 1e8252b65 (upstream a44b8b08), tree_sha256 cc7009d0…9bf3b.
+  - Root: ports/fnv-nx/platform/coremath. Green on the d1a92e26 scratch: 7 objects, 19 sympair rows, 0 nodecor, 0 refusals.
+  - cc keys: atan2 59660b188825, cos 985d25007856, exp2m1 3f4d2e688f17, log2 eb0cbf61acb6, log2p1 bda91178dbc7, sin 8d3508d93a44, tan 02b02bc94cf0; gen 6d878d4e88c3.
+  - Blocked: -frounding-math, which the recipe refuses as a per-root flag. Recommendation to L1: a per-root semantic flag only when cited from the root's external. Until then the objects are not valid for the RZ calls.
+  - Open: atan2's printf/exit failure path is a trap path; w2 is listing the sites for the orchestrator.
