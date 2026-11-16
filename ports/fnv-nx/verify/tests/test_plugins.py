@@ -215,7 +215,9 @@ def main():
         "void thrower();\n"
         "int tc(int *p) { try { thrower(); } catch (...) { return *p; } return 0; }\n"
         "struct cpu { int r[4]; };\nregister cpu *cc asm(\"x26\");\nint hl(int v) { register unsigned loc asm(\"x25\") = v; cc->r[1] = loc; return cc->r[2]; }\n"
-        "int sj2(jmp_buf b, int *p) { if (setjmp(b)) return *p; thrower(); return 0; }\n")
+        "int sj2(jmp_buf b, int *p) { if (setjmp(b)) return *p; thrower(); return 0; }\n"
+        "int bsj(void **b) { if (__builtin_setjmp(b)) return 1; thrower(); return 0; }\n"
+        "void blj(void **b) { __builtin_longjmp(b, 1); }\n")
     crepo = make_repo("cont", REC, "native", {ROOT + "/b.cc": cont_src})
     rc_, _ = build(crepo, "C")
     check("ONE FORM: setjmp / try-catch / hard-register fixtures compile with no error", rc_["status"] == "green", rc_.get("failure"))
@@ -232,6 +234,15 @@ def main():
         check("catch landing pad: ldar and no dmb", any(x.startswith("ldar") for x in tc) and not any(x.startswith("dmb") for x in tc), tc)
         s3 = lines("3sj2P")
         check("setjmp(): a plain call, no dmb", not any(x.startswith("dmb") for x in s3), s3)
+        # ORDER-RTLBUILTIN: __builtin_setjmp / __builtin_longjmp on a possibly shared buffer compile; the expansion's plain accesses are fenced
+        bs = lines("3bsjPPv")
+        check("__builtin_setjmp: fenced (a dmb before the buffer stores, one after)", sum(x.startswith("dmb") for x in bs) >= 2, bs)
+        bl = lines("3bljPPv")
+        check("__builtin_longjmp: its buffer loads are fenced before and nothing is emitted after the noreturn jump", any(x.startswith("dmb") for x in bl), bl)
+    # a builtin that calls code through a function operand has an effect no pointer operand expresses: the one refusal left
+    bad = make_repo("rtlbad", REC, "native", {ROOT + "/b.cc": "extern void f(); void *ap() { return __builtin_apply((void (*)(...))f, __builtin_apply_args(), 8); }\n"})
+    rb_, _ = build(bad, "RB")
+    check("ORDER-RTLBUILTIN: a builtin with no library function that calls through a function operand stays an error", rb_["status"] == "red" and any("function operand" in x for x in rb_["failure"]["stderr"]), rb_.get("failure"))
     # the plugin is a declared input of the CC stage and its flags are in the stage document
     docs = [json.load(open(p)) for p in glob.glob(os.path.join(BASE, "A", "stage-docs", "*", "*.json"))]
     cc = [d for d in docs if d["stage"] == "cc:a.cc"]
