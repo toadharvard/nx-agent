@@ -146,17 +146,22 @@ static void make_fsets(void) {
 
 static const char *deb_root;   /* --deb ROOT: where the declared debs' files are mounted (the run stage's /deb); unset on a machine whose libraries are installed */
 static int gl_init(void) {
-    if (deb_root) {   /* the loader's own search paths of the GL vendor libraries: each declared deb is mounted at ROOT/<name>/<absolute path>, so the lists run over every directory of ROOT (names sorted: the order is the same on every run) */
-        static char names[64][128]; int n = 0; DIR *dd = opendir(deb_root);
+    if (deb_root) {   /* the loader's own search paths of the GL vendor libraries: each declared deb is mounted at ROOT/<name>/<absolute path>, so the lists run over every directory of ROOT (names sorted: the order is the same on every run; no cap) */
+        DIR *dd = opendir(deb_root); char **nm = NULL; size_t n = 0, lenv = 0, lend = 0;
         if (!dd) { fprintf(stderr, "sm_link: cannot open %s\n", deb_root); return -1; }
-        for (struct dirent *e; (e = readdir(dd)) && n < 64;) if (e->d_name[0] != '.' && strlen(e->d_name) < sizeof names[0]) strcpy(names[n++], e->d_name);
+        for (struct dirent *e; (e = readdir(dd));) {   /* exactly the entries of ROOT: the debs the stage mounts */
+            if (e->d_name[0] == '.') continue;
+            nm = realloc(nm, (n + 1) * sizeof *nm); if (!nm || !(nm[n] = strdup(e->d_name))) { fprintf(stderr, "sm_link: out of memory\n"); return -1; }
+            n++;
+        }
         closedir(dd);
-        if (n >= 64) { fprintf(stderr, "sm_link: %s holds 64 or more debs\n", deb_root); return -1; }
-        for (int i = 1; i < n; i++) for (int j = i; j > 0 && strcmp(names[j - 1], names[j]) > 0; j--) { char t[128]; strcpy(t, names[j]); strcpy(names[j], names[j - 1]); strcpy(names[j - 1], t); }
-        static char vend[16384], dri[16384]; size_t lv = 0, ld = 0;
-        for (int i = 0; i < n; i++) {
-            lv += (size_t)snprintf(vend + lv, sizeof vend - lv, "%s%s/%s/usr/share/glvnd/egl_vendor.d", i ? ":" : "", deb_root, names[i]);
-            ld += (size_t)snprintf(dri + ld, sizeof dri - ld, "%s%s/%s/usr/lib/x86_64-linux-gnu/dri", i ? ":" : "", deb_root, names[i]);
+        for (size_t i = 1; i < n; i++) for (size_t j = i; j > 0 && strcmp(nm[j - 1], nm[j]) > 0; j--) { char *t = nm[j]; nm[j] = nm[j - 1]; nm[j - 1] = t; }
+        for (size_t i = 0; i < n; i++) { lenv += strlen(deb_root) + strlen(nm[i]) + sizeof "//usr/share/glvnd/egl_vendor.d:"; lend += strlen(deb_root) + strlen(nm[i]) + sizeof "//usr/lib/x86_64-linux-gnu/dri:"; }
+        char *vend = malloc(lenv + 1), *dri = malloc(lend + 1); size_t lv = 0, ld = 0;
+        if (!vend || !dri) { fprintf(stderr, "sm_link: out of memory\n"); return -1; }
+        for (size_t i = 0; i < n; i++) {
+            lv += (size_t)sprintf(vend + lv, "%s%s/%s/usr/share/glvnd/egl_vendor.d", i ? ":" : "", deb_root, nm[i]);
+            ld += (size_t)sprintf(dri + ld, "%s%s/%s/usr/lib/x86_64-linux-gnu/dri", i ? ":" : "", deb_root, nm[i]);
         }
         setenv("__EGL_VENDOR_LIBRARY_DIRS", vend, 1); setenv("LIBGL_DRIVERS_PATH", dri, 1);
     }
