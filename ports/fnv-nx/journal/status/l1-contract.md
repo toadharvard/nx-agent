@@ -2346,3 +2346,12 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - test_layout and test_ldbl look for externals at GATE_CACHE/external, a second path. Folded into w28's ext_dir accessor item.
 - The farm's earlier w29 and cand3b runs died silently. The cand3b verdict at 963dce662 is moved to first; the farm reports the cause of the deaths.
 - d1a92e26 is an old-path build, a measurement only. guest_compiler.json takes only the recipe-path pin, with proof (b) and the deletion of the old path in the same commit (L2).
+- w28 c071d7e1b:
+  - an admit row with more than one tree is red;
+  - plugin_errors = f(profile), host ∅ (render/shaders/total red, L6);
+  - the ext cache has one reader path;
+  - the `{"include_of": ROOT}` form;
+  - _deb_tree from the pinned debs' own data, a dangling link red;
+  - getrandom answered through seccomp.
+- Ruling: every randomness source in the sandbox is a deterministic stream (a function of the stage key), proven by byte-identical rebuilds.
+- The entry kind is next, then one-name-per-module.
