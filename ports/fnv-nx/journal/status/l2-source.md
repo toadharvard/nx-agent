@@ -616,3 +616,7 @@ After the first frame:
   - Ruling: a msvcmodel.patch hunk in grokdeclarator cdk_function adds the type attribute fnvnx_parmform, only for non-plain forms. The names plugin encodes from it, and forms without a recorded cl reference are a compile error.
   - On the cand4b line, in COMPILER-STAGE's farm build (K1 changes). Owner w2.
   - The 24 platform rows (3 functions × 8 roots) re-measure after that build.
+- 2026-11-16 02:10Z: ENTRY1-ATOMIC (asked for by L3a; it blocks lift/rt and lift/disp on the ELF path).
+  - Defect: dispatch contp_walk rejects `__atomic_store` on fnvnx_site_t*, because only memcpy, memmove and mempcpy are exempt.
+  - Rule: the generic and _N atomic and value-moving __sync builtins, derived from sync-builtins.def, are a same-type copy, exempt only when every data pointer is the same entry type T; fetch_op on an entry is red.
+  - Owner w2, cand4b, ahead of NAMES-FNPARM. Status: doing.
