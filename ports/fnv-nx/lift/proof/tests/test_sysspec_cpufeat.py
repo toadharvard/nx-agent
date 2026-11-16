@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """The cleared-feature class (proof/forms_cpufeat.py, sysspec_cpufeat.py): an instruction whose CPUID feature the declared CPU clears is the Form fault(UD) with no other effect; the MPX hint-NOP encodings (0F 1A/1B) are the Form NOP
-with no memory access (SDM Vol. 1 E.4.1).  Needs the declared CPUID feature-bit table (FNVNX_CPUFEAT, a file; or FNVNX_BUILD via declared_cpufeat) and the pinned SDM text (FNVNX_SDM_TXT) for the page table check.
+with no memory access (SDM Vol. 1 E.4.1).  Needs the declared CPUID feature-bit table (derived from the pins by declared_cpufeat: FNVNX_BUILD and FNVNX_SDM_TXT) and the pinned SDM text (FNVNX_SDM_TXT) for the page table check.
 python3 -I tests/test_sysspec_cpufeat.py"""
 import os
 import subprocess
