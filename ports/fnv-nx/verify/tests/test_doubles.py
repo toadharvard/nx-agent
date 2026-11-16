@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """doubles.judge ("no doubles in tests", gate objstub) and the `tests` key of recipe.check, on real AArch64 objects compiled with
 aarch64-linux-gnu-gcc-13 (symbols read by recipe.symbols from the ELF .symtab). Plain script: exit 0 on pass, one ok/FAIL line per case.
 Scratch: tempfile.mkdtemp, removed at exit."""
@@ -127,7 +126,7 @@ def new(**kw):
 
 check("a declared test adds no error", new(tests=[{"name": "t1", "units": ["t1.c"]}]) == [], new(tests=[{"name": "t1", "units": ["t1.c"]}]))
 check("declared test: product units exclude it", True
-      and recipe.units_of(dict(REC, tests=[{"name": "t1", "units": ["t1.c"]}]), T + "r", files) == ["a.c", "b.c", "t2.c"])
+      and recipe.units_of(dict(REC, tests=[{"name": "t1", "units": ["t1.c"]}]), T + "r", files, {}) == ["a.c", "b.c", "t2.c"])
 check("test unit that is no source of the root: error", any("not a source" in e for e in errs(tests=[{"name": "t", "units": ["zz.c"]}])))
 check("unit in two tests: error", any("two tests" in e for e in errs(tests=[{"name": "t", "units": ["t1.c"]}, {"name": "u", "units": ["t1.c"]}])))
 check("duplicate test name: error", any("twice" in e for e in errs(tests=[{"name": "t", "units": ["t1.c"]}, {"name": "t", "units": ["t2.c"]}])))

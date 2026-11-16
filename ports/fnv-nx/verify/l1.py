@@ -82,9 +82,15 @@ def _check(repo, commit, vdir, budget, gates, td, env_id, started):
         verdict.cmd_store(["--verdict", outp, "--verdicts", vdir])
     return json.load(open(outp))
 
+def _artifacts(o):
+    """The artifacts repository is a required argument; it is recorded beside the verdict's external cache (recipe.set_artifacts), where every gate reads it."""
+    import recipe
+    recipe.set_artifacts(recipe.ext_dir(os.path.join(os.path.abspath(o["--verdicts"]), "cache")), o["--artifacts"])
+
 def cmd_verdict(a):
     started = time.time()
-    o = _opts(a, ("--commit",))
+    o = _opts(a, ("--commit", "--artifacts"))
+    _artifacts(o)
     env_id, bad = _env(o["--repo"], o["--commit"])
     if bad:
         return _blocked_env(bad)
@@ -95,7 +101,8 @@ def cmd_verdict(a):
 
 def cmd_merge(a):
     started = time.time()
-    o = _opts(a, ("--into", "--from"), ("--remote",))
+    o = _opts(a, ("--into", "--from", "--artifacts"), ("--remote",))
+    _artifacts(o)
     o.setdefault("--remote", None)
     repo, vdir, remote, bname = o["--repo"], o["--verdicts"], o["--remote"], o["--into"]
     if remote:

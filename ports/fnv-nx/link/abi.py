@@ -33,15 +33,17 @@ are uncertified anyway).  Dropped from the legacy tool: the bridge generator (`e
 `ret_carry`, narrow-extension moves, `varargs_check` with `va_reads` from a run (`vacall`), `ecx_unused` from the pristine object, the
 source-text type spelling (`classify` by regex over declaration text), and `describe_shape` strings.
 """
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import argparse
 import collections
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'contract'))
 import abi_msvcname
-import gatefile
+from contract import gatefile
 import abi_native as N
 
 NAME = 'abi'

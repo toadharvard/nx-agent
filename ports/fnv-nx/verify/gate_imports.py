@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
 """Gate "imports" (fnvnx-gate/1, class 4 of VERDICT.md): every import of the manifest has a body, proven by the build products (rules: contract/imports.py).
-    python3 -I gate_imports.py      cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/imports.json and GATE_OUT/imports.ids
+    python3 -I gate_imports.py      cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/imports.json and GATE_OUT/imports.ids
 Roots come only from verify/admit.json (class product); for each the gate calls gate_build.ensure (build or cache hits) and reads the symbol
 tables the recipe wrote (objects.json: defined {symbol, bind, type}, undefined). No nm, no ELF parsing, no probe run.
 A product root DECLARES its imports in `<root>/imports.in.json` ("fnvnx-imports-in/1"):
   {"format", "external": NAME of an entry of the root's recipe `external` (the private manifest: fnv-nx-build commit + tree_sha256),
    "names": path of sys_names.tsv inside it, "specs": directory of the reference environment's .spec files inside it,
    "extra": [row files inside it, judged against this root], "extra_other": [row files of another owner's build, judged against the other roots],
-   "name_table": the msvcrt name table `name TAB symbol TAB func|data` (the same file the root generates its lookup table from), "va": the va record
+   "va": the va record
    `name TAB symbol` (the exports whose native body reads the x86 stack words of the call); every path of the declaration is a resolve_input ref
    (a tracked path of the root, {root, path} of a tool root such as bridgefacts, {root, output} of a root the recipe `uses`, {external, path} or {stage, path})}
 The external is checked out from the build's own fetch (GATE_CACHE/external/<commit>) and its tree hash must equal tree_sha256.
 Universe (gate_build.quantify, the convention of build/objstub): the admitted product roots; per root every row of the bridge table (contract/bridgetable.derive). A root without imports.in.json is one red item, unless it is header-only (gate_build.unitless: no unit, no link; it holds no code, so it has no imports by construction): 0 items, or outside the class `import-provider`: the symbol table of its build defines no native symbol of the bridge table (natives_of: the table the declaring roots derive), so it has no import body: 0 items. A root that defines one enters the class and is the one red item. If no root declares imports the table is not known and the root is the one red item. Certified: rows with no class
 (contract/imports.py). uncertified: the first 50 ids `dll!name`; imports.ids lists `id TAB class`, sorted. No product root: universe 0, green. Bad input, a red build, an invalid recipe or an
 external that fails its hash is red with the reason in detail. Exit 0 iff green."""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import shutil
@@ -23,15 +26,26 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.join(os.path.dirname(HERE), "contract"))
-import bridgetable  # noqa: E402
+from contract import bridgetable  # noqa: E402
+from contract import exportgen  # noqa: E402
 import cas  # noqa: E402
 import gate_build  # noqa: E402
-import imports  # noqa: E402
+from contract import imports  # noqa: E402
 import linkset  # noqa: E402
 import recipe  # noqa: E402
 
-IN_KEYS = {"format", "names", "specs", "extra", "extra_other", "name_table", "va"}
+IN_KEYS = {"format", "names", "specs", "extra", "extra_other", "va"}
+EXPORTS_ROOT = "ports/fnv-nx/contract/exports"   # the producer of exports.tsv: the `.fnvnx.export` records of the link set (contract/exports/build.json)
+
+
+def exports_of(repo, cache):
+    """{(module, name): (symbol, kind, ret, args)} of the published exports.tsv of the link set at this commit (the stage B input of the bridge table: gate_build.ensure builds or hits the cache, then
+    published_output reads what was published; a red or missing producer is the caller's red)."""
+    res = gate_build.ensure(EXPORTS_ROOT, cache, repo)[0]
+    if res["status"] == "red":
+        raise ValueError("%s: build red at stage %s" % (EXPORTS_ROOT, res["failure"]["stage"]))
+    path, _ = gate_build.published_output(cache, EXPORTS_ROOT, "exports", repo)
+    return exportgen.read(read(path))
 
 
 def symbols(res):
@@ -50,28 +64,27 @@ def read(path):
 
 
 def bridge_of(root, rec, res, decl, repo, cache):
-    """-> (rows, errors, extra_of, table, syms) of the bridge table that ROOT's declaration derives (every path of DECL read through
+    """-> (rows, errors, extra_of, syms) of the bridge table that ROOT's declaration derives (every path of DECL read through
     recipe.resolve_input); the one derivation of the judged rows and of the import-provider class."""
     if set(decl) != IN_KEYS or decl["format"] != "fnvnx-imports-in/1":
         raise ValueError("%s/imports.in.json: need exactly the keys %s and format fnvnx-imports-in/1" % (root, sorted(IN_KEYS)))
     def rp(ref):
         return recipe.resolve_input(root, ref, repo, cache, rec)[0]
     syms = symbols(res)
-    table = bridgetable.read_name_table(read(rp(decl["name_table"])))
     specs = rp(decl["specs"])
     rows, errors, extra_of = bridgetable.derive(
-        read(rp(decl["names"])), lambda d: read(os.path.join(specs, d + ".spec")), set(syms), table,
-        [read(rp(p)) for p in decl["extra"] + decl["extra_other"]], bridgetable.read_va(read(rp(decl["va"]))))
-    return rows, errors, extra_of, table, syms
+        read(rp(decl["names"])), lambda d: read(os.path.join(specs, d + ".spec")), set(syms),
+        [read(rp(p)) for p in decl["extra"] + decl["extra_other"]], bridgetable.read_va(read(rp(decl["va"]))), exports_of(repo, cache))
+    return rows, errors, extra_of, syms
 
 
 def root_rows(root, rec, res, decl, repo, cache, others):
     """-> [(id, class)] of one root that declares imports"""
-    rows, errors, extra_of, table, syms = bridge_of(root, rec, res, decl, repo, cache)
+    rows, errors, extra_of, syms = bridge_of(root, rec, res, decl, repo, cache)
     if errors:
         raise ValueError("%d bridge errors, first: %s" % (len(errors), errors[0]))
     other = {k for k, i in sorted(extra_of.items()) if i >= len(decl["extra"])}
-    return imports.judge(rows, syms, table, others, other)
+    return imports.judge(rows, syms, others, other)
 
 
 def natives_of(repo, cache, admit, roots):
@@ -89,7 +102,7 @@ def natives_of(repo, cache, admit, roots):
         res = gate_build.ensure(r2, cache, repo)[0]
         if res["status"] == "red":
             raise ValueError("%s: build red at stage %s" % (r2, res["failure"]["stage"]))
-        rows, errors, _, _, _ = bridge_of(r2, recipe.load_recipe(repo, admit, r2), res, decl, repo, cache)
+        rows, errors, _, _ = bridge_of(r2, recipe.load_recipe(repo, admit, r2), res, decl, repo, cache)
         if errors:
             raise ValueError("%d bridge errors, first: %s" % (len(errors), errors[0]))
         out |= {r[6] for r in rows if r[6] != "-"}
@@ -111,7 +124,7 @@ def provider_item(root, repo, cache, admit, roots):
 def judge_root(root, repo, cache, admit, roots, bad):
     """One admitted product ROOT -> (universe, certified, ids, detail) (gate_build.quantify); input errors are red with the reason, never raised.
     BAD collects (id, class) of the uncertified rows."""
-    p = os.path.join(repo, recipe.split_spec(root)[0], "imports.in.json")
+    p = os.path.join(repo, root, "imports.in.json")
     try:
         if not os.path.isfile(p):
             if gate_build.unitless(root, cache, repo):

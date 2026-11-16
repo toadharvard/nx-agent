@@ -65,17 +65,19 @@ A pure function of its arguments (no file, no process): the driver verify/gate_i
   names       text of sys_names.tsv (dll TAB name per line) from the private manifest
   spec_text   function dll -> text of the export specification of the reference environment (Wine 9.0 dlls/<dll>/<dll>.spec)
   syms        the set of symbol names that the product objects define or reference (objects.json defined + undefined); None = the rows table
-              (stage A): every row binds by rule alone (sym, data, lookup, l3), no symbol table is read and none is judged; the table is then a
-              function of the names, the specs, the name table and the extra rows only, so the import keys (contract/iat.py) are too.  The
-              symbols are judged against the rows by the gate `imports` (stage B: contract/imports.judge over derive(syms=the objects' symbols))
-  name_table  {msvcrt name: (symbol, kind)} of the name table the product serves msvcrt names from (read_name_table)
+              (stage A, the root `bridgetable`): every row binds by rule alone (link, data, sym), no symbol table is read and none is judged; the
+              table is then a function of the names, the specs, the extra rows and exports.tsv only, so the import keys (contract/iat.py)
+              are too.  The symbols are judged against the rows by the gate `imports` (contract/imports.judge over the members of the link)
   extra       texts of rows in this 8-column format (other owners' rows: COM interfaces); a row of the same (dll, name) replaces the derived one
-bind  sym    native_symbol is a symbol of the product objects     lookup  msvcrt name served by the name table (native_symbol `-`)
-      l3     provided by the lifter runtime under native_symbol   data    the slot holds the address of the object native_symbol
+  exports     {(module, name): (symbol, kind, ret, args)} of exports.tsv (contract/exportgen.py: the `.fnvnx.export` records of the link set, ret and args from the definer's `.fnvnx.decltype`; kind func|entry|data:
+              entry = a guest-state body, definer void(void), the bridge jumps to it and marshals nothing; a module with no reference spec takes its signature from these records)
+bind  link   native_symbol is the symbol of the export record; exactly one member of the link defines it (imports.judge)
+      entry  the same for a record of kind entry (ret `-`; conv and args stay the reference spec's)
+      sym    native_symbol is a symbol of the root's own objects (rows of another owner's file)      data  the same for a data row without a record
       none   no implementation: the gate `imports` is red for the row
 conv  stdcall | cdecl | vararg | thiscall | fastcall | data;  ret v|i|q|f|d;  args: x86 stack slots i|q|f|d.
-A name missing from its spec, a stub in the spec, a forward that cannot be followed or an unknown argument type is an error: total or failing.
-`lookup` is decided by the name table, a declared input (a name is in it or not), not by a run.
+A function name with no export record, a name missing from its spec, a stub in the spec, a forward that cannot be followed, a struct or vector return or an unknown
+argument type is an error: total or failing.
 ```
 
 ## contract/gate_call.py
@@ -392,15 +394,13 @@ Order: the exe, then the images in discovery order (depth first, import director
 Gate `imports` (class 4 of verify/VERDICT.md), pure judgement: every row of the bridge table has a body proven by the build products.
 
 Inputs (all values, no file): rows from bridgetable.derive; `syms` {symbol: [(bind, type)]} of the product objects (objects.json `defined`);
-`table` the msvcrt name table {name: (symbol, kind)}; `others` the same kind of map over every product root that is not the one the rows belong
+`others` the same kind of map over every product root that is not the one the rows belong
 to; `owner_of` {(dll, name): index} of rows taken from files that belong to another owner's build (the `external` rows).
 A row is certified iff its body is proven by the symbol table of a build product:
   sym/data  a GLOBAL (or UNIQUE) symbol of type FUNC (sym) or OBJECT (data) is defined in the row's root
-  lookup    the name table entry of the name names a symbol defined GLOBAL of type FUNC (kind func) or OBJECT (kind data) in the root
   l3        and rows of another owner's file: such a symbol is defined in another product root (the lifter runtime's build); else `external`
 Classes of an uncertified row: none (no symbol of that name is defined or referenced), unresolved-symbol (referenced only), weak (defined weak
-only), not-a-function (defined global of the wrong type), lookup-miss (an msvcrt name that the name table does not carry, or whose entry names
-no proven symbol), external (l3 or another owner's row that no other root defines).
+only), not-a-function (defined global of the wrong type), external (l3 or another owner's row that no other root defines).
 The decision reads symbol tables and tables, never a source text, a run or a name pattern. Assumption (ASM-052): objects.json lists every global, weak
 and unique symbol of every object of the root (recipe.symbols); locals are not symbols a row can bind to.
 ```
@@ -574,7 +574,7 @@ Steps:
  3 icount.py spec: range lifted = section .text.fnvl, class softfloat from the softfloat file (left out when absent)
  4 SD root: a fresh empty card directory (--root); the installed game is mounted in place at the guest's sdmc:/switch/fnv
    (--game, verify/bootpath.py). The game is GAME_DIR, else fetched by farm/gamedata_fetch.sh into $FARM_HOME/game
-   (the exe, INIs, static modules and d3dx9 DLLs; plus every Data item (gamedata/data/* of the artifacts repository: *.bsa, *.esm, Music,
+   (the exe, INIs, static modules and d3dx9 DLLs; plus every Data item that a recipe declares as an external (gamedata/data/* pinned by commit and tree_sha256; one that no recipe declares is red: *.bsa, *.esm, Music,
    Shaders; every part's and every file's sha256 checked by the fetcher), or only the Data items named in BOOT_DATA_ITEMS; `--no-data`
    there means no Data item, a run without the game's archives). FalloutNV.exe must be in it; its sha256 is printed. The fetched
    Data items are recorded in meta.json (data_items; null with GAME_DIR, whose content the job does not know)
@@ -1343,7 +1343,7 @@ Assumption: `git ls-files` lists the tree under test (the verdict runs gates in 
 
 ```text
 Gate "build" (fnvnx-gate/1): every product root's recipe (build.json, see RECIPE.md) builds, all in the sandbox.
-    python3 -I gate_build.py        cwd = checkout root (a git worktree), env GATE_OUT, optional GATE_CACHE, optional GATE_COMMIT
+    python3 -I gate_build.py        cwd = checkout root (a git worktree), env GATE_OUT, optional GATE_CACHE
 Universe: every unit of every product root of verify/admit.json (tracked sources + generated sources, recipe.units_of) and the ELF
 of a root with a link. Certified: units whose object was built (+ the ELF). uncertified: repo-relative unit paths (<= 50, sorted).
 No product root: universe 0, green. A recipe that fails validation certifies nothing (units = tracked source files).
@@ -1361,7 +1361,7 @@ gates call ensure() (build or cache hits, same result). Without GATE_CACHE nothi
 ```text
 Gate "contract" family (fnvnx-gate/1, class 8 of VERDICT.md): the whole-binary gates of contract/ judged on the link of the product root.
     python3 -I gate_contract.py --gate NAME     NAME: n1 n2_data n2_call n2_vcall xc xunit rtti pcrel bodysel
-    cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/NAME.json (gatefile.py shape).
+    cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/NAME.json (gatefile.py shape).
 One entry per gate file in gates.d, so each is its own line of the verdict; the stages are the ones of contract/verdict.py (exefacts, n1,
 objfacts, registry, xunit, rtti, pcrel, bodysel), run with the same arguments, in the order of their dependencies, each once per input set:
 N3 (the static native-body criterion of the pi plugin's `.fnvnx.n3`) reaches bodysel through the `bind` stage (contract/bind.py: exe addresses of the objects' N3 rows through the N1 certificate, written as n3.tsv) and bodysel's `--n3`; a function without an `ok` N3 row is LIFTED.
@@ -1397,14 +1397,13 @@ judged, certified = judged minus the rows whose address bodysel does not give LI
 
 ```text
 Gate "imports" (fnvnx-gate/1, class 4 of VERDICT.md): every import of the manifest has a body, proven by the build products (rules: contract/imports.py).
-    python3 -I gate_imports.py      cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/imports.json and GATE_OUT/imports.ids
+    python3 -I gate_imports.py      cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/imports.json and GATE_OUT/imports.ids
 Roots come only from verify/admit.json (class product); for each the gate calls gate_build.ensure (build or cache hits) and reads the symbol
 tables the recipe wrote (objects.json: defined {symbol, bind, type}, undefined). No nm, no ELF parsing, no probe run.
 A product root DECLARES its imports in `<root>/imports.in.json` ("fnvnx-imports-in/1"):
   {"format", "external": NAME of an entry of the root's recipe `external` (the private manifest: fnv-nx-build commit + tree_sha256),
    "names": path of sys_names.tsv inside it, "specs": directory of the reference environment's .spec files inside it,
-   "extra": [row files inside it, judged against this root], "extra_other": [row files of another owner's build, judged against the other roots],
-   "name_table": path inside the root of the msvcrt name table `name TAB symbol TAB func|data` (the same file the root generates its lookup table from)}
+   "extra": [row files inside it, judged against this root], "extra_other": [row files of another owner's build, judged against the other roots]}
 The external is checked out from the build's own fetch (GATE_CACHE/external/<commit>) and its tree hash must equal tree_sha256.
 Universe (gate_build.quantify, the convention of build/objstub): the admitted product roots; per root every row of the bridge table (contract/bridgetable.derive). A root without imports.in.json is one red item. Certified: rows with no class
 (contract/imports.py). uncertified: the first 50 ids `dll!name`; imports.ids lists `id TAB class`, sorted. No product root: universe 0, green. Bad input, a red build, an invalid recipe or an
@@ -1415,7 +1414,7 @@ external that fails its hash is red with the reason in detail. Exit 0 iff green.
 
 ```text
 Gate "linkstrict" (fnvnx-gate/1, class 3 of VERDICT.md): no symbol is unresolved or substitutable. Decides on symbol tables only.
-    python3 -I gate_linkstrict.py    cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/linkstrict.json
+    python3 -I gate_linkstrict.py    cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/linkstrict.json
 Roots come from verify/admit.json: for every product root the gate calls gate_build.ensure(root, GATE_CACHE) and reads the ELF `.symtab` of
 its objects (relocatable) and of its linked ELF, never a name's text. Rules:
   (a) a root that links an ELF: the ELF has no undefined symbol and no weak undefined symbol, no IFUNC, and a `.symtab` (item `<elf>`).
@@ -1496,7 +1495,7 @@ The layouts are pinned by tests/test_elffacts.py on a real link with the same bi
 ```text
 Gate "tlsmodel" (fnvnx-gate/1, class A of VERDICT.md): every thread-local reference of a guest object and of a linked guest output uses a
 TLS access model the loader supports, and one symbol is accessed with one model.
-    python3 -I gate_tlsmodel.py    cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/tlsmodel.json
+    python3 -I gate_tlsmodel.py    cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/tlsmodel.json
 Roots: every product and test root of verify/admit.json with "target": "guest", built by gate_build.ensure; a root's link group is its own
 objects plus the objects of its derived link members (ld's archive selection, recipe.link_candidates) (the objects that one linked output is made of), and its linked ELF.
 Facts are the relocations of the pinned binutils' own decoding (`aarch64-linux-gnu-readelf -rW`, the binutils of verify/env.json): the type
@@ -1522,7 +1521,7 @@ finding. Counts per relocation family over all roots are in `detail`. No guest r
 
 ```text
 Gate "onedef" (fnvnx-gate/1): one definition, one source. A name, a COMDAT group, a source file and a header each come from ONE place.
-    python3 -I gate_onedef.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/onedef.json
+    python3 -I gate_onedef.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/onedef.json
 Rules (by symbol tables and file content, never by a name's text):
   (a) Per linked image (a root with a `link`; its objects are those of the root itself and of every root of its derived link members): a GLOBAL or WEAK
       definition outside every COMDAT group comes from exactly ONE root. Two roots defining one name is `dup-def`, whatever the binding (strong, weak):
@@ -1546,7 +1545,7 @@ no finding. No product root: units/headers still count (clauses (c'), (c'') are 
 ```text
 Gate "argordergate" (fnvnx-gate/1, VERDICT.md class: calling convention / argument order): every native C++ unit of a guest root is compiled with
 the fnvnx_order plugin (MSVC evaluation order of arguments, objects, operators, assignments) loaded in the rule's order.
-    python3 -I gate_argorder.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/argordergate.json
+    python3 -I gate_argorder.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/argordergate.json
 Universe: the C++ units of every admitted product root with "target": "guest" and "cxx_origin": "native" (admit.json; the lifter emits the order
 itself, a lifted root has none). No such root: universe 0, green.
 Certificate of a unit, all of: (1) the recipe of its root validates (recipe.check, which holds the plugin rule); (2) the recipe's plugin list is
@@ -1561,7 +1560,7 @@ object compiled without it, or with another .so, has another key and is not this
 ```text
 Gate "machine" (fnvnx-gate/1, class G of VERDICT.md): the product's registry hive holds exactly the keys that the exe and the modules read
 (rules: contract/hive.py).
-    python3 -I gate_machine.py     cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/machine.json and machine.ids
+    python3 -I gate_machine.py     cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/machine.json and machine.ids
 Roots come only from verify/admit.json (class product). A root DECLARES its hive in `<root>/registry.in.json` ("fnvnx-registry-in/1"):
   {"format", "external": NAME of an entry of the root's recipe `external` (private: fnv-nx-build commit + tree_sha256),
    "sites": path of regsites.tsv inside it (the registry-API call sites of the exe and the modules),
@@ -1588,7 +1587,7 @@ Run: `python3 -I ports/fnv-nx/verify/gate_hostapi.py [--header PATH]` (cwd = che
 ```text
 Gate "datamodel" (fnvnx-gate/1, VERDICT.md class A: data model): every unit of a guest product root is compiled by the pinned game
 compiler in the exe's data model.
-    python3 -I gate_datamodel.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/datamodel.json
+    python3 -I gate_datamodel.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/datamodel.json
 Universe (through gate_build.quantify): the admitted product roots with "target": "guest" (a host root has none); per root one item
 `<root>:compiler` plus one item `<root>/<unit>` per unit of the build. No guest root: universe 0, green.
 Certificate, read from the build's own outputs (objects.json of the root, the CC stage documents of its units in GATE_CACHE/store/stage-docs,
@@ -1613,7 +1612,7 @@ Relies on the owner-accepted item "the compiler is correct": the pinned compiler
 
 ```text
 Gate "objstub" (fnvnx-gate/1, classes 1 and 2 of VERDICT.md): no built function holds a trap/abort path or is vacuous (rules and proofs: objstub.py).
-    python3 -I gate_objstub.py [--jobs N]     cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/objstub.json
+    python3 -I gate_objstub.py [--jobs N]     cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/objstub.json
 Roots come from verify/admit.json, never from arguments: for every product root the gate calls gate_build.ensure(root, GATE_CACHE) (build or
 cache hits) and judges what the recipe says (RECIPE.md): the objects (os_layer ones may hold SVC), the constants table (key (unit, symbol))
 and the terminator set DERIVED from the recipe's compiler: objstub.unit_terminators runs the compiler's own plugin over the preprocessed text
@@ -1691,7 +1690,7 @@ Rule. A test file is certified iff ALL hold:
   2. `subject` is not empty and every subject path is a tracked file inside a root of verify/admit.json;
   3. `references` is not empty and every REF has one of the forms above; `wine` is "9.0"; `exe_sha256` equals
      verify/oracle_pins.json "exe_sha256"; the artifact is fetched by its exact commit (`git fetch --depth 1
-     $ARTIFACTS_URL <commit>`, cached in GATE_CACHE/external/<commit> like a recipe's external), its tree hash
+     <artifacts URL> <commit>`, cached in GATE_CACHE/external/<commit> like a recipe's external), its tree hash
      (cas.py) equals `tree_sha256` and `path` is a file of it; every `path` of a spec, contract or model is a tracked
      file inside a root; a spec's anchor resolves in its file. A spec without a file and an anchor is not a reference;
   4. independence: no spec, contract or model `path` is in the import closure of the subject. The closure is computed
@@ -1720,7 +1719,7 @@ Gate "assumptions" (fnvnx-gate/1): every assumption the rules rest on is in one 
 
 Registry: verify/ASSUMPTIONS.json ("fnvnx-assumptions/1"; the accepted entries are ASM-001 to ASM-009):
   {"format": "fnvnx-assumptions/1", "entries": [ENTRY...]}
-  ENTRY  {"id": "ASM-NNN", "text": STR, "used_by": [PATH...], "aliases": [STR...], "status": "OWNER" | "REMOVE", ...}
+  ENTRY  {"id": "ASM-NNN", "text": STR, "aliases": [STR...], "status": "OWNER" | "REMOVE", ...}
     OWNER   + "decision": {"file": "CLAUDE.md", "quote": STR}   the owner's acceptance, verbatim
     REMOVE  + "removed_by": STR, "owner": LEAD | LEAD+LEAD      the discharge and the stream lead(s) who owe it
     optional: "note": STR. The registry holds exactly the entries that files of THIS tree rely on: the entry of an unmerged
@@ -1737,7 +1736,7 @@ universe is (path, first line of the block). A mention is certified iff ALL hold
   2. every id in it is the id of an entry of the registry.
 The registry is certified iff ALL hold:
   3. ids are unique and well formed, aliases are unique across entries, text is not empty;
-  4. used_by is not empty and every path in it is a tracked file that contains the entry's id (the reliance is written at the
+  4. the entry has a user: at least one tracked text file other than the registry cites its id; the users are derived (users_of), never listed (the reliance is written at the
      place of reliance, so an entry nobody cites is dead and is red); 
   5. an OWNER entry has decision.file CLAUDE.md and decision.quote occurring verbatim inside exactly one numbered item under
      the line "OWNER, the only accepted ones:", no item serves two entries, and every item has an entry: the OWNER set is
@@ -1897,7 +1896,7 @@ objstub: decide on MACHINE CODE whether built AArch64 objects contain (T) a trap
         (the object id and the `unit` of a constants row are the path as given)
     objstub.py terminators --cc CC [--cflag F]... [--lang c|c++] --header H... -o FILE
 Inputs: ELF relocatable objects, ELF32 (ILP32; SHT_RELA with Elf32_Rela, R_AARCH64_P32_* kinds) or ELF64, AArch64, little endian. Decoder: ONE source, verify/a64access.cc (built with
-the host g++ against LLVM 18's MC layer; env var A64ACCESS names a prebuilt binary): per word the registers read and written
+the host g++ against LLVM 18's MC layer): per word the registers read and written
 (MCInstrDesc defs/uses/implicit, tied operands), the memory operand and the kind. Everything the T and V classes need beyond that
 is read from architectural encoding fields (Arm ARM A64 top-level table), never from mnemonics. Assumption: LLVM's AArch64 (ASM-043)
 instruction descriptions and disassembler are correct; the test cross-checks the decoded word set against objdump. Output: one line `obj:symbol: KIND detail`, sorted; exit 0 iff no finding.
@@ -2200,7 +2199,7 @@ RULE refusal set R: an option of GNU ld's grammar that lets a link accept missin
   strip one or two leading dashes, cut at `=`; a name that is a prefix (getopt_long abbreviation) of a refused long name is refused (a
   single-dash name needs >= 2 chars); `-z undefs|muldefs` as `-z X` or `-zX`; `-Wl,a,b` and `-Xlinker a` are split into the options
   they pass; `@file` is refused (cannot be analysed). An ambiguous abbreviation is refused too (ld would reject it anyway).
-EXTERNAL inputs (key "external", RECIPE.md): fetched only by exact commit from ARTIFACTS_URL into a bare cache (--ext DIR, shared by
+EXTERNAL inputs (key "external", RECIPE.md): fetched only by exact commit from the artifacts URL (recipe.artifacts_url) into a bare cache (--ext DIR, shared by
   builds that must not share stores), checked out, ingested; the CAS tree hash must equal tree_sha256 (else the build is red naming
   the external). The tree is a declared input at "at" of EVERY stage (the tool runtime lists it), so stage keys cover its hash. A tree
   is the content-pinned INPUT, not a build output: sharing the fetch between two cold builds shares nothing that a build computes.
@@ -2377,8 +2376,8 @@ Report "fnvnx-unitstage/2": per unit status (ok|pp-failed|cc-failed), closure (s
 L4 verdict: gate certificates, merge gate, build/verification separation, rule-defect queue. stdlib only.
 Run as `python3 -I verdict.py CMD ...`. Exit codes: 0 ok, 1 usage/format error, 2 red/blocked, 3 merge conflict.
   run         --repo R --commit C --gates GATES.json --out V.json [--budget-s 300] [--env-id H] [--cache DIR]
-              Runs each gate (argv, cwd = clean git worktree of C, env + GATE_OUT + GATE_COMMIT [+ GATE_CACHE]), in file order.
-              Gate contract for the environment: GATE_OUT (result directory), GATE_COMMIT (commit under test) and, when --cache is
+              Runs each gate (argv, cwd = clean git worktree of C, env + GATE_OUT [+ GATE_CACHE]), in file order.
+              Gate contract for the environment: GATE_OUT (result directory; the commit under test is the HEAD of the gate's worktree, never an environment value) and, when --cache is
               given, GATE_CACHE (absolute path of a caller-owned directory that outlives the run). A gate may store results in
               GATE_CACHE only under a key that covers everything it reads (its inputs' content, the declared environment, its own
               arguments); it must work, and give the same verdict, without GATE_CACHE. A gate writes
@@ -2580,7 +2579,7 @@ INPUT FACTS.  The objects are ELF relocatable objects of one target (the objects
 ```text
 Gate "abi" (fnvnx-gate/1, VERDICT.md class 8): a reference and the definition it binds to have one calling contract (rule, universe and proof:
 link/abi.py docstring RULE, UNIVERSE, PROOF).
-    python3 -I gate_abi.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/abi.json
+    python3 -I gate_abi.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/abi.json
 Universe: the rows abi.py defines (abi.check), over the C++ objects of every admitted product root with "target": "guest" and "cxx_origin": "native"
 (objects from gate_build.ensure; the contract names are the plugin's `.fnvnx.sympair` of each object), plus the input facts abi.py's PROOF rests on, as items
 of the same gate:
@@ -2597,7 +2596,7 @@ unit is an object of the root's recipe (recipe.CXX_EXT). No such root: universe 
 ```text
 Gate "namegate" (fnvnx-gate/1, VERDICT.md class 8): a native body that stands for an exe function carries that function's MSVC name, certified
 against the cl object of the same source (link/gate_names.py rows(): the plugin's name is a definition of the unit's cl object).
-    python3 -I gate_namegate.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/namegate.json
+    python3 -I gate_namegate.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/namegate.json
 Universe: the rows of gate_names.rows() whose symbol bodysel selects as the NATIVE body of an exe function, in each admitted product root with
 "target": "guest", "cxx_origin": "native" and a `game` directory (the join and its inputs: gate_l2native.py). A root without `game`: universe 0 for it;
 no such root: universe 0, green. An uncertified row whose symbol bodysel turns LIFTED is outside the universe, not red.
@@ -2611,7 +2610,7 @@ naming the input; owner L1 for bodysel, L2 for the cl side), or the root's build
 ```text
 Gate "r7" (fnvnx-gate/1, VERDICT.md class 8): every type that a native exe-function body uses has the exe's layout, certified by link/gate_r7.py rows()
 against the cl /Z7 CodeView types of the same source.
-    python3 -I gate_r7gate.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/r7.json
+    python3 -I gate_r7gate.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/r7.json
 Universe: the rows of gate_r7.rows() of the NATIVE-BEARING units (a unit with at least one symbol that bodysel selects as the native body of an exe function;
 the types such a body uses are among the unit's complete records), in each admitted product root with "target": "guest", "cxx_origin": "native" and a `game`
 directory (gate_l2native.py). A root without `game`: universe 0 for it; no such root: universe 0, green.
@@ -2680,7 +2679,7 @@ TEXT/DATA ranges (the section table is used), the JSON cache keyed on mtime.
 ```text
 Gate "guestlink" (fnvnx-gate/1, class A of VERDICT.md): the guest link's libraries are what the pinned guest runtime's own driver derives; nothing is stored
 (link/guest.json is {script}), the link derives them itself (recipe.Job.guest_libs). The gate recomputes that derivation and is red when it does not hold.
-    python3 -I gate_guestlink.py    cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/guestlink.json
+    python3 -I gate_guestlink.py    cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/guestlink.json
 Derivation (RECIPE.md, Link): the C++ driver of the pinned runtime external (verify/guest_compiler.json `runtime_driver`) is run, as the hermetic recipe
 stage `drv:<root>`, with the guest semantic flags and `-pie -###` on a one-line C++ file; recipe.parse_driver_link reads startfiles, dirs, names and
 endfiles from its link command; an object is excluded by recipe.onedef (a symbol a green guest root defines) or recipe.entry_object (ENTRY of the script

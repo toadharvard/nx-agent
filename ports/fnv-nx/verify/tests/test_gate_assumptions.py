@@ -280,8 +280,8 @@ check("lexer data: json, tsv, txt are never prose", all(mention("x" + e, "assume
 check("an extension not in the table is red and named", mention("x.zzz", "assume\n") == [0] and
       "'.zzz'" in str(G.judge_mentions(["x.zzz"], ids, lambda p: "a")[1][("x.zzz", 0)]) and
       G.judge_mentions(["x.zzz"], ids, lambda p: "a")[1][("x.zzz", 0)].code == "ext-unknown", "")
-check("a file with no extension is keyed by its name when the table has it (.gitignore), else it is plain text: every line is prose (README, Makefile)",
-      mention(".gitignore", "# assume\n") == [1] and mention("Makefile", "x\n") == [] and mention("README", "ok\nthis is an assumption\n") == [1] and mention("README", "an `assumption` span\n") == [], "")
+check("a file with no extension is keyed by its name (.gitignore is in the table, Makefile is not)",
+      mention(".gitignore", "# assume\n") == [1] and mention("Makefile", "x\n") == [0], "")
 
 # stray ids
 S = {"a.json": '{"x": "%s"}' % asm(998), "b.md": "ok %s" % asm(1)}

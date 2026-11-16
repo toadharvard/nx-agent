@@ -3,8 +3,11 @@ guest root in a temp git repo (admit entry "target": "guest", "cxx_origin": "nat
 plugins = recipe.PLUGIN_SOURCES / PLUGIN_ARGS), exactly as verify/tests/test_plugins.py and test_guest.py do.  No direct compiler call.
 
     objects(names)  -> {fixture stem: path of the produced .o}    (built once per process; the store is $GATE_CACHE, else a scratch store)
-The external compiler is fetched by the pin (commit + tree hash) from ARTIFACTS_URL; when it cannot be fetched this raises, never skips.
+The external compiler is fetched by the pin (commit + tree hash) from recipe.ARTIFACTS; when it cannot be fetched this raises, never skips.
 """
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import atexit
 import json
 import os
@@ -16,10 +19,9 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOL = os.path.dirname(os.path.dirname(HERE))                    # ports/fnv-nx
 REAL = os.path.dirname(os.path.dirname(TOOL))                    # checkout root
-sys.path.insert(0, os.path.join(TOOL, 'verify'))
-import scratch  # noqa: E402
-import cas  # noqa: E402
-import recipe  # noqa: E402
+from verify import scratch  # noqa: E402
+from verify import cas  # noqa: E402
+from verify import recipe  # noqa: E402
 
 T = 'ports/fnv-nx/'
 ROOT = T + 'toy'
@@ -85,7 +87,7 @@ def build(sources, plugins=None, lifted=False, flags=()):
         os.makedirs(os.path.dirname(os.path.join(repo, n)), exist_ok=True)
         shutil.copyfile(os.path.join(REAL, n), os.path.join(repo, n))
     store = _store()
-    old_url = os.environ.get('ARTIFACTS_URL')
+    old_url = recipe.ARTIFACTS
     root = {'path': ROOT, 'class': 'product', 'target': 'guest', 'gates': [], 'recipe': ROOT + '/build.json'}
     if lifted:
         pack = os.path.join(base, 'pack')
@@ -107,10 +109,10 @@ def build(sources, plugins=None, lifted=False, flags=()):
         rec['external'] = [ext, {'name': 'pack', 'repo': 'fnv-nx-build', 'ref': 't', 'commit': commit, 'tree_sha256': tree, 'at': '/ext/pack'}]
         _w(repo, T + 'gen/lift.py', lift)
         root['cxx_origin'] = {'lifted_by': T + 'gen/lift.py', 'pack': 'pack'}
-        os.environ['ARTIFACTS_URL'] = pack
+        recipe.ARTIFACTS = pack
     else:
         for n, text in sources.items():
-            _w(repo, ROOT + '/' + (n if os.path.splitext(n)[1] in recipe.CC_EXT + recipe.CXX_EXT + recipe.ASM_EXT else n + '.cc'), text)   # a name with a unit suffix is the unit; a bare name is a C++ unit
+            _w(repo, ROOT + '/%s.cc' % n, text)
         root['cxx_origin'] = 'native'
     _w(repo, ROOT + '/build.json', json.dumps(rec, indent=1))
     _w(repo, T + 'verify/guest_compiler.json', json.dumps(pin))
@@ -123,10 +125,7 @@ def build(sources, plugins=None, lifted=False, flags=()):
     try:
         return recipe.build(repo, ROOT, store, os.path.join(base, 'out'))
     finally:
-        if old_url is None:
-            os.environ.pop('ARTIFACTS_URL', None)
-        else:
-            os.environ['ARTIFACTS_URL'] = old_url
+        recipe.ARTIFACTS = old_url
 
 
 def objects(names):

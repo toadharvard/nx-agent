@@ -5,7 +5,10 @@ Both sides are sorted; equal lengths are compared pairwise.  Several native copi
 """
 import collections
 
-import store
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: the siblings are imported by their qualified name (contract.X)
+from contract import store
 
 NAME = 'vcall'
 ORDER = ('equal', 'delta_0_or_4', 'count_differs', 'other')   # best .. worst

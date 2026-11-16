@@ -118,10 +118,7 @@ def suffix_of(path):
 
 
 def lexer_of(path):
-    """the lexer kind of PATH: its extension's entry in LEXER; a file with no extension and no entry of its own name (README, LICENSE, NOTES) is plain text: every line is prose"""
-    k = LEXER.get(suffix_of(path))
-    base = os.path.basename(path)
-    return k or ("plain" if k is None and not os.path.splitext(base)[1] and not base.startswith(".") else None)
+    return LEXER.get(suffix_of(path))
 
 
 def py_spans(body, lines, off):
@@ -338,7 +335,7 @@ def prose_lines(path, body):
     if kind == "data":
         return [" " * len(ln) for ln in lines]
     spans = {"python": lambda: py_spans(body, lines, off), "c": lambda: c_spans(body), "ld": lambda: ld_spans(body), "sail": lambda: c_spans(body, False), "markdown": lambda: md_spans(body),
-             "shell": lambda: hash_spans(body, False), "toml": lambda: hash_spans(body, True), "semi": lambda: hash_spans(body, True, ";"), "plain": lambda: [(0, len(body))]}[kind]()
+             "shell": lambda: hash_spans(body, False), "toml": lambda: hash_spans(body, True), "semi": lambda: hash_spans(body, True, ";")}[kind]()
     keep = bytearray(len(body))
     for s, e in strip_code(body, spans):
         keep[s:e] = b"\x01" * (e - s)

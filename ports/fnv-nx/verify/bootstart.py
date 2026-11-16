@@ -208,13 +208,13 @@ def iat_dumps(slots):
 
 def read_modules(text):
     """modules.tsv -> {name: {"pref", "base", "soi", "tls" (has_tls), "static", "idx" (load_index or None)}}"""
-    rows, _ = bootinputs._rows(text, bootinputs.MODULE_HEADER, 10)
+    rows, _ = bootinputs._rows(text, bootinputs.MODULE_HEADER, 11)
     out = {}
     for no, f in rows:
-        name, _sha, _sz, pref, base, soi, tls, _e, static, idx = f
+        name, _sha, _sz, pref, base, soi, tls, _e, static, idx, dll = f
         out[name] = {"pref": bootinputs._hex(pref, "preferred_base", no), "base": bootinputs._hex(base, "assigned_base", no),
                      "soi": bootinputs._hex(soi, "size_of_image", no), "tls": tls == "1", "static": static == "1",
-                     "idx": int(idx) if idx.isdigit() else None}
+                     "idx": int(idx) if idx.isdigit() else None, "dll": dll == "1"}
     return out
 
 
@@ -319,7 +319,7 @@ def tls_plan(pe, tls, mods):
     template), dump (state dump name). errors: facts that contradict each other (tls.tsv, modules.tsv, the exe's PE). tls is None when not supplied:
     StartError when the exe or any module has a TLS directory."""
     t = tls_dir(pe)
-    has_dll = [n for n, m in sorted(mods.items()) if m["tls"]]
+    has_dll = [n for n, m in sorted(mods.items()) if m["tls"] and m["dll"]]   # the exe row (dll 0) is the exe, whose TLS is the exe row of tls.tsv
     if tls is None:
         if t or has_dll:
             raise StartError("--tls (tls.tsv and tls/) is required: %s" % ("the exe has a TLS directory" if t else "module %s has a TLS directory" % has_dll[0]))

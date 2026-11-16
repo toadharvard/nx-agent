@@ -67,6 +67,13 @@ def judge(units):
     return len(units), len(units) - len(bad), sorted(ids)
 
 
+def generated_units(rec):
+    """{root-relative unit path} that are generator outputs: the declared outputs of the `generated` and `run` steps of the recipe. This holds for every origin of a root's C++ (recipe.py
+    lifted-origin rule: a lifted root's unit must be an output of a step of lifted_by, in the pack form, the pack-root form and the stage form alike), so a lifted pack unit is generator
+    output by the one rule, and a tracked file (all_units_of's own sources) never is."""
+    return set(recipe.generated_outputs(rec))
+
+
 def root_units(root, repo, cache):
     """One product ROOT -> ([unit dict for judge], None) or (None, (id, detail)) when its recipe is invalid or its build is red."""
     try:
@@ -77,7 +84,7 @@ def root_units(root, repo, cache):
         return None, (root + ":build-red", "stage %s" % res["failure"]["stage"])
     store = os.path.join(cache, "store")
     rec = recipe.load_recipe(repo, recipe.load_admit(repo), root)
-    gen = set(recipe.generated_outputs(rec))
+    gen = generated_units(rec)
     objs = {o["unit"]: o["object"] for o in res["objects"]}
     out = []
     for u, k in sorted(res["pp_keys"].items()):

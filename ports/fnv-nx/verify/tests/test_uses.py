@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/contract ports/fnv-nx/hostabi/product/build.json ports/fnv-nx/link
-# reads: ports/fnv-nx/shim/build.json ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for cross-root outputs of verify/recipe.py (RECIPE.md "Outputs and uses"): a root declares `outputs`, another admitted root takes them by
 `uses` as stage inputs at /uses/<root>/<name>; the stage key holds the output's content hash. Toy roots in temp git repos, real sandbox stages.
 Plain script: exit 0 on pass, one PASS/FAIL line per case. Needs root (sandbox). Scratch: test_recipe's BASE, removed at exit."""
@@ -43,7 +41,7 @@ def repo_of(name, prec=PREC, pfiles=PF, crec=None):
 
 def main():
     subprocess.run(["git", "init", "-q", "--bare", BASE + "/artifacts.git"], check=True)
-    os.environ["ARTIFACTS_URL"] = BASE + "/artifacts.git"
+    TR.recipe.ARTIFACTS = BASE + "/artifacts.git"
     SS = BASE + "/store"
     ra = repo_of("ua")
     r = recipe.build(ra, ROOT, SS, BASE + "/o-ua")
@@ -112,6 +110,22 @@ def main():
     rk = srepo("sk", ["tsrc:src/s1.c"], sources="gen/other.txt")
     ek = recipe.check(json.load(open(rk + "/" + ROOT + "/build.json")), ROOT, recipe.tracked(rk), recipe.load_admit(rk), None, rk)
     check("sources: a name that is no generated output of the root is a check error", any("sources must name" in e for e in ek), ek)
+    # `sources` line <root>:<path>: a tracked file of an admitted root listed in `uses`
+    def rrepo(name, args, uses=None, pfiles=PF):
+        r = consumer(generated=[{"tool": T + "gen/lst.py", "args": args, "inputs": [], "outputs": ["gen/srcs.txt"]}], sources="gen/srcs.txt",
+                     uses=[{"root": P, "output": "handheld"}] if uses is None else uses, outputs={})
+        return TL.mk(name, r, dict(TL.BASE_FILES, **{"gen/lst.py": LST, "toy/b.c": "int f_b(void) { return 1; }\n"}), libs=[(P, (PREC, pfiles))])
+    rr1 = recipe.build(rrepo("rs1", [P + ":p.c"]), ROOT, SS, BASE + "/o-rs1")
+    check("root sources: a tracked file of a root in uses is compiled as unit <root with / as __>/<path>", rr1["status"] == "green"
+          and P.replace("/", "__") + "/p.c" in rr1["units"], TL.err_text(rr1))
+    rr2 = recipe.build(rrepo("rs2", [P + ":p.c"], pfiles=dict(PF, **{"p.c": "int p_x;\nint p_y;\n"})), ROOT, SS, BASE + "/o-rs2")
+    u = P.replace("/", "__") + "/p.c"
+    check("root sources: the file's content is in the unit key: another content has another preprocessing key", rr1["status"] == rr2["status"] == "green"
+          and rr1["pp_keys"][u] != rr2["pp_keys"][u], "")
+    for what, args, kw in (("a root that is not admitted", [T + "ghost:p.c"], {}), ("a file that is not tracked", [P + ":zzz.c"], {}),
+                           ("a path leaving the root", [P + ":../x.c"], {}), ("a root that is not in uses", [P + ":p.c"], {"uses": []})):
+        rr = recipe.build(rrepo("rr-" + str(abs(hash(what)) % 10000), args, **kw), ROOT, SS, BASE + "/o-rr")
+        check("root sources: %s is red (stage sources:<root>)" % what, rr["status"] == "red" and rr["failure"]["stage"] == "sources:" + ROOT, TL.err_text(rr))
     print("%d FAILED" % len(TR.FAILED) if TR.FAILED else "all passed")
     return 1 if TR.FAILED else 0
 
