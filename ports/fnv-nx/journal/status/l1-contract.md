@@ -2907,3 +2907,5 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - The `reached.tsv` stage is L1's, queued as w28's item C: (dll, name, how=iat|gpa, site) from the IAT facts and gpa_names, with the dll set as its only bridge input, so there is no cycle with D9_ROWS.
   - Interim record (L6, a measurement): 11 of 11 documented have a record, 0 undoc reached, 3 undoc unreached (exe 0948da1e8, redist c53729e3b).
 - bottleneck: farm 3 bridgetable; the w28 prefix head; cand4 verdict; L3a base3 head.
+- Farm 3: merging 96fcecc into 0430a1863 conflicts on 110 paths, because L6's line is based on an older platform and verify tree. The merge was aborted.
+  - Instead, farm 3 cherry-picks only the three record commits (9cab4b24a, e24edc9ee, 96fcecc2e) onto 0430a1863 and runs dens/b (doing).
