@@ -2565,3 +2565,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - L3a base3 0596da7f4: assumptions gate 144/144 mentions, 123 entries, 5 findings (ASM-329 stray in l3a-lift.md, plus 617/619/621 from the stale render/). L3a takes render/ from L6 d98bb7faa and fixes its status line.
 - w28 farm at e3ea4f5ac: test_runpython 5/0, test_stageref_cost 4/0, test_foreach_dynamic 3/1 (the test's count; fixed at 0d2a5f765, no recipe change), test_sandbox 9a 27/0.
 - bottleneck: cand3b verdict at 02f26b3de.
+
+## 2026-11-16 04:55
+- L5 w33 7eafe53b5: 510 platform records already placed correctly (iob.c fine since w32); platform, platform@time and platform@vclock are 112/112 green. platform/exptable is blocked only by lift/rt dispatch.c ENTRY1-CONT (L2 w2 fix (c), pending).
+- bottleneck: cand3b verdict at 02f26b3de; ELF path: L2's ENTRY1 front-end fix.
