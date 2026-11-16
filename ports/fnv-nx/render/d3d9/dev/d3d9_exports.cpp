@@ -13,6 +13,9 @@
 //   so with no profiler there is no observable effect on any later d3d9 call.
 // GetStatus / QueryRepeatFrame / SetMarker / SetOptions / SetRegion are Wine 9.0 FIXME stubs (d3d9_main.c, same-named functions): one fnvnx_wine_fixme per call, rows 41-45 of verify/wine_fixme.tsv.
 // BeginEvent / EndEvent are real (the level). DebugSetMute: Wine does nothing (`/* nothing to do */`), id 52 (NX_WINE_FIXME_VOID).
+// Wine 9.0 citations (dlls/d3d9/d3d9_main.c, tag wine-9.0): DebugSetMute :31-33 (`/* nothing to do */`), D3DPERF_BeginEvent :201-205, D3DPERF_EndEvent :211-214,
+// D3DPERF_GetStatus :220-221 (FIXME stub), D3DPERF_SetOptions :230-232 (FIXME), D3DPERF_QueryRepeatFrame :238-239 (FIXME), D3DPERF_SetMarker :247-249 (FIXME),
+// D3DPERF_SetRegion :255-257 (FIXME); Direct3DCreate9 :35, Direct3DCreate9Ex :56, Direct3DShaderValidatorCreate9 :191. Signatures: dlls/d3d9/d3d9.spec :1,:5-:10,:12-:14.
 // The level is one object per process as in the reference; updates are atomic (the reference's plain int is a data race there).
 #include <atomic>
 #include <string.h>
