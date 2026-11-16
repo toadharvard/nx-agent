@@ -276,7 +276,6 @@ extern "C" int c_wctomb(char *d, u16 wc)
     return 1;
 }
 
-FNVNX_EXPORT("msvcrt.dll", "sprintf", c_sprintf, "func");
 /* ---------------------------------------------------------------- printf and scanf: the engine is msvcrt_format.cpp */
 extern "C" int c_sprintf(char *buf, const char *fmt, ...)
 {
@@ -292,7 +291,6 @@ extern "C" int c_sprintf(char *buf, const char *fmt, ...)
         buf[r] = 0;
     return r;
 }
-FNVNX_EXPORT("msvcrt.dll", "sscanf", c_sscanf, "func");
 extern "C" int c_sscanf(const char *in, const char *fmt, ...)
 {
     va_list ap;
