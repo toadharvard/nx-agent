@@ -385,6 +385,15 @@ consumers: a later step's `inputs` ref `{"stage": "<root>:gen:I", "path": DIR}` 
 root reads it through `uses`. A directory output does not overlap another output or a tracked file. A stage whose stage-ref input is an output of a
 red generator is blocked by it (never run on a missing path). Tests: `tests/test_genchain.py` (a 3-stage chain, unmounted paths fail, the re-key rule).
 
+### Derived forms of a run step (`debs.closure`, `{"plugins": "root"}`)
+
+Two sets are never written twice (they are derived once from their source):
+
+- `"debs": {"closure": [TOP, ...]}`: TOP are the packages of the programs the step runs; the step's debs are TOP and their Pre-Depends/Depends closure on the declared machine, `envcheck.dep_closure`, the rule that defines the declared package set itself (`debs.packages` is checked against it). The result is sorted, every deb's sha256 is in the stage key as before. A top that env.json does not declare is red in `check`; a top that is not installed on the declared machine is red in the build. A list of names is still accepted for a step whose few debs are the whole set.
+- `{"plugins": "root"}` as an input: one `{"plugin": NAME}` per plugin of the root's `plugins`, in declaration order (the order is written once). Red when the root declares no plugins or when it is written twice.
+
+`recipe.expand_run` is the one reader of the expanded steps (`check` after the form check, the build).
+
 ### Generator tool reads (`gen:file-escape`)
 
 `recipe check` is red with `gen:file-escape:<root>:gen:<I>:<FILE>:<LINE>:<PATH>` when a generator tool, or a module of its import closure, reads a file by a path

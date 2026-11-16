@@ -1368,11 +1368,73 @@ def deb_pins():
         return {}
 
 
+def deb_closure(tops):
+    """Sorted package names of TOPS and everything their Pre-Depends/Depends need on the declared machine (envcheck.dep_closure, the rule that defines the
+    declared package set: what `dpkg -i` of the pins needs to be complete). A top that is not installed there is not in the result; the build refuses it."""
+    import envcheck
+    have = envcheck.dep_closure(list(tops))
+    miss = sorted(set(tops) - set(have))
+    if miss:
+        raise ValueError("debs.closure: %s is not installed on the declared machine" % ", ".join(miss))
+    return sorted(have)
+
+
+DEBS_CLOSURE_ERR = 'debs is a list of env.json package names or {"closure": [top package names]} (the dependency closure of the programs the step runs, resolved by the recipe)'
+
+
+def step_debs(g, closure=True):
+    """The debs of run step G as a sorted list of names: the written list, or for {"closure": [TOPS]} the Depends closure of TOPS (deb_closure), so a package that a
+    dependency adds is written in no build.json. ValueError on a form that is neither; CLOSURE False returns the tops themselves (the check does not read the machine)."""
+    d = g.get("debs")
+    if isinstance(d, list) and all(isinstance(x, str) for x in d):
+        return list(d)
+    if isinstance(d, dict) and set(d) == {"closure"} and isinstance(d["closure"], list) and d["closure"] and all(isinstance(x, str) for x in d["closure"]):
+        return deb_closure(d["closure"]) if closure else sorted(set(d["closure"]))
+    raise ValueError(DEBS_CLOSURE_ERR)
+
+
+def step_inputs(rec, g):
+    """The inputs of run step G with {"plugins": "root"} expanded to one {"plugin": NAME} per plugin the root declares, in declaration order (the order is written once, in `plugins`)."""
+    out = []
+    for p in g.get("inputs", []):
+        if isinstance(p, dict) and p == {"plugins": "root"}:
+            out += [{"plugin": x["name"]} for x in (rec.get("plugins") if isinstance(rec.get("plugins"), list) else []) if isinstance(x, dict) and isinstance(x.get("name"), str)]
+        else:
+            out.append(p)
+    return out
+
+
+def expand_run(rec, closure=True):
+    """REC with the `run` steps' forms expanded (step_inputs, step_debs): the one reader every consumer of the steps uses after the form check."""
+    rs = rec.get("run")
+    if not isinstance(rs, list):
+        return rec
+    out = []
+    for g in rs:
+        if isinstance(g, dict) and isinstance(g.get("inputs"), list):
+            g = dict(g, inputs=step_inputs(rec, g))
+        if isinstance(g, dict):
+            try:
+                g = dict(g, debs=step_debs(g, closure))
+            except ValueError:
+                if closure:
+                    raise
+        out.append(g)   # (a malformed form is run_errors' report; the build refuses a closure that cannot be resolved)
+    return dict(rec, run=out)
+
+
 def run_errors(rec, root, files, roots, mine, seen, repo):
     """The `run` stages (RECIPE.md "Run stages"): {name, artifact "ROOT:OUTPUT", args, inputs [ref], debs [env.json package], outputs [path]}."""
     rs, err = rec.get("run", []), []
     if not isinstance(rs, list):
         return ["run is not a list"]
+    for i, g in enumerate(rs):
+        if isinstance(g, dict) and isinstance(g.get("inputs"), list) and {"plugins": "root"} in g["inputs"]:
+            if g["inputs"].count({"plugins": "root"}) > 1:
+                err.append('run[%d].inputs: {"plugins": "root"} is written once' % i)
+            if not any(isinstance(x, dict) for x in (rec.get("plugins") if isinstance(rec.get("plugins"), list) else [])):
+                err.append('run[%d].inputs: {"plugins": "root"} needs the root to declare `plugins`' % i)
+    rs = expand_run(rec, closure=False)["run"]
     pk = deb_pins()
     names = set()
     for i, g in enumerate(rs):
@@ -1414,10 +1476,10 @@ def run_errors(rec, root, files, roots, mine, seen, repo):
                 err.append("run[%d].artifact %s: root %s is not a host product (the sandbox runs x86_64)" % (i, a, ar))
         if not (isinstance(g["args"], list) and all(isinstance(x, str) for x in g["args"])):
             err.append("run[%d].args must be strings" % i)
-        if not (isinstance(g["debs"], list) and all(isinstance(d, str) for d in g["debs"])):
-            err.append("run[%d].debs must be env.json package names" % i)
-        else:
-            err += ["run[%d].debs: %s is not declared in env.json debs.packages" % (i, d) for d in g["debs"] if d not in pk]
+        try:
+            err += ["run[%d].debs: %s is not declared in env.json debs.packages" % (i, d) for d in step_debs(g, closure=False) if d not in pk]
+        except ValueError as e:
+            err.append("run[%d].%s" % (i, e))
         ins = g["inputs"]
         if not isinstance(ins, list):
             err.append("run[%d].inputs must be a list of refs" % i)
@@ -1499,7 +1561,7 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
     gen = generated_outputs(rec)
     if gonly:   # `compiler` and `plugins` of a root with no unit are used only by its run steps: a plugin is a step's {"plugin": NAME} input, the compiler builds the plugins
         # (or is a step's {"external": NAME} input); an unused one is red, as gen:unused-import is
-        rins = [p for g in (rec.get("run") if isinstance(rec.get("run"), list) else []) if isinstance(g, dict) and isinstance(g.get("inputs"), list) for p in g["inputs"] if isinstance(p, dict)]
+        rins = [p for g in (expand_run(rec, closure=False).get("run") if isinstance(rec.get("run"), list) else []) if isinstance(g, dict) and isinstance(g.get("inputs"), list) for p in g["inputs"] if isinstance(p, dict)]
         pl = [x.get("name") for x in (rec.get("plugins") if isinstance(rec.get("plugins"), list) else []) if isinstance(x, dict)]
         err += ["gonly:unused-plugin:%s (a root with no unit declares a plugin only when a run step takes it as its {\"plugin\": NAME} input)" % n for n in pl if {"plugin": n} not in rins]
         cp = written_compiler
@@ -2501,7 +2563,15 @@ class Job:
 
     def run_all(self, ws):
         """The `run` stages of the recipe (RECIPE.md "Run stages"), after the generators; a red one blocks its outputs like a generator."""
-        for i, g in enumerate(self.rec.get("run", [])):
+        try:
+            steps = expand_run(self.rec).get("run", [])
+        except ValueError as e:
+            self.red.append({"stage": "run:%s" % self.root, "exit": None, "stderr": [str(e)]})
+            for g in self.rec.get("run", []):
+                for o in step_outputs(g):
+                    self.blocked[o] = "run:%s" % self.root
+            return
+        for i, g in enumerate(steps):
             try:
                 self.run_one(ws, i, g)
             except BuildRed as r:
