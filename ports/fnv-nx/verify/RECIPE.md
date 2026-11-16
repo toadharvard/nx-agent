@@ -577,6 +577,16 @@ An input of a `run` or `generated` step may be `{"include_of": ROOT}`: every tra
 
 The external cache is named once: `recipe.ext_dir(cache)`. A build that is given its own external cache (`--ext`) passes it to every reader (`resolve_input(..., extc)`, `exttree(e, cache, extc)`), so the reader goes where `fetch_externals` wrote.
 
+## The preprocessed text of a unit (`pp`)
+A `run` step's `inputs` entry `{"pp": ROOT, "unit": PATH}` mounts ONE file at `/in/N`: the preprocessed text (`unit.ii`) of unit PATH (root-relative, as `objects.json` names it) of the guest root ROOT. It is exactly the
+output of that unit's PP stage (`unitstage`, `Build.pp_file`: the same loop as the unit's own build) in ROOT's own build: the same compiler, flags, defines and include closure that the CC stage compiles, served from the store by the
+stage key. The step key holds the file's content, so a changed header (or a changed flag, define or compiler of ROOT) is a changed input. No step runs a preprocessor of its own over product source: that would be a second build path
+whose flags could diverge from what is compiled.
+Red (one rule, `recipe.pp_errors`, called by `check` for every run input and by `Job.pp_tree` for the mount): ROOT is not a root this recipe `uses`; ROOT is not an admitted root; ROOT is not a guest root; PATH is not a unit of ROOT
+(`all_units_of`: its sources and generated sources; a header or an absent file is none) or is a `.s` unit (assembled directly, no PP stage); the input has any other shape (keys other than `pp` and `unit`, a non-string value). The
+producing build is `Job.compile(..., pp_only=True)`: the plugins and the analysis plugin are not built (preprocessing loads none), the generated sources of ROOT are produced first as in its own build.
+Tests: `tests/test_pp_input.py` (each red case, `check` and the mount agree; the stage case, run on a farm: a header edit changes the step's key and input).
+
 ## Single file of an external (a document through a tool step)
 A run step's `inputs` entry `{"external": NAME, "path": FILE}` mounts ONE file of a declared external at `/in/N`. The external is pinned as above, by
 `{commit, tree_sha256}` over its whole checkout; `resolve_input` checks that hash, then reads FILE from the checked-out tree (red: the file is not in

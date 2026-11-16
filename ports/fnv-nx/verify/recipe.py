@@ -1849,11 +1849,13 @@ def run_errors(rec, root, files, roots, mine, seen, repo):
                     err += external_of_errors("run[%d].inputs" % i, p, root, rec, roots, repo)
                 elif is_include_of(p):
                     err += include_of_errors("run[%d].inputs" % i, p, root, rec, roots, repo)
+                elif is_pp(p):
+                    err += pp_errors("run[%d].inputs" % i, p, root, rec, roots, files, repo)
                 elif isinstance(p, dict) and set(p) == {"plugin"}:   # the built plugin of this root (its .so), mounted like a stage input
                     if not (tool and p["plugin"] in [x.get("name") for x in rec.get("plugins", []) if isinstance(x, dict)]):
                         err.append("run[%d].inputs: plugin %r is not declared in this root's `plugins` (or the step is no tool step)" % (i, p["plugin"]))
                 elif not (isinstance(p, dict) and set(p) == {"stage", "path"} and all(isinstance(v, str) for v in p.values())):
-                    err.append("run[%d].inputs: %r is neither a path, {external, path} nor {stage, path}" % (i, p))
+                    err.append("run[%d].inputs: %r is neither a path, {external, path}, {external_of, ...}, {include_of}, {pp, unit}, {plugin} nor {stage, path}" % (i, p))
         outs = g["outputs"]
         if not (isinstance(outs, list) and (outs or g.get("dirs")) and all(isinstance(o, str) and rel_ok(o) for o in outs)):
             err.append("run[%d].outputs must be a non-empty list of root-relative paths (a tool step may have only dirs)" % i)
@@ -2752,6 +2754,28 @@ class Job:
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def pp_tree(self, ws, ref):
+        """The input {pp: ROOT, unit: PATH} as one file: the unit.ii of the unit's PP stage in ROOT's own build (the same compiler, flags, defines and include closure that its CC
+        stage compiles, served by the stage key from the store), so a changed header is a changed input. -> tree of the file. Validation: pp_errors, the one rule."""
+        where = "%s: input" % self.root
+        errs = pp_errors(where, ref, self.root, self.rec, self.roots, self.files, self.repo)
+        if errs:
+            raise BuildRed({"stage": "pp:%s" % ref.get("pp", "?"), "exit": None, "stderr": errs})
+        p = Job(self.repo, ref["pp"], self.store, self.jobs, self.extcache)
+        pws = tempfile.mkdtemp(dir=ws)
+        _copy(self.repo, [f for f in p.files if under(f, ref["pp"])], ref["pp"], os.path.join(pws, "root"))
+        try:
+            p.externals(pws)
+            p.generate(pws)
+            p.run_all(pws)
+            got = p.compile(pws, [ref["unit"]], pp_only=True)
+        finally:
+            self.run, self.hit = self.run + p.run, self.hit + p.hit
+        if ref["unit"] not in got:
+            why = (p.red or p.failed or [{"stage": "pp:" + ref["unit"], "stderr": [str(p.blocked.get(ref["unit"], "not produced"))]}])[0]
+            raise BuildRed({"stage": "pp:%s:%s" % (ref["pp"], ref["unit"]), "exit": None, "stderr": ["the preprocessed text is not produced: %s" % why.get("stage")] + list(why.get("stderr", []))[-18:]})
+        return cas.ingest(got[ref["unit"]], self.store)
+
     def external_of_host(self, ws, ref):
         """-> host path of an {external_of, name, path} input: the owner's pinned external is fetched into the shared cache by its exact commit (checked against its tree_sha256, as
         Job.externals does for this root's own), then read by resolve_input, the one reader. The validation is external_of_errors, inside resolve_input."""
@@ -3150,6 +3174,8 @@ class Job:
                 ins.append({"at": at, "tree": cas.ingest(self.external_of_host(ws, ref), self.store)})
             elif is_include_of(ref):   # the include closure of another root: its tracked trees, repo-relative
                 ins.append({"at": at, "tree": self.include_of_tree(ref)})
+            elif is_pp(ref):   # the preprocessed text of a unit of another guest root: its PP stage, one file at /in/N
+                ins.append({"at": at, "tree": self.pp_tree(ws, ref)})
             else:   # {external, path} or {stage, path}: resolve_input is the one reader
                 host, _ = resolve_input(self.root, ref, self.repo, os.path.dirname(self.store), self.rec, self.extcache)
                 ins.append({"at": at, "tree": cas.ingest(host, self.store)})
@@ -3516,7 +3542,7 @@ class Job:
         -> tree of its /out."""
         return self.plugin_build(self.plugin_env(ws), ws, ANALYSIS_PLUGIN[0], ANALYSIS_PLUGIN[1], [])
 
-    def compile(self, ws, units):
+    def compile(self, ws, units, pp_only=False):
         rec, drv = self.rec, dict(zip(("c", "cxx"), self.drivers()))
         # KEEP GOING: a unit is built iff every input it declares is produced. A unit that is the output of a red generator, every unit
         # when a `uses` producer is red, and the C++ units when a plugin is red, are blocked by that stage (recorded, never built, never hidden).
@@ -3542,14 +3568,14 @@ class Job:
         guest = entry_of(self.roots, self.root + "@" + self.variant if self.variant else self.root).get("target") == "guest"
         pk = ("c", "cxx") if guest else ("cxx",)   # guest: the plugins are loaded by the C and the C++ front end alike
         try:
-            self.built = self.plugins(ws) if any(k in pk for k in kinds.values()) else []
+            self.built = self.plugins(ws) if any(k in pk for k in kinds.values()) and not pp_only else []   # PP loads no plugin
         except BuildRed as r:
             self.red.append(dict(r.args[0]))
             self.blocked.update({u: r.args[0]["stage"] for u, k in kinds.items() if k in pk})
             units = [u for u in units if u not in self.blocked]
             kinds = {u: k for u, k in kinds.items() if u in units}
             self.built = []
-        if self.analysis is None and guest and any(k != "asm" for k in kinds.values()):   # the analysis plugin is bound to the guest compiler: a host root has none
+        if self.analysis is None and guest and not pp_only and any(k != "asm" for k in kinds.values()):   # the analysis plugin is bound to the guest compiler: a host root has none
             try:
                 self.analysis = self.analysis_plugin(ws)
             except BuildRed as r:   # the gate objstub cannot judge the root: red and named, no unit is blocked by it
@@ -3581,6 +3607,14 @@ class Job:
                 builds[k].cc_flags = [f for n, _, fl in self.built if n in ok for f in fl] + list(self.aux)
                 builds[k].cc_inputs = [("/plug/" + n, t) for n, t, _ in self.built if n in ok]
 
+        if pp_only:   # {pp, unit} input: the preprocessed text of each unit, the PP stage of the one build above (no CC, no plugin)
+            out = {}
+            for u in units:
+                try:
+                    out[u] = builds[kinds[u]].pp_file(u)
+                except (sandbox.SbxError, unitstage.UnitError) as e:
+                    self.failed.append({"unit": u, "stage": getattr(e, "stage", "pp:" + u), "exit": None, "stderr": str(e)[-600:].splitlines()})
+            return out
         if self.shard:   # the shard rule (shard_of): this build compiles the units of its shard only; the partition is asserted from the unit list
             ukeys = {u: builds[kinds[u]].first_key(u) for u in units}
             parts = shard_partition(ukeys, self.shard[1])
@@ -4153,6 +4187,34 @@ def is_external_of(ref):
 def is_include_of(ref):
     """REF is the input form {"include_of": ROOT}: the tracked trees of ROOT's include closure (RECIPE.md "The include closure of a root")."""
     return isinstance(ref, dict) and set(ref) == {"include_of"} and isinstance(ref["include_of"], str)
+
+
+def is_pp(ref):
+    """REF is the input form {"pp": ROOT, "unit": PATH}: the preprocessed text of unit PATH of guest root ROOT (RECIPE.md "The preprocessed text of a unit")."""
+    return isinstance(ref, dict) and set(ref) == {"pp", "unit"} and isinstance(ref["pp"], str) and isinstance(ref["unit"], str)
+
+
+def pp_errors(where, ref, root, rec, roots, files, repo="."):
+    """[str]: the ONE rule of the `pp` form, called by check (run inputs) and by Job.pp_tree (the mount). Red: a ref of another shape; ROOT is not a root this recipe `uses`; ROOT is not an
+    admitted guest root; PATH is not a unit of ROOT that has a preprocessing stage (all_units_of: its sources and generated sources; a .s unit is assembled directly)."""
+    if not is_pp(ref):
+        return ["%s: %r is not {pp: ROOT, unit: PATH} (strings)" % (where, ref)]
+    owner, unit = ref["pp"], ref["unit"]
+    if owner not in {u.get("root") for u in (rec.get("uses") or []) if isinstance(u, dict)}:
+        return ["%s: pp %s is not a root this recipe `uses` (declare the dependency)" % (where, owner)]
+    if owner not in roots:
+        return ["%s: pp %s is not an admitted root" % (where, owner)]
+    if roots[owner].get("target") != "guest":
+        return ["%s: pp %s is not a guest root (target %r)" % (where, owner, roots[owner].get("target"))]
+    try:
+        orec = load_recipe(repo, roots, owner)
+    except (OSError, ValueError, RecipeError) as e:
+        return ["%s: the recipe of %s cannot be read: %s" % (where, owner, str(e)[:200])]
+    if unit not in all_units_of(orec, owner, files, roots, repo):
+        return ["%s: %s is not a unit of %s" % (where, unit, owner)]
+    if unit.endswith(".s"):
+        return ["%s: %s is a .s unit: it has no preprocessing stage" % (where, unit)]
+    return []
 
 
 def include_of_dirs(owner, roots, repo="."):

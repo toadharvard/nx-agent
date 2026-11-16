@@ -1006,6 +1006,19 @@
     "ports/fnv-nx/verify/unitstage.py"
    ]
   },
+  "test_pp_input.py": {
+   "references": [
+    {
+     "anchor": "## The preprocessed text of a unit",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py",
+    "ports/fnv-nx/verify/unitstage.py"
+   ]
+  },
   "test_ppkeys.py": {
    "references": [
     {
