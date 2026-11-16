@@ -43,6 +43,14 @@ def disp_only(md, text, T0, cov, r, bad=()):
     return any(op.type == 3 and op.mem.disp & 0xffffffff == int.from_bytes(text[o:o + 4], 'little') for op in ins.operands)       # 3 = X86_OP_MEM
 
 
+def data_proof(facts_dir, a):
+    """the proof id of a byte of class data-reloc: `data-reloc:<relocation site>` from the codemap row that covers it (one predicate with entries_on_data), else '-'."""
+    for l in open(os.path.join(facts_dir, 'codemap.tsv')):
+        f = l.rstrip('\n').split('\t')
+        if len(f) >= 4 and f[2] == 'data-reloc' and int(f[0], 16) <= a < int(f[0], 16) + int(f[1]): return 'data-reloc:' + f[3].split(':')[-1]
+    return '-'
+
+
 def entries_on_data(facts_dir):
     """INVARIANT (R3 refined): no universe entry starts on a byte that codemap.tsv classes as data named by a relocation. The universe and the codemap come from one rule, so an entry over table bytes
     would be a lifted body over data. -> sorted entry addresses violating it. Reads <facts>/universe.tsv and <facts>/codemap.tsv; writes the count into gate_codemap.json (key entries_on_data) and
