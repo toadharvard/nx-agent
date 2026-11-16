@@ -452,3 +452,8 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
 - 05:35: the trunk fac693694 (cand3b) is in; L1 w28 d193554fe fixed gamedata_fetch (one item at a time, cache freed, pinned = installed + framing).
   - w8 session_01KmtZKS8Qkj4RxpvezPAmzP: doing. Merges the trunk and w28 by the per-layer side rule, keeping the owner heads the trunk lacks (base3, L5 adba10d8e, L6A decb62ead), then reruns recipe.check, the gl4 sha and test_gamedata_fetch.
 - bottleneck: the w8 trunk merge; the L3a post-cand3 pack store | w8 working, no farms
+- 05:55: w8 7cb2352e9 rejected. Its L1 dirs were a hybrid: verify/genlaunch.py from the uncandidated L1 37e483aa6 (via base3) next to the trunk's recipe.py, 146 files different from the trunk, and the cause of the gl4 gen failure.
+  - Rule: every L1 path equals one L1 head, the trunk fac693694. Owner heads stay for lift/platform/loader/render. link.entry is declared from the sources (bootguest_entry, icfx_start).
+  - w8: redoing.
+  - Reported to L1: 37e483aa6 and w28 are a second L1 lineage; land them in the next candidate.
+- bottleneck: w8 redo; L1 next candidate (w28) for .gamedata_pins; the L3a post-cand3 pack store | w8 working, no farms
