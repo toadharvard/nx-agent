@@ -18,7 +18,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 mode, outpath = sys.argv[1], sys.argv[2]
 verify = sys.argv[3]   # the mounted verify directory (a declared input of the generator), always passed
-from verify import recipe  # noqa: E402   (the module path of a declared import root; the stage puts /imp on PYTHONPATH)
+from verify import plugsem as recipe  # noqa: E402   (the module path of a declared import root; the stage puts /imp on PYTHONPATH)
 
 t = json.load(open(os.path.join(verify, "targets.json")))
 pin = json.load(open(os.path.join(verify, "guest_compiler.json")))
