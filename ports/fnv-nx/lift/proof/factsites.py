@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """factsites: the site universe of the #UD classification (sdmfeat.py rows/partition), derived from L3a's code universe and from nothing else.
 
-    python3 -I factsites.py --exe FalloutNV.exe --modules modules.tsv --dir DIR [--dir DIR ...] --facts FACTS_DIR --out SITES.tsv
+    python3 -I factsites.py --exe FalloutNV.exe --modules modules.tsv --dir DIR [--dir DIR ...] --facts FACTS_DIR --out SITES.tsv [--lift LIFT_DIR]
 
 Rule (one source, CLAUDE.md "defects impossible by construction" 1, 2, 4): a site is an instruction that the lift facts decode, read from the image as the loader maps it (relocations applied at the table's assigned base, never the raw file). The decoded instructions of an image are the nodes of
 L3a's graph over the facts (tools/udcert.py Graph: the facts' ranges.tsv, recursive descent from every entry, one decoder); this tool imports that graph and adds only the shape key
@@ -15,7 +15,8 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(HERE)); sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'tools')); sys.path.insert(0, HERE)
+LIFT = sys.argv[sys.argv.index('--lift') + 1] if '--lift' in sys.argv else os.path.dirname(HERE)      # the lift tree (a recipe stage mounts its declared inputs at /in/<repo path>, the tool's own root at /tool)
+sys.path[:0] = [HERE, os.path.join(LIFT, 'proof'), os.path.join(LIFT, 'tools'), LIFT]
 import imageset  # noqa: E402
 from proof import shape  # noqa: E402
 import udcert as U  # noqa: E402
@@ -48,7 +49,7 @@ def image_sites(pe_path, facts, load_base):
 def main(argv):
     ap = argparse.ArgumentParser()
     ap.add_argument('--exe', required=True); ap.add_argument('--modules', required=True); ap.add_argument('--dir', action='append', required=True)
-    ap.add_argument('--facts', required=True); ap.add_argument('--out', required=True)
+    ap.add_argument('--facts', required=True); ap.add_argument('--out', required=True); ap.add_argument('--lift')
     a = ap.parse_args(argv)
     ims = imageset.images(a.exe, a.modules, a.dir); ab = imageset.assigned(a.modules)
     rows, shas = [], []
