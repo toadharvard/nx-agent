@@ -2973,3 +2973,9 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - Split: the first entry, from the declared set and files only, writes modules.tsv, modules.c, tls, exports and each image's import NAMES from the PE directory. `modules iat`, with bridge.tsv as input, writes the keys and iat tables.
   - reached reads the import names from the first entry, so there is no cycle.
 - w28-c5 heads: 2276c64a3 (gate_pure, empty --lib) and 919f09277 (root-owned rows).
+- New worker w29 (session_01KmtZKUxqdNhZGVjAtF3F1K, claude/fnv-l1-contract-w29, Sonnet, doing):
+  - objstub constants from `.fnvnx.const` records in the product object. This was L5's proposal, accepted, and it replaces constants.tsv and --probe.
+  - ENTRY moves to guest_image.ld; the lift/rt BFD assert is to be named.
+  - Why the reach gate gives no output.
+  - objstub excludes objects of declared external library trees, by provenance (FreeType).
+- Test doubles routed: sm_link `main` (L6), tests/bootrt `fnvnx_reach_violation` (L4).
