@@ -2339,3 +2339,6 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - sprintf/_snprintf/sscanf must name the va forwarders (L5);
   - _CI* RET=v awaits L3a's confirmation.
 - The RET diff over objects needs the farm. test_gate_imports is to be rewritten (w28).
+- L3a confirms that the _CI* bodies (msvcrt_ci.cc CI1/CI2, per Wine math.c CREATE_FPU_FUNC1/2) and every lift/rt void fnvl_* are guest entries: they own the x87 state, their arguments and the return through c->ra.
+  - Ruling: the export record carries the ABI kind: func (marshalled by decltype), entry (guest-state body, no marshalling) or data. An entry that is not void(void) is red.
+  - w28 implements it; L3a re-marks its records.
