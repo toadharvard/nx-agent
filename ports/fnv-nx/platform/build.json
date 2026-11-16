@@ -235,8 +235,7 @@
     "/uses/ports/fnv-nx/bridgefacts/com/COM_ROWS",
     "/uses/ports/fnv-nx/bridgefacts/com/COM_WORDS",
     "/out/com",
-    "/in/ports/fnv-nx/platform/crt/cxx_types.tsv",
-    "/in/ports/fnv-nx/contract"
+    "/in/ports/fnv-nx/platform/crt/cxx_types.tsv"
    ],
    "inputs": [
     "ports/fnv-nx/platform/crt/cxx_types.tsv",
