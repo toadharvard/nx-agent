@@ -670,3 +670,11 @@ After the first frame:
   - At L3a base3 330e873c7, all three decltype sites are fnvnx_dispatch.
   - L1's rule: the writer takes the declaration from the tree (DECL_SOURCE_LOCATION). It goes to w2 together with ENTRY1-ATOMIC in C.
   - The recipe-path pin (w3) is built from the plugins head that has them, and goes to L1 with proof (b) and the deletion of the old path.
+- 2026-11-16 04:20Z: w2 ce44e31fa. DECLTYPE-PLUGINSYM a1323a228: a plugsym row is written whenever a site is rewritten.
+  - The platform root, @time and @vclock build green on d1a92e26 through the recipe: 336 objects.
+  - sympair rows: 23136 / 23136 / 23168. nodecor: 852 per root, 2556 in total (real16 1482, int8 438, int16 330, int64 288, extern-in-internal 18).
+  - Fnparm rows: 11 per root, 0 nodecor.
+  - test_layout 204, with 1 failure (va_list, CTYPE-FE, w3).
+  - test_plugins 85/88. The 3 failures are L1 rule tests on the old semantics and went to L1. The __builtin_apply result varies between runs; w2 is isolating it.
+  - New for w2: NAMES-INTN, sized-integer MSVC codes keyed by (precision, signedness) through DATAMODEL. The count of nodecor rows the exe or a module names must be 0.
+  - Still owed: the named decltype diagnostic, msvcrt on w28, ENTRY1-ATOMIC in C.
