@@ -10,6 +10,8 @@ def mov(c):
     if any(o.k == 'r' and o.name[:2] in ('cr', 'dr') for o in c.ops):      # MOV to/from CRn / DRn: CPL 0 only (0F 20..23), KiTrap0D's table decides the status
         from proof import forms_sys
         return forms_sys.privileged(c)
+    if c.ops[1].k == 'r' and c.ops[1].name in dsl.SEGS:      # MOV r/m16, Sreg / MOV r32, Sreg (SDM 2B MOV): DEST := the segment selector (the pre-state sel_<reg>, 16 bits), zero-extended into a 32-bit register, a 16-bit quantity in memory
+        sel = V('sel_' + c.ops[1].name, 16); return wr(c.F, c.ops[0], zext(sel, c.ops[0].w) if c.ops[0].w > 16 else sel)
     wr(c.F, c.ops[0], rd(c.ops[1], c.ops[0].w))
 @handler('movzx', 'movsx')
 def movx(c): wr(c.F, c.ops[0], (zext if c.m == 'movzx' else sext)(rd(c.ops[1]), c.ops[0].w))

@@ -169,6 +169,10 @@ def check(key):
         try: rec = x86sys.load()
         except x86sys.Undecided as e: return 'uncertified', 'uncertified: %s' % e
         return check_far(key, fk, rec)
+    import sysspec_gap
+    if sysspec_gap.family(sysspec_gap.decode(key)) is not None:      # bswap, xlat, mov m16 from Sreg, bts: claimed by decoding (sysspec_gap.py, SDM quotes checked against sysspec_gap_pages.tsv)
+        try: return sysspec_gap.check(key)
+        except x86sys.Undecided as e: return 'uncertified', 'uncertified: %s' % e
     if m not in PRIV and m not in COND and m not in CLASS_B and m not in DECL and m not in LARFAM and not needs_any(m):
         return 'not-covered', 'no spec for %s' % m
     if m in CLASS_B:
@@ -182,6 +186,9 @@ def check(key):
         return 'uncertified', 'uncertified: %s' % why
     if m in DECL:
         return check_decl(key, m, rec)
+    import sysspec_int
+    if m == 'int' and sysspec_int.claims(key):                       # INT n: the 256 vectors against the record rows (sysspec_int.py, quotes checked against sysspec_int_pages.tsv)
+        return sysspec_int.check(key)
     if x86sys.get(rec, 'cr4', 'umip') != 0:
         return 'FAILED(facts)', 'cr4.umip is set on the declared machine: UMIP semantics are not specified'
     if m not in PRIV and m not in COND and m not in CLASS_B:
