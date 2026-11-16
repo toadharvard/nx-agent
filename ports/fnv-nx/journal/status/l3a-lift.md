@@ -1889,3 +1889,7 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - lift/sdm and lift/sdmrows stay: the 8 fnvlift x86sys tests and test_x87_exc_routing still read SDMROWS. Revisit after the first frame.
 - x87 exception routing: base3 eee971323 (w8; FXF is the one path, 12 helper sites, the FCOM/FUCOM Q class). Doing: C1 round-up on the carrier fast paths.
 - Doing (w13): one liftsrcgen include function for every lifted-text root (the imptest root lacked platform/include).
+- The exe facts run was red at e9352af11 after 6,084 s: "R3 refinement does not converge" (a 2-cycle of an antitone G).
+  - Fix 8b1dfbab9 (w7): stop at a fixed point or a 2-cycle and take the smaller L, which satisfies L ⊆ G(L), so the universe is a sound superset. Test test_r3_refine.
+  - Doing (farm d3dx9): exe, d3dx9_38 and d3dx9_31 in parallel at 8b1dfbab9. Then w7 publishes the all-7 universe pin for L1.
+- base3 @2841c8abf (w8): C1 = |r|>|x| on the fist/frndint fast paths.
