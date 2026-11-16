@@ -32,6 +32,11 @@ from pycparser import c_parser, c_ast
 ARM_RMODE = z3.BitVec('fpcr_rmode', 2)
 FPCR_DN = z3.BitVec('fpcr_dn', 1)
 FPCR_FZ = z3.BitVec('fpcr_fz', 1)
+FPCR_TRAP = z3.BitVec('fpcr_trap', 6)      # FPCR.IDE, IXE, UFE, OFE, DZE, IOE (bits 15, 12..8): FPProcessException traps when the enable bit of the exception is set; the terms are those of all six clear
+FPSR_IN = z3.BitVec('fpsr_in', 64)         # the FPSR a function starts with: its cumulative bits (IOC 0, DZC 1, OFC 2, UFC 3, IXC 4, IDC 7) are state, updated by every FP operation (`fpflags`)
+# the FPCR a function starts with: DN, FZ, RMode and the six enables as named above, every other bit 0.  FPCR.AH, FIZ, NEP (FEAT_AFP, Armv8.7), FZ16 (FEAT_FP16), EBF (FEAT_EBF16) are absent on the
+# console CPU (Cortex-A57, armv8-a: `ah_reserved`), Len and Stride are not in AArch64 (Arm ARM FPCR): they read as 0
+FPCR_INIT = z3.Concat(z3.BitVecVal(0, 38), FPCR_DN, FPCR_FZ, ARM_RMODE, z3.BitVecVal(0, 6), z3.Extract(5, 5, FPCR_TRAP), z3.BitVecVal(0, 2), z3.Extract(4, 0, FPCR_TRAP), z3.BitVecVal(0, 8))
 TARGETS = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'verify', 'targets.json')
 
 
@@ -100,6 +105,22 @@ def split_items(t):
     return items
 
 
+SYSREGS = ('fpsr', 'fpcr')      # the system registers that are state of the model (Machine.fpsr, Machine.fpcr)
+ASM_RE = re.compile(r'__asm__\s+volatile\s*\(\s*"(mrs %0, (\w+)|msr (\w+), %0)"\s*:\s*(?:"=r"\s*\(([^()]*)\))?\s*(?::\s*(?:"r"\s*\(([^()]*)\))?\s*)?\)')
+
+
+def asm_sysreg(text):
+    """One mapping, asm body text -> Arm ARM instruction semantics (grammar mapping like `__int128`): `__asm__ volatile("mrs %0, R" : "=r"(X))` is `X = MRS(R)` (Arm ARM, A64 System instructions:
+    MRS, Move System Register to general-purpose register) and `__asm__ volatile("msr R, %0" :: "r"(X))` is `MSR(R, X)`, for R a system register the model holds as state (SYSREGS).  The
+    statement becomes the call `__arm_mrs_R()` / `__arm_msr_R(X)` that the executor evaluates (BUILTINS).  An asm statement of any other text stays and its function is refused."""
+    def sub(m):
+        reg = m.group(2) or m.group(3)
+        if reg not in SYSREGS: return m.group(0)
+        if m.group(2): return '%s = __arm_mrs_%s()' % (m.group(4), reg)
+        return '__arm_msr_%s(%s)' % (reg, m.group(5))
+    return ASM_RE.sub(sub, text)
+
+
 FUNC_RE = re.compile(r'^((?:static\s+|inline\s+|extern\s+)*[A-Za-z_][\w\s\*]*?)\b([A-Za-z_]\w*)\s*\(([^{;]*)\)\s*\{', re.S)
 
 
@@ -132,6 +153,7 @@ class Source:
             text = user_text(p)
             text = re.sub(r'unsigned\s+__int128', 'u128', text)       # grammar mapping: pycparser has no __int128 (GCC manual "__int128"); u128 is a typedef-name of ctrans
             text = strip_attrs(text)
+            text = asm_sysreg(text)
             text = re.sub(r'\bregister\s+struct\s+cpu\s*\*\s*c\s+asm\s*\([^)]*\)\s*;', '', text)
             for it in split_items(text):
                 head = it.split('{')[0]
@@ -210,8 +232,8 @@ def kindof(spec_names):
     return s
 
 
-def rm_term():
-    r = ARM_RMODE
+def rm_term(r=None):
+    r = ARM_RMODE if r is None else r
     return z3.If(r == 0, z3.RNE(), z3.If(r == 1, z3.RTP(), z3.If(r == 2, z3.RTN(), z3.RTZ())))
 
 
@@ -242,11 +264,11 @@ def quiet(e, t):
 def defnan(t): return z3.BitVecVal(0x7FF8000000000000 if t[1] == 64 else 0x7FC00000, t[1])
 
 
-def fop(kind, args, t):
+def fop(kind, args, t, rmode=None):
     """one FP operation `kind` (a z3 FPA constructor name) on operand bit patterns of type t: FPA when no operand is NaN, else Arm FPProcessNaNs; a NaN FPA result is the
     default NaN (invalid operation).  Arm ARM DDI 0487 'FPProcessNaNs', 'FPDefaultNaN'; FPCR.DN = 0."""
     fps = [tofp(a, t) for a in args]
-    rm = rm_term()
+    rm = rm_term(rmode)
     if kind == 'add': r = z3.fpAdd(rm, *fps)
     elif kind == 'sub': r = z3.fpSub(rm, *fps)
     elif kind == 'mul': r = z3.fpMul(rm, *fps)
@@ -265,6 +287,94 @@ def fop(kind, args, t):
     return out
 
 
+# ---------------------------------------------------------------- the cumulative exception bits of the FPSR
+# Source (pinned): Arm A-profile A64 ISA XML 2023-09, ISA_A64_xml_A_profile-2023-09.tar.gz sha256 7f2092a1416fa1f8b784e96fbc7cdd67b2ce81f84426968279694f96f1b11596, file shared_pseudocode.xml
+# (the pseudocode of DDI 0487 as Arm publishes it); the function of every row is named.  AH = 0 (FEAT_AFP absent, `ah_reserved`), so every `altfp` branch is the false one.
+#   FPProcessException: FPSR<cumul> = 1 with cumul IOC 0, DZC 1, OFC 2, UFC 3, IXC 4, IDC 7 (no trap: the six enables are 0, obligation FPCR_TRAP)
+#   FPUnpackBase: the IDC bit (FPExc_InputDenorm) is raised only when `fz` (FPCR.FZ = 1) flushes a denormal input; FPCR.FZ = 0 (obligation), so IDC is never raised, and a denormal input is
+#                 FPType_Denormal with its exact value
+#   FPProcessNaN / FPProcessNaNs: IOC for a signalling NaN operand (type1 SNaN, or type2 SNaN; a QNaN alone raises nothing)
+#   FPAdd/FPSub/FPMul/FPDiv/FPSqrt: IOC for the invalid operation (inf + -inf, 0 * inf, 0 / 0, inf / inf, sqrt of a negative nonzero or -inf), DZC for x / 0 with x finite and nonzero
+#   FPRoundBase (FPRound, FPRoundCV), non-altfp: with the exact value op != 0, E exponent bits, F fraction bits, minimum_exp:
+#       exponent = floor(log2 |op|); biased_exp = max(exponent - minimum_exp + 1, 0); error = the part of the denormal-grid / normal-grid quotient that rounding drops
+#       UFC  iff biased_exp == 0 and error != 0          (tininess before rounding: |op| < 2^minimum_exp)
+#       round up as the mode says; OFC iff biased_exp >= 2^E - 1 after rounding, with unbounded exponent range (and then error := 1)
+#       IXC  iff error != 0 (after the overflow rule)
+#   FPCompare: IOC for a signalling NaN, and for a QNaN when signal_nans (FCMPE, the ordered relations; GCC aarch64: aarch64_select_cc_mode gives CCFPEmode to < <= > >=, CCFPmode to == !=)
+#   FPRoundInt (FRINTN/M/P/Z, exact = FALSE): IOC for a signalling NaN, nothing else.  FPToFixed (FCVTZS/FCVTZU): IXC iff error != 0 (the C range obligation excludes NaN and overflow)
+#   FPConvert (FCVT): IOC for a signalling NaN, FPRoundCV for a finite nonzero operand.  FixedToFP (SCVTF/UCVTF): FPRound of the integer, IXC iff inexact.
+# Class rule for the rounding bits: the unbounded-exponent rounding of the exact result to F+1 bits is the FPA operation in the format with the same precision and exponent width 15 (`wide`);
+# it differs from the pseudocode's exact value only by the rounding the pseudocode applies too, so (overflow: its magnitude >= 2^(emax+1); tininess: the round-toward-zero value is below the
+# smallest normal, which a value >= 2^minimum_exp never is) and (inexact: the round-toward-positive and round-toward-negative results differ iff the exact value is not representable).
+FPFMT = {64: (53, 1024, 1022), 32: (24, 128, 126)}      # significand bits, emax + 1, -minimum_exp
+
+
+def fpbits(ioc=None, dzc=None, ofc=None, ufc=None, ixc=None):
+    """the FPSR cumulative bits as a 64-bit vector (IOC bit 0, DZC 1, OFC 2, UFC 3, IXC 4; IDC bit 7 is never set, FPUnpackBase with FPCR.FZ = 0)"""
+    b = lambda x: z3.BitVecVal(0, 1) if x is None else z3.If(x, z3.BitVecVal(1, 1), z3.BitVecVal(0, 1))
+    return z3.ZeroExt(59, z3.Concat(b(ixc), b(ufc), b(ofc), b(dzc), b(ioc)))
+
+
+def _wide(sb): return z3.FPSort(15, sb)
+
+
+def _const(sb, e2, sign=0):
+    """the wide-format value 2^e2 (e2 may be negative): exponent field 16383 + e2, fraction 0"""
+    return z3.fpBVToFP(z3.BitVecVal(((sign << 15) | (16383 + e2)) << (sb - 1), 16 + sb - 1), _wide(sb))
+
+
+def _round_bits(rm, narrow_of, wide_of, sb, emax1, emin, fin):
+    """FPRoundBase's OFC, UFC, IXC.  narrow_of(mode) is the operation in the operand format rounded by `mode`, wide_of(mode) the same operation in the wide format; FIN says the operation reaches FPRound"""
+    rw, rz = wide_of(rm), wide_of(z3.RTZ())
+    ofc = z3.And(fin, z3.fpGEQ(z3.fpAbs(rw), _const(sb, emax1)))
+    inex = z3.Not(z3.fpEQ(narrow_of(z3.RTP()), narrow_of(z3.RTN())))
+    ufc = z3.And(fin, z3.fpLT(z3.fpAbs(rz), _const(sb, -emin)), inex)
+    return ofc, ufc, z3.And(fin, inex)
+
+
+def fpflags(kind, args, t, rmode=None):
+    """the FPSR cumulative bits (64-bit vector) the operation `kind` raises on the operand patterns ARGS of type t (FPCR.DN = FZ = 0, traps off), per the rows above.
+    kinds: add sub mul div sqrt, roundeven floor ceil trunc, cmp (fcmp), cmpe (fcmpe)"""
+    sb, emax1, emin = FPFMT[t[1]]
+    nan = [nan_(a, t) for a in args]; snan = [snan_(a, t) for a in args]
+    anynan, anysnan = z3.Or(*nan) if len(nan) > 1 else nan[0], z3.Or(*snan) if len(snan) > 1 else snan[0]
+    if kind in ('cmp', 'cmpe'): return fpbits(ioc=anynan if kind == 'cmpe' else anysnan)
+    if kind in ('roundeven', 'floor', 'ceil', 'trunc'): return fpbits(ioc=anysnan)
+    rm = rm_term(rmode)
+    fps = [tofp(a, t) for a in args]
+    wfps = [z3.fpToFP(z3.RNE(), x, _wide(sb)) for x in fps]
+    opf = {'add': z3.fpAdd, 'sub': z3.fpSub, 'mul': z3.fpMul, 'div': z3.fpDiv}.get(kind)
+    narrow_of = (lambda m: opf(m, *fps)) if opf else (lambda m: z3.fpSqrt(m, *fps))
+    wide_of = (lambda m: (opf or z3.fpSqrt)(m, *wfps))
+    r = narrow_of(rm)
+    ioc = z3.Or(anysnan, z3.And(z3.Not(anynan), z3.fpIsNaN(r)))
+    dzc = z3.And(z3.Not(anynan), z3.fpIsZero(fps[1]), z3.Not(z3.fpIsZero(fps[0])), z3.Not(z3.fpIsInf(fps[0]))) if kind == 'div' else None
+    rw = wide_of(rm)
+    fin = z3.And(z3.Not(anynan), z3.Not(z3.Or(*[z3.fpIsInf(x) for x in fps])), z3.Not(z3.fpIsNaN(rw)), z3.Not(z3.fpIsInf(rw)), z3.Not(z3.fpIsZero(rw)))
+    ofc, ufc, ixc = _round_bits(rm, narrow_of, wide_of, sb, emax1, emin, fin)
+    return fpbits(ioc, dzc, ofc, ufc, ixc)
+
+
+def fpflags_cvt(src, dst, e, rmode=None):
+    """FPConvert / FixedToFP / FPToFixed: src and dst are ('f', bits) or ('i', bits, signed); E is the operand pattern"""
+    rm = rm_term(rmode)
+    if src[0] == 'f' and dst[0] == 'f':
+        sn = snan_(e, src)
+        if dst[1] >= src[1]: return fpbits(ioc=sn)
+        sb, emax1, emin = FPFMT[dst[1]]
+        x = tofp(e, src)
+        fin = z3.Not(z3.Or(nan_(e, src), z3.fpIsInf(x), z3.fpIsZero(x)))
+        ofc, ufc, ixc = _round_bits(rm, lambda m: z3.fpToFP(m, x, fpsort(dst)), lambda m: z3.fpToFP(m, x, _wide(sb)), sb, emax1, emin, fin)
+        return fpbits(sn, None, ofc, ufc, ixc)
+    if src[0] == 'i' and dst[0] == 'f':
+        sb, emax1, emin = FPFMT[dst[1]]
+        cv = z3.fpSignedToFP if src[2] else z3.fpUnsignedToFP
+        ofc, ufc, ixc = _round_bits(rm, lambda m: cv(m, e, fpsort(dst)), lambda m: cv(m, e, _wide(sb)), sb, emax1, emin, e != 0)
+        return fpbits(None, None, ofc, ufc, ixc)
+    x = tofp(e, src)
+    return fpbits(ixc=z3.And(z3.Not(nan_(e, src)), z3.Not(z3.fpEQ(x, z3.fpRoundToIntegral(z3.RTZ(), x)))))
+
+
 # ---------------------------------------------------------------- the executor
 class Frame:
     def __init__(self, name, L):
@@ -272,7 +382,7 @@ class Frame:
 
 
 class Result:
-    def __init__(self, ret, outs, ub, dom=()): self.ret, self.outs, self.ub, self.dom = ret, outs, ub, list(dom)
+    def __init__(self, ret, outs, ub, dom=(), fpsr=None, fpcr=None): self.ret, self.outs, self.ub, self.dom, self.fpsr, self.fpcr = ret, outs, ub, list(dom), fpsr, fpcr
 
 
 class Lazy(dict):
@@ -295,6 +405,7 @@ class Machine:
         self.G = {}               # globals: 'c' -> struct cpu (fields free inputs)
         self.ub = []
         self.dom = []
+        self.fpsr, self.fpcr, self.rmode = FPSR_IN, FPCR_INIT, ARM_RMODE
         self.fresh = 0
         for e in tast.ext: self.declare(e)
 
@@ -392,7 +503,8 @@ class Machine:
             return V((z3.SignExt if s[2] else z3.ZeroExt)(t[1] - s[1], v.e), t)
         if 'f' in (t[0], s[0]): self.fpdom(fr)
         if t[0] == 'f' and s[0] == 'i':
-            x = (z3.fpSignedToFP if s[2] else z3.fpUnsignedToFP)(rm_term(), v.e, fpsort(t))
+            x = (z3.fpSignedToFP if s[2] else z3.fpUnsignedToFP)(rm_term(self.rmode), v.e, fpsort(t))
+            self.raise_(fr, fpflags_cvt(s, t, v.e, self.rmode))
             return V(frombits(x), t)
         if t[0] == 'i' and s[0] == 'f':
             x = tofp(v.e, s); b = t[1]; sig = s[1] == 64
@@ -400,17 +512,32 @@ class Machine:
             hi = (1 << (b - 1)) if t[2] else (1 << b)
             ok = z3.And(z3.Not(z3.fpIsNaN(x)), z3.fpGT(x, z3.FPVal(float(lo), fpsort(s))), z3.fpLT(x, z3.FPVal(float(hi), fpsort(s))))
             self.ub.append(z3.Implies(fr.L, ok))
+            self.raise_(fr, fpflags_cvt(s, t, v.e, self.rmode))
             return V((z3.fpToSBV if t[2] else z3.fpToUBV)(z3.RTZ(), x, z3.BitVecSort(b)), t)
         if t[0] == 'f' and s[0] == 'f':
+            self.raise_(fr, fpflags_cvt(s, t, v.e, self.rmode))
             if s[1] == 32 and t[1] == 64:          # Arm FCVT: NaN keeps its payload, quieted
                 nanr = z3.Concat(z3.Extract(31, 31, v.e), z3.BitVecVal(0x7FF, 11), z3.BitVecVal(1, 1), z3.Extract(21, 0, v.e), z3.BitVecVal(0, 29))
                 return V(z3.If(nan_(v.e, s), nanr, frombits(z3.fpToFP(z3.RNE(), tofp(v.e, s), z3.Float64()))), t)
             nanr = z3.Concat(z3.Extract(63, 63, v.e), z3.BitVecVal(0xFF, 8), z3.BitVecVal(1, 1), z3.Extract(50, 29, v.e))
-            return V(z3.If(nan_(v.e, s), nanr, frombits(z3.fpToFP(rm_term(), tofp(v.e, s), z3.Float32()))), t)
+            return V(z3.If(nan_(v.e, s), nanr, frombits(z3.fpToFP(rm_term(self.rmode), tofp(v.e, s), z3.Float32()))), t)
         raise Unsupported('cast %s -> %s' % (s, t))
 
     def fpdom(self, fr):
-        if fr is not None: self.dom.append(z3.Implies(fr.L, z3.And(FPCR_DN == 0, FPCR_FZ == 0)))
+        if fr is not None:
+            f = self.fpcr
+            self.dom.append(z3.Implies(fr.L, z3.And(z3.Extract(25, 25, f) == 0, z3.Extract(24, 24, f) == 0, z3.Extract(15, 15, f) == 0, z3.Extract(12, 8, f) == 0)))
+
+    def raise_(self, fr, bits):
+        """FPProcessException: the cumulative bits BITS (fpflags) are set in the FPSR when the path condition holds"""
+        if fr is not None: self.fpsr = z3.If(fr.L, self.fpsr | bits, self.fpsr)
+
+    def msr(self, fr, reg, v):
+        """MSR <reg>, Xt (Arm ARM, A64 System instructions: Move general-purpose register to System register): FPSR and FPCR are the whole 64-bit register value"""
+        x = self.cast(v, I(64, 0), fr).e
+        if reg == 'fpsr': self.fpsr = z3.If(fr.L, x, self.fpsr)
+        else:
+            self.fpcr = z3.If(fr.L, x, self.fpcr); self.rmode = z3.If(fr.L, z3.Extract(23, 22, x), self.rmode)
 
     def promote(self, v):
         if v.t[0] == 'i' and v.t[1] < 32: return self.cast(v, INT, None)
@@ -427,8 +554,9 @@ class Machine:
         else: t = I(ta[1], 0)
         return self.cast(a, t, fr), self.cast(b, t, fr)
 
-    def truth(self, v):
+    def truth(self, v, fr=None):
         if v.t[0] == 'i': return v.e != 0
+        self.raise_(fr, fpflags('cmp', [v.e], v.t))      # x != 0.0 is FCMP against zero
         return z3.Not(z3.fpIsZero(tofp(v.e, v.t)))
 
     def bool_(self, c): return V(z3.If(c, z3.BitVecVal(1, 32), z3.BitVecVal(0, 32)), INT)
@@ -523,6 +651,16 @@ class Machine:
         return v
 
     def e_ArrayRef(self, n, fr):
+        p = self.eval(n.name, fr)
+        if isinstance(p, Ptr) and isinstance(p.cont, list):
+            i = self.eval(n.subscript, fr)
+            if not z3.is_bv_value(z3.simplify(i.e)) and p.key == 0 and p.cont and all(isinstance(x, V) and x.t == p.cont[0].t for x in p.cont):
+                # a read at a symbolic index of an array of scalars (C11 6.5.2.1): the selected element; an index outside the array is undefined (J.2), an obligation
+                idx = self.cast(i, I(64, 0), fr).e if i.t[1] != 64 else i.e
+                self.ub.append(z3.Implies(fr.L, z3.ULT(idx, z3.BitVecVal(len(p.cont), 64))))
+                r = p.cont[-1].e
+                for j in reversed(range(len(p.cont) - 1)): r = z3.If(idx == j, p.cont[j].e, r)
+                return V(r, p.cont[0].t)
         cont, key, _ = self.lval(n, fr)
         return cont[key]
 
@@ -551,7 +689,7 @@ class Machine:
             cont[key] = self.guard(fr, old, new)
             return old if op.startswith('p') else new
         v = self.eval(n.expr, fr)
-        if op == '!': return self.bool_(z3.Not(self.truth(v)))
+        if op == '!': return self.bool_(z3.Not(self.truth(v, fr)))
         v = self.promote(v)
         if op == '-':
             if v.t[0] == 'f': return V(v.e ^ z3.BitVecVal(1 << (v.t[1] - 1), v.t[1]), v.t)
@@ -577,7 +715,11 @@ class Machine:
         t = a.t
         if t[0] == 'f':
             self.fpdom(fr)
-            if op in ('+', '-', '*', '/'): return V(fop({'+': 'add', '-': 'sub', '*': 'mul', '/': 'div'}[op], [a.e, b.e], t), t)
+            if op in ('+', '-', '*', '/'):
+                k = {'+': 'add', '-': 'sub', '*': 'mul', '/': 'div'}[op]
+                self.raise_(fr, fpflags(k, [a.e, b.e], t, self.rmode))
+                return V(fop(k, [a.e, b.e], t, self.rmode), t)
+            self.raise_(fr, fpflags('cmp' if op in ('==', '!=') else 'cmpe', [a.e, b.e], t))
             x, y = tofp(a.e, t), tofp(b.e, t)
             c = {'<': z3.fpLT, '>': z3.fpGT, '<=': z3.fpLEQ, '>=': z3.fpGEQ, '==': z3.fpEQ}.get(op)
             if op == '!=': return self.bool_(z3.Not(z3.fpEQ(x, y)))
@@ -606,9 +748,9 @@ class Machine:
     def e_BinaryOp(self, n, fr):
         op = n.op
         if op in ('&&', '||'):
-            a = self.truth(self.eval(n.left, fr)); save = fr.L
+            a = self.truth(self.eval(n.left, fr), fr); save = fr.L
             fr.L = z3.And(save, a if op == '&&' else z3.Not(a))
-            b = self.truth(self.eval(n.right, fr)); fr.L = save
+            b = self.truth(self.eval(n.right, fr), fr); fr.L = save
             return self.bool_(z3.And(a, b) if op == '&&' else z3.Or(a, b))
         a, b = self.eval(n.left, fr), self.eval(n.right, fr)
         if isinstance(a, Ptr) and isinstance(b, V) and op in ('+', '-'):
@@ -619,7 +761,7 @@ class Machine:
         return self.arith(op, a, b, fr)
 
     def e_TernaryOp(self, n, fr):
-        c = self.truth(self.eval(n.cond, fr)); save = fr.L
+        c = self.truth(self.eval(n.cond, fr), fr); save = fr.L
         fr.L = z3.And(save, c); a = self.eval(n.iftrue, fr)
         fr.L = z3.And(save, z3.Not(c)); b = self.eval(n.iffalse, fr); fr.L = save
         if isinstance(a, V) and isinstance(b, V):
@@ -679,7 +821,13 @@ class Machine:
         if isinstance(n.type, c_ast.FuncDecl): return
         v = self.zero(t)
         if n.init is not None:
-            if isinstance(n.init, c_ast.InitList): raise Unsupported('initializer list')
+            if isinstance(n.init, c_ast.InitList):
+                if t[0] != 'a' or t[1][0] not in 'if': raise Unsupported('initializer list')      # C11 6.7.9: an array of scalars, the members in order, the rest zero
+                v = self.zero(t)
+                for i, ie in enumerate(n.init.exprs):
+                    if isinstance(ie, c_ast.InitList) or i >= len(v): raise Unsupported('initializer list')
+                    v[i] = self.cast(self.eval(ie, fr), t[1], fr)
+                fr.vars[n.name] = v; return
             r = self.eval(n.init, fr)
             v = self.cast(r, t, fr) if isinstance(r, V) and t[0] in 'if' else r
             if isinstance(v, dict): v = self.copy(v)
@@ -691,7 +839,7 @@ class Machine:
     def s_ExprList(self, n, fr): self.eval(n, fr)
 
     def s_If(self, n, fr):
-        c = self.truth(self.eval(n.cond, fr)); L0 = fr.L
+        c = self.truth(self.eval(n.cond, fr), fr); L0 = fr.L
         fr.L = z3.And(L0, c); self.run(n.iftrue, fr); Lt = fr.L
         fr.L = z3.And(L0, z3.Not(c))
         if n.iffalse is not None: self.run(n.iffalse, fr)
@@ -754,7 +902,7 @@ class Machine:
         step = n.next.exprs if isinstance(n.next, c_ast.ExprList) else [n.next]
         while True:
             Lc = fr.L; fr.L = z3.BoolVal(True)
-            c = z3.simplify(self.truth(self.eval(n.cond, fr))); fr.L = Lc
+            c = z3.simplify(self.truth(self.eval(n.cond, fr), fr)); fr.L = Lc
             if not (z3.is_true(c) or z3.is_false(c)): raise Unsupported('loop bound not constant')
             if z3.is_false(c): break
             nloop += 1
@@ -772,11 +920,11 @@ class Machine:
     # -- public
     def apply(self, name, args):
         """execute function `name` on `args` (V / dict / Ptr values); -> Result(ret, outs, ub), outs = the final contents of every pointer argument"""
-        self.ub = []; self.dom = []
+        self.ub = []; self.dom = []; self.fpsr, self.fpcr, self.rmode = FPSR_IN, FPCR_INIT, ARM_RMODE
         fd = self.funcs[name]
         fr = Frame('top', z3.BoolVal(True))
         ret = self.call(fd, args, fr)
-        return Result(ret, None, list(self.ub), self.dom)
+        return Result(ret, None, list(self.ub), self.dom, self.fpsr, self.fpcr)
 
     def inputs(self, name):
         """fresh symbolic arguments for `name`: scalars and structs by value, pointers to a fresh cell; -> (args, cells)"""
@@ -809,7 +957,8 @@ def b_clzll(m, a, fr, raw):
 def b_unary_fp(kind):
     def f(m, a, fr, raw):
         x = m.cast(a[0], F64, fr); m.fpdom(fr)
-        return V(fop(kind, [x.e], F64), F64)
+        m.raise_(fr, fpflags(kind, [x.e], F64, m.rmode))
+        return V(fop(kind, [x.e], F64, m.rmode), F64)
     return f
 
 
@@ -835,9 +984,20 @@ def b_memcpy(m, a, fr, raw):
     return V(z3.BitVecVal(0, 32), INT)
 
 
+def b_mrs(reg):
+    def f(m, a, fr, raw): return V(m.fpsr if reg == 'fpsr' else m.fpcr, I(64, 0))
+    return f
+
+
+def b_msr(reg):
+    def f(m, a, fr, raw): m.msr(fr, reg, a[0]); return V(z3.BitVecVal(0, 32), INT)
+    return f
+
+
 BUILTINS = {'__builtin_expect': b_expect, '__builtin_clzll': b_clzll, '__builtin_roundeven': b_unary_fp('roundeven'), '__builtin_floor': b_unary_fp('floor'),
             '__builtin_ceil': b_unary_fp('ceil'), '__builtin_trunc': b_unary_fp('trunc'), '__builtin_sqrt': b_unary_fp('sqrt'), '__builtin_nan': b_nan,
-            '__builtin_memcpy': b_memcpy}
+            '__builtin_memcpy': b_memcpy,
+            **{'__arm_mrs_' + r: b_mrs(r) for r in SYSREGS}, **{'__arm_msr_' + r: b_msr(r) for r in SYSREGS}}
 
 
 def load(ipaths, macro_files, mutate=None):
