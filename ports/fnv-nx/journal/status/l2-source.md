@@ -700,3 +700,6 @@ After the first frame:
 - 2026-11-16 04:55Z: w2 f819770fe: test_dispatch_entry 53/54. The header tests take their include dirs from the owning root.
   - Last failure: fnvnx_fls.h is C++-only but is tested as C. Rule to w2: a header's test languages come from the recipe's PP deps (C if some C unit includes it).
   - The generated NAMES code table is blocked: Microsoft's documentation has no letter table. Recommendation to the orchestrator: Wine 9.0 undname.c as source 2; waiting for its ruling. Off the path.
+- 2026-11-16 05:00Z: orchestrator ruling on the NAMES type-letter table: option (c), Wine 9.0 dlls/msvcrt/undname.c, as source 2 for __unDName.
+  - It is pinned in fnv-nx-build tools/*. A recipe stage generates the table from undname.c's type switch, citing the source line per row.
+  - Open rule-1 item, after the first frame. It is done earlier only if a gate on a candidate turns the table red, and then only this minimal fix. w2 holds it.
