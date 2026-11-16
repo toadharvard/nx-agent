@@ -276,7 +276,7 @@ def main():
     subprocess.run(["git", "-C", ext, "checkout-index", "-a", "-f", "--prefix=" + chk + "/"], check=True)
     tree = cas.ingest(chk, os.path.join(BASE, "ingest-store"))
     lrec = {"format": "fnvnx-recipe/1", "compiler": REC["compiler"], "flags": REC["flags"], "include": [], "units": "all",
-            "plugins": [dict(P["fnvnx_ftoi"])],
+            "plugins": [dict(p) for p in PLUGS],   # a guest root loads the full set whatever the origin of its code (recipe.plugin_errors)
             "generated": [{"tool": T + "gen/lift.py", "args": [], "inputs": [], "outputs": ["gen/a.cc"]}],
             "external": list(REC["external"]) + [{"name": "pack", "repo": "fnv-nx-build", "ref": "t", "commit": commit, "tree_sha256": tree, "at": "/ext/pack"}]}
     LSRC = SRC.replace("int f2i(float f)", "__attribute__((fnvnx_f2i)) int f2i(float f)")   # lifted C++ converts inside a helper only
@@ -284,13 +284,13 @@ def main():
     lrepo = make_repo("lifted", lrec, {"lifted_by": T + "gen/lift.py", "pack": "pack"}, {T + "gen/lift.py": lift, ROOT + "/a.cc": None})
     check("lifted root with fnvnx_ftoi in mode lifted is valid", errs(lrepo, lrec) == [], errs(lrepo, lrec))
     check("lifted root without fnvnx_ftoi is red", any("does not load plugin fnvnx_ftoi" in x for x in errs(lrepo, dict(lrec, plugins=[]))))
-    check("a lifted root's ftoi mode is the origin's: plugin_decls gives mode lifted", recipe.plugin_decls([P["fnvnx_ftoi"]], {"lifted_by": "x.py", "pack": "p"})[0]["args"]["mode"] == "lifted")
+    check("a lifted root's ftoi mode is the origin's: plugin_decls gives mode lifted", recipe.plugin_decls([P["fnvnx_ftoi"]], {"lifted_by": "x.py", "pack": "p"}, recipe.tracked(REAL), recipe.load_admit(REAL), REAL)[0]["args"]["mode"] == "lifted")
     # the game's compiler is in the external cache before ARTIFACTS_URL names the fixture's pack repo (which holds no compiler): mounted by the selftest gate (FNVNX_EXTCACHE), else fetched here
     os.environ.setdefault("FNVNX_EXTCACHE", os.path.join(BASE, "extcache"))
     recipe.fetch_externals(list(REC["external"]), os.path.join(BASE, "ingest-store"), os.environ["FNVNX_EXTCACHE"], BASE)
     recipe.ARTIFACTS = ext
     rl, _ = build(lrepo, "L")
-    check("lifted root builds green with only fnvnx_ftoi (lifted)", rl["status"] == "green" and [p["name"] for p in rl["plugins"]] == ["fnvnx_ftoi"], rl.get("failure"))
+    check("lifted guest root builds green with the full plugin set (fnvnx_ftoi in mode lifted)", rl["status"] == "green" and [p["name"] for p in rl["plugins"]] == list(recipe.PLUGIN_SOURCES), rl.get("failure"))
     if rl["status"] == "green":
         check("without the plugin the conversion is the bare fcvtzs", "#0x80000000" not in disasm(rl, "_Z3f2if", "gen/a.cc") and "fcvtzs" in disasm(rl, "_Z3f2if", "gen/a.cc"))
     # --- the CC stage mounts no external but the compiler's: a new commit of another external re-runs PP only; CC cannot read it
