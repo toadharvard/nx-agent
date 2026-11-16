@@ -2,7 +2,7 @@
   accepts: the text, the flag-drop rows and the record of a correct lift;
   rejects: a list with one bit flipped / a row removed / a row added; a unit with one dropped flag line restored; a unit with one kept flag line removed; a unit with a Form block removed;
   the merge stage rejects a pack list that is not the union of the shard lists.
-    test_flagcheck.py --sdmrows PATH"""
+    test_flagcheck.py"""
 import os, sys, time, json, tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import _inputs; _inputs.configure()
 from fnvlift import flaglive as fl
@@ -113,7 +113,7 @@ import liftgen as LG, lifted
 code = bytes.fromhex(BUFS['add;add;ret'])
 u = d + '/universe.tsv'; open(u, 'w').write('%08x\tcode\t%d\t\n' % (B, len(code)))
 inputs.reset(); _inputs.configure(); inputs.reset()
-inputs.configure(universe=u, fpstate=d, fpdepth=d + '/depth.tsv', x86sys=_inputs.X86SYS, sdmrows=_inputs.sdmrows_arg(), cpumodel=_inputs.CPUMODEL, rcptab=_inputs.RCPTAB, rcpcert=_inputs.RCPCERT, udsail=d + '/udsail.tsv', segwrites=d + '/segwrites.json', image='buf')
+inputs.configure(universe=u, fpstate=d, fpdepth=d + '/depth.tsv', x86sys=_inputs.X86SYS, cpumodel=_inputs.CPUMODEL, rcptab=_inputs.RCPTAB, rcpcert=_inputs.RCPCERT, udsail=d + '/udsail.tsv', segwrites=d + '/segwrites.json', image='buf')
 lifted.begin(Image.from_bytes(code, B), 'dsl', None)
 t1, m1 = lift(BUFS['add;add;ret'])
 LG.G['chk'] = ({B: t1.encode()}, {B: dict(m1['flagdrop'])})

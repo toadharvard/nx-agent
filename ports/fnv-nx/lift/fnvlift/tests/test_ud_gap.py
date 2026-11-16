@@ -2,7 +2,7 @@
 the lifter never decides it.  The rows here are an input fixture (the verdicts of the pinned Sail model come from the farm run of proof/udsail.py).
     test_ud_gap.py (the input SDMROWS is mounted)"""
 import os, sys, tempfile
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import _inputs; SDMROWS = _inputs.sdmrows_arg(); _inputs.configure(SDMROWS)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import _inputs; _inputs.configure()
 import fnvlift as L
 from fnvlift import f_sys, inputs
 from fnvlift.core import Unsupported
@@ -12,7 +12,7 @@ d = tempfile.mkdtemp(prefix='udgap-')
 open(d + '/udsail.tsv', 'w').write('# fnvnx-udsail/2\nc7d8\tUD\t2\tsail\tfixture\n8fe0\tUD\t2\tfeature\tfixture\n')
 open(d + '/universe.tsv', 'w').close(); open(d + '/depth.tsv', 'w').close()
 inputs.reset()
-inputs.configure(universe=d + '/universe.tsv', fpstate=d, fpdepth=d + '/depth.tsv', x86sys=_inputs.X86SYS, sdmrows=SDMROWS, cpumodel=_inputs.CPUMODEL, udsail=d + '/udsail.tsv', segwrites=d + '/none.json', image='buf')
+inputs.configure(universe=d + '/universe.tsv', fpstate=d, fpdepth=d + '/depth.tsv', x86sys=_inputs.X86SYS, cpumodel=_inputs.CPUMODEL, udsail=d + '/udsail.tsv', segwrites=d + '/none.json', image='buf')
 
 assert f_sys.ud_gap(bytes.fromhex('c7d8112233445566')).size == 2           # the row is the decode extent: bytes after it are not part of the instruction
 assert f_sys.ud_gap(bytes.fromhex('c7c8')) is None                        # c7 /1: no row: undecided

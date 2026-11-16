@@ -3,7 +3,7 @@
   (2) the solver: every point of P keeps all flags live (the flags written before a loop header are not dropped; the same write before a straight-line block is);
   (3) lifted buffers: the entry and each loop header carry exactly one FNVL_POLLP at the first emission of the instruction, a straight-line body only the entry's; a handler loop (`loop`) and a jump-table-free
       conditional loop are found by the one rule; a poll names the address of its instruction; the macro and the struct field exist in rt/fnvl.h.
-    test_poll.py --sdmrows PATH"""
+    test_poll.py"""
 import os, re, sys, tempfile, json
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import _inputs; _inputs.configure()
 from fnvlift import flaglive as fl, inputs
@@ -44,7 +44,7 @@ open(d + '/universe.tsv', 'w').write('')
 open(d + '/depth.tsv', 'w').close(); open(d + '/udsail.tsv', 'w').write('# fnvnx-udsail/2\n')
 json.dump({'format': 'fnvnx-segwrites/2', 'images': {'buf': {n: {'guard': n == 'gs'} for n in ('es', 'ds', 'fs', 'gs')}}}, open(d + '/segwrites.json', 'w'))
 inputs.reset(); _inputs.configure(); inputs.reset()
-inputs.configure(universe=d + '/universe.tsv', fpstate=d, fpdepth=d + '/depth.tsv', x86sys=_inputs.X86SYS, sdmrows=_inputs.sdmrows_arg(), cpumodel=_inputs.CPUMODEL, rcptab=_inputs.RCPTAB, rcpcert=_inputs.RCPCERT,
+inputs.configure(universe=d + '/universe.tsv', fpstate=d, fpdepth=d + '/depth.tsv', x86sys=_inputs.X86SYS, cpumodel=_inputs.CPUMODEL, rcptab=_inputs.RCPTAB, rcpcert=_inputs.RCPCERT,
                  udsail=d + '/udsail.tsv', segwrites=d + '/segwrites.json', image='buf')
 B = 0x401000
 

@@ -2,7 +2,7 @@
   lifted buffers of each of the 8 instructions: the emitted text calls exactly the table's cr_* function (and no fnvl_m_ engine function);
   the C2 path (|x| >= 2^63) of fsin fcos fptan fsincos: the macros test fnvl_m_trig_big and set C2 with the operand and the stack unchanged; trig_big itself on the boundary values;
   0 libm symbols in the emitted text and in lift/rt (code, comments and strings removed); no cr_* is defined in lift/rt and the one declaration is in rt/fmath.h.
-    test_crmath.py --sdmrows PATH"""
+    test_crmath.py"""
 import os, re, sys, glob, subprocess, tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import _inputs; _inputs.configure()
 from fnvlift.image import Image

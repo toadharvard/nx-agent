@@ -4,7 +4,7 @@ return, and the form expands to exactly the statements that were emitted at each
   (2) lifted buffers of every transfer shape (entry / not an entry / import / indirect, plain / x87 function): no site keeps the legacy text, no form call is left unexpanded by the header's own
       definitions, and a plain name is used exactly where the hooks are the unextended ones;
   (3) the static x87 path (f_x87_ctl.fix_lines) extends the hooks inside the form's arguments: the stores before SYNC_OUT, the loads after SYNC_IN, none after a tail's SYNC_IN.
-    test_xfer_forms.py --sdmrows PATH"""
+    test_xfer_forms.py"""
 import os, re, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import _inputs; _inputs.configure()
 import capstone
@@ -96,7 +96,7 @@ _u = d + '/universe.tsv'
 import json
 open(d + '/depth.tsv', 'w').close(); open(d + '/udsail.tsv', 'w').write('# fnvnx-udsail/2\n')
 json.dump({'format': 'fnvnx-segwrites/2', 'images': {'buf': {n: {'guard': n == 'gs'} for n in ('es', 'ds', 'fs', 'gs')}}}, open(d + '/segwrites.json', 'w'))
-inputs.configure(universe=_u, fpstate=d, fpdepth=d + '/depth.tsv', x86sys=_inputs.X86SYS, sdmrows=_inputs.sdmrows_arg(), cpumodel=_inputs.CPUMODEL, rcptab=_inputs.RCPTAB, rcpcert=_inputs.RCPCERT,
+inputs.configure(universe=_u, fpstate=d, fpdepth=d + '/depth.tsv', x86sys=_inputs.X86SYS, cpumodel=_inputs.CPUMODEL, rcptab=_inputs.RCPTAB, rcpcert=_inputs.RCPCERT,
                  udsail=d + '/udsail.tsv', segwrites=d + '/segwrites.json', image='buf')
 SHAPES = {'call_entry': b'\xe8' + rel(0x402000), 'call_noentry': b'\xe8' + rel(0x409000), 'call_ind': b'\xff\xd0', 'call_imp': b'\xff\x15\x00\x20\x40\x00', 'call_mem': b'\xff\x50\x08',
           'jmp_entry': b'\xe9' + rel(0x403000), 'jmp_noentry': b'\xe9' + rel(0x409000), 'jmp_ind': b'\xff\xe0', 'jmp_imp': b'\xff\x25\x00\x20\x40\x00', 'ret': b'\xc3', 'retn': b'\xc2\x08\x00', 'repz_ret': b'\xf3\xc3'}

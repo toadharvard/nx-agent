@@ -6,8 +6,7 @@ configure(). A name that was not configured is an error at the point of use: the
   fpstate    the directory of the fp-state facts (invariants.tsv; tools/fpstate.py)
   fpdepth    the x87 stack-depth facts (depth.tsv; tools/fpmodes.py): a file; no facts is an empty file
   x86sys     the declared x86 system record (platform X86SYS output)
-  sdmrows    the SDM opcode rows and flag table (proof/sdmfeat.py dumprows output, JSON): the one source of the CPUID feature gate (cpufeat.py)
-  cpumodel   the declared CPU's data (verify/cpuid_model.json): the words of the CPUID feature gate (cpufeat.py)
+  cpumodel   the declared CPU's data (verify/cpuid_model.json): the words and the capstone-group table of the CPUID feature gate (cpufeat.py)
   segwrites  the per-image write-site counts of the data segment registers (lift/facts SEGWRITES output, tools/segwrites.py): a file
   udsail     the Sail #UD verdicts of the byte sequences capstone refuses (proof/udsail.py output): a file; read only when such a sequence is met
   rcptab     the certified RCPSS/RSQRTSS table source (lift/rt/rcptab.c): a file; read by dsl._rcp_tables, which checks it against rcpcert
@@ -15,7 +14,7 @@ configure(). A name that was not configured is an error at the point of use: the
   image      the key of the image being lifted in that file ('exe', or the module name without .dll, lower case)
 The load base of a module is not an input of this kind: it is the argument `base` of Image(path, base), taken from the module table row.
 Proof: a lookup is get(name); configure() accepts only these names; a second configure() of a name with another value is an error (one process, one input set)."""
-NAMES = ('universe', 'fpstate', 'fpdepth', 'x86sys', 'sdmrows', 'cpumodel', 'segwrites', 'udsail', 'rcptab', 'rcpcert', 'image')
+NAMES = ('universe', 'fpstate', 'fpdepth', 'x86sys', 'cpumodel', 'segwrites', 'udsail', 'rcptab', 'rcpcert', 'image')
 _I = {}
 
 

@@ -25,8 +25,6 @@
     "/in/ports/fnv-nx/lift",
     "--x86sys",
     "/uses/ports/fnv-nx/platform/X86SYS",
-    "--sdmrows",
-    "/uses/ports/fnv-nx/lift/sdmrows/SDMROWS",
     "--cpumodel",
     "/in/ports/fnv-nx/verify/cpuid_model.json",
     "--rcptab",
@@ -63,10 +61,6 @@
   {
    "root": "ports/fnv-nx/shim",
    "output": "INCLUDE"
-  },
-  {
-   "root": "ports/fnv-nx/lift/sdmrows",
-   "output": "SDMROWS"
   },
   {
    "root": "ports/fnv-nx/platform",

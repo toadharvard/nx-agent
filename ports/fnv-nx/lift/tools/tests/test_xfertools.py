@@ -3,7 +3,7 @@
   (1) the tally attributes every function to its image by the module table's range, counts every form call by name (hooked / plain) and every legacy sequence of a text lifted before the forms;
   (2) the per-image selection takes the units with the most transfer sites, ties by unit name, and a unit without a site is never selected;
   (3) the token comparison drops line markers, is whitespace-insensitive, and finds the first differing token; the diff of two builds is 0 iff every unit has a PP result in both and the tokens are equal.
-    test_xfertools.py --sdmrows PATH"""
+    test_xfertools.py"""
 import collections, os, re, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(LIFT, 'fnvlift', 'tests')); import _inputs; _inputs.configure()

@@ -2,7 +2,7 @@
   (1) the solver on hand-made CFGs (records straight from flaglive.info shapes): a loop, a jcc consumer, an escape (fault), a call / ret exit, a handler (not a Form instruction);
   (2) lifted buffers: the dropped set (meta['flagdrop'], addr -> mask) is exactly the dead writes, and the C text has no store to a dropped flag at that address;
   (3) every flag stays live where it must: before a ret, a call, a div (fault), and for a flag read by a later jcc/setcc/adc.
-    test_flaglive.py --sdmrows PATH"""
+    test_flaglive.py"""
 import os, re, sys, tempfile, json
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import _inputs; _inputs.configure()
 from fnvlift import flaglive as fl, inputs
@@ -54,7 +54,7 @@ open(d + '/universe.tsv', 'w').write('')
 open(d + '/depth.tsv', 'w').close(); open(d + '/udsail.tsv', 'w').write('# fnvnx-udsail/2\n')
 json.dump({'format': 'fnvnx-segwrites/2', 'images': {'buf': {n: {'guard': n == 'gs'} for n in ('es', 'ds', 'fs', 'gs')}}}, open(d + '/segwrites.json', 'w'))
 inputs.reset(); _inputs.configure(); inputs.reset()
-inputs.configure(universe=d + '/universe.tsv', fpstate=d, fpdepth=d + '/depth.tsv', x86sys=_inputs.X86SYS, sdmrows=_inputs.sdmrows_arg(), cpumodel=_inputs.CPUMODEL, rcptab=_inputs.RCPTAB, rcpcert=_inputs.RCPCERT,
+inputs.configure(universe=d + '/universe.tsv', fpstate=d, fpdepth=d + '/depth.tsv', x86sys=_inputs.X86SYS, cpumodel=_inputs.CPUMODEL, rcptab=_inputs.RCPTAB, rcpcert=_inputs.RCPCERT,
                  udsail=d + '/udsail.tsv', segwrites=d + '/segwrites.json', image='buf')
 B = 0x401000
 M = lambda *f: sum(1 << fl.FL.index(x) for x in f)

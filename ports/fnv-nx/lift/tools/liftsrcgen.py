@@ -21,7 +21,7 @@ EXTERNALS = [
     {'name': 'exe', 'repo': 'fnv-nx-build', 'ref': 'gamedata/exe', 'commit': '0948da1e89ab719dcf8471e45b67bc60575f6b93', 'tree_sha256': 'ba933b684b5e221e74b8a841a0ebb35ea8599c78a4d582ca0c376ef5a424ef2b', 'at': '/ext/exe'},
     {'name': 'redist', 'repo': 'fnv-nx-build', 'ref': 'gamedata/redist', 'commit': 'c53729e3bac168798fddcf4312f5a64a9b5eb08f', 'tree_sha256': 'fe7d3b56dba13c2bb236bdd3f7681dab41029f192283b7d4ba0c81105878bfd2', 'at': '/ext/redist'},
 ]
-USES = [{'root': 'ports/fnv-nx/lift/sdmrows', 'output': 'SDMROWS'}, {'root': 'ports/fnv-nx/loader', 'output': 'MODULES_TSV'}, {'root': 'ports/fnv-nx/lift/facts', 'output': 'FACTS'}, {'root': 'ports/fnv-nx/lift/facts', 'output': 'SEGWRITES'}, {'root': 'ports/fnv-nx/lift/fpfacts', 'output': 'FPSTATE'}, {'root': 'ports/fnv-nx/lift/fpfacts', 'output': 'FPDEPTH'}, {'root': 'ports/fnv-nx/platform', 'output': 'X86SYS'}]
+USES = [{'root': 'ports/fnv-nx/loader', 'output': 'MODULES_TSV'}, {'root': 'ports/fnv-nx/lift/facts', 'output': 'FACTS'}, {'root': 'ports/fnv-nx/lift/facts', 'output': 'SEGWRITES'}, {'root': 'ports/fnv-nx/lift/fpfacts', 'output': 'FPSTATE'}, {'root': 'ports/fnv-nx/lift/fpfacts', 'output': 'FPDEPTH'}, {'root': 'ports/fnv-nx/platform', 'output': 'X86SYS'}]
 MOD = '/uses/ports/fnv-nx/loader/MODULES_TSV'
 SDM_PDF = 'intel-64-ia-32-sdm-combined.pdf'      # the one file of the `sdm` external (tools/intel-sdm MANIFEST.json); the pdf's sha256 a4a62e6a7ba11a76c7753a195b825087306812aac39b930973f9168ee599f321
 SDMROWS_ROOT = 'ports/fnv-nx/lift/sdmrows'      # the one producer of the lifter's `sdmrows` input (sdmrows_recipe()): every root that lifts `uses` it
@@ -85,7 +85,7 @@ def image_shards(name, n, where, common, root=ROOT, prov=False):
 
 
 def shard_stages(modules, root=ROOT, prov=False):
-    common = ['--lift', '/in/' + LIFT, '--fpstate', '/uses/ports/fnv-nx/lift/fpfacts/FPSTATE', '--fpdepth', '/uses/ports/fnv-nx/lift/fpfacts/FPDEPTH', '--x86sys', '/uses/ports/fnv-nx/platform/X86SYS', '--sdmrows', SDMROWS_FILE, '--cpumodel', '/in/ports/fnv-nx/verify/cpuid_model.json', '--rcptab', '/in/'+LIFT+'/rt/rcptab.c', '--rcpcert', '/in/'+LIFT+'/rt/rcptab.cert.json', '--segwrites', '/uses/ports/fnv-nx/lift/facts/SEGWRITES', '--certs', '/in/' + ROOT + '/certs', '--jobs', '4']
+    common = ['--lift', '/in/' + LIFT, '--fpstate', '/uses/ports/fnv-nx/lift/fpfacts/FPSTATE', '--fpdepth', '/uses/ports/fnv-nx/lift/fpfacts/FPDEPTH', '--x86sys', '/uses/ports/fnv-nx/platform/X86SYS', '--cpumodel', '/in/ports/fnv-nx/verify/cpuid_model.json', '--rcptab', '/in/'+LIFT+'/rt/rcptab.c', '--rcpcert', '/in/'+LIFT+'/rt/rcptab.cert.json', '--segwrites', '/uses/ports/fnv-nx/lift/facts/SEGWRITES', '--certs', '/in/' + ROOT + '/certs', '--jobs', '4']
     gen, imgargs = [], []
     for name, mod, size in images(modules):
         n = shards(size)
@@ -164,17 +164,17 @@ GUEST_TESTS = {'imptest': 'guestgen_imptest.py', 'msvcrttest': 'guestgen_msvcrtt
 
 
 def guest_test_recipe(name, rec):
-    """lift/tests/guest/NAME/lifted/build.json: REC (the existing recipe) with its generated stages rewritten: the sdmrows generator, then the root's guest generator with the lifter's declared inputs as explicit arguments
-    (the same mounts as the shard stages: X86SYS from the platform root, the SDM rows from the SDM text, the tracked cpuid model and rcptab)"""
+    """lift/tests/guest/NAME/lifted/build.json: REC (the existing recipe) with its generated stages rewritten: the root's guest generator with the lifter's declared inputs as explicit arguments
+    (the same mounts as the shard stages: X86SYS from the platform root, the tracked cpuid model and rcptab)"""
     root = 'ports/fnv-nx/lift/tests/guest/%s/lifted' % name
     gen = rec['generated'][-1]
     assert gen['tool'] == LIFT + '/tools/' + GUEST_TESTS[name], gen['tool']
     outs = gen['outputs']
-    st = [{'tool': gen['tool'], 'args': ['/out/gen', '/in/' + LIFT, '--x86sys', '/uses/ports/fnv-nx/platform/X86SYS', '--sdmrows', SDMROWS_FILE, '--cpumodel', '/in/ports/fnv-nx/verify/cpuid_model.json',
+    st = [{'tool': gen['tool'], 'args': ['/out/gen', '/in/' + LIFT, '--x86sys', '/uses/ports/fnv-nx/platform/X86SYS', '--cpumodel', '/in/ports/fnv-nx/verify/cpuid_model.json',
                                          '--rcptab', '/in/' + LIFT + '/rt/rcptab.c', '--rcpcert', '/in/' + LIFT + '/rt/rcptab.cert.json'],
            'inputs': [LIFT + '/fnvlift', 'ports/fnv-nx/verify/cpuid_model.json', LIFT + '/proof', LIFT + '/rt/rcptab.c', LIFT + '/rt/rcptab.cert.json'], 'outputs': outs}]
     uses = [u for u in rec.get('uses', []) if (u['root'], u['output']) not in (('ports/fnv-nx/lift/sdm', 'SDM_TEXT'), (SDMROWS_ROOT, 'SDMROWS'), ('ports/fnv-nx/platform', 'X86SYS'))]
-    uses += [{'root': SDMROWS_ROOT, 'output': 'SDMROWS'}, {'root': 'ports/fnv-nx/platform', 'output': 'X86SYS'}]
+    uses += [{'root': 'ports/fnv-nx/platform', 'output': 'X86SYS'}]
     return dict(rec, generated=st, uses=uses)
 
 
