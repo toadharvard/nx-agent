@@ -31,14 +31,16 @@ A missing or malformed rows file, or a missing ELF, is red (`rows:no-rows`, `row
 Gate file `disp` ($GATE_OUT/disp.json, gatefile.py; full list in $GATE_OUT/disp.ids): items = per rows file 1 + rows + empty slots, plus the universe addresses;
 uncertified = the ids above `:<reason>`.  Counts only on stdout.  Exit 1 when red.
 """
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import argparse
 import os
 import struct
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'contract'))
-import gatefile
+from contract import gatefile
 import gateids
 
 SHT_SYMTAB, SHT_RELA, SHT_REL, SHT_RELR, PT_LOAD, SHN_UNDEF = 2, 4, 9, 19, 1, 0

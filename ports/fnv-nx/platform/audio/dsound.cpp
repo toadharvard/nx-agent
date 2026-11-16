@@ -20,6 +20,7 @@
 #include "mixer.h"
 #include "reverb.h"
 #include "../os/os.h"
+#include <fnvnx_export.h>
 
 #include <math.h>
 #include <stddef.h>
@@ -1148,6 +1149,7 @@ static bool known_device(LPCGUID g)
     return !g || guid_eq(*g, DSDEVID_DefaultPlayback) || guid_eq(*g, DSDEVID_DefaultVoicePlayback_);
 }
 
+FNVNX_EXPORT("dsound.dll", "DirectSoundCreate8", DirectSoundCreate8, "func");
 extern "C" HRESULT WINAPI DirectSoundCreate8(LPCGUID guid, LPDIRECTSOUND8 *out, LPUNKNOWN outer)
 {
     if (!out) return DSERR_INVALIDPARAM;
@@ -1161,6 +1163,7 @@ extern "C" HRESULT WINAPI DirectSoundCreate8(LPCGUID guid, LPDIRECTSOUND8 *out, 
     return DS_OK;
 }
 
+FNVNX_EXPORT("dsound.dll", "DirectSoundCreate", DirectSoundCreate, "func");
 extern "C" HRESULT WINAPI DirectSoundCreate(LPCGUID guid, LPDIRECTSOUND *out, LPUNKNOWN outer)
 {
     if (!out) return DSERR_INVALIDPARAM;
@@ -1170,6 +1173,7 @@ extern "C" HRESULT WINAPI DirectSoundCreate(LPCGUID guid, LPDIRECTSOUND *out, LP
     return hr;
 }
 
+FNVNX_EXPORT("dsound.dll", "DirectSoundEnumerateA", DirectSoundEnumerateA, "func");
 extern "C" HRESULT WINAPI DirectSoundEnumerateA(LPDSENUMCALLBACKA cb, LPVOID ctx)
 {
     if (!cb) return DSERR_INVALIDPARAM;

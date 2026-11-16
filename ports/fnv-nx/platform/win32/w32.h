@@ -318,7 +318,6 @@ BOOL FreeEnvironmentStringsW(WCHAR *);
 int CompareStringA(LCID, DWORD, LPCSTR, int, LPCSTR, int);
 int CompareStringW(LCID, DWORD, LPCWSTR, int, LPCWSTR, int);
 UINT SetHandleCount(UINT);
-DWORD GetFileType(HANDLE);
 UINT GetConsoleCP(void);
 UINT GetConsoleOutputCP(void);
 BOOL GetConsoleMode(HANDLE, LPDWORD);

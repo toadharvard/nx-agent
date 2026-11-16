@@ -28,6 +28,7 @@
  },
  "include": [
   "ports/fnv-nx/platform/include",
+  "ports/fnv-nx/contract/include",
   "ports/fnv-nx/loader/include",
   "ports/fnv-nx/lib/sha256/include",
   "ports/fnv-nx/hostabi/include",
@@ -247,12 +248,9 @@
     "/uses/ports/fnv-nx/bridgefacts/COM_ROWS",
     "/uses/ports/fnv-nx/bridgefacts/COM_WORDS",
     "/out/com",
-    "/in/ports/fnv-nx/contract",
     "/in/ports/fnv-nx/platform/crt/cxx_types.tsv"
    ],
    "inputs": [
-    "ports/fnv-nx/contract/proto.py",
-    "ports/fnv-nx/contract/store.py",
     "ports/fnv-nx/platform/crt/cxx_types.tsv"
    ],
    "outputs": [
@@ -541,11 +539,16 @@
   }
  },
  "outputs": {
+  "INCLUDE": "include",
   "X86SYS": "declared/x86sys.export.json"
  },
  "uses": [
   {
-   "root": "ports/fnv-nx/loader",
+   "root": "ports/fnv-nx/contract/include",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/loader/include",
    "output": "INCLUDE"
   },
   {

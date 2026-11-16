@@ -43,6 +43,9 @@ def w(repo, rel, text):
 def toy_tree(self, tmp, name, pin):
     """_deb_tree of the toy package: /bin -> usr/bin (a top-level link, like base-files), /usr/bin/busybox and /usr/bin/sh -> busybox, /etc (a second top-level dir)."""
     d = os.path.join(tmp, "deb-" + name)
+    if name != "toybb":   # the machine's layout deb (envcheck.RUN_LAYOUT_DEB, named by every step) ships nothing here: the toy package carries the layout
+        os.makedirs(d)
+        return None
     os.makedirs(os.path.join(d, "usr/bin"))
     shutil.copy(shutil.which("busybox"), os.path.join(d, "usr/bin/busybox"))
     for a in ("sh", "cp", "mkdir", "echo", "cat", "ls", "sleep"):
@@ -53,7 +56,7 @@ def toy_tree(self, tmp, name, pin):
     return None
 
 
-recipe.deb_pins = lambda: {"toybb": {"version": "1", "sha256": "0" * 64}}
+recipe.deb_pins = lambda: {"toybb": {"version": "1", "sha256": "0" * 64}, "base-files": {"version": "1", "sha256": "1" * 64}}
 recipe.Job._deb_tree = toy_tree
 recipe.env_blocked = lambda repo: None   # this machine's pinned packages are not the point of the test
 

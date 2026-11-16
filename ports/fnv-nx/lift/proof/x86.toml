@@ -1,0 +1,42 @@
+# isla config for the Sail x86 model (x86.ir built by sail_build.sh).  Only the keys isla requires; execution is driven by
+# isla-execute-function on x86_fetch_decode_execute (not isla-footprint), so there is no ifetch event and no toolchain.
+pc = "rip"
+ifetch = "Read_ifetch"      # never produced by this model (fetch goes through the x86_fetch.sail register window)
+read_exclusives = []
+write_exclusives = []
+
+[mmu]
+page_table_base = "0x300000"
+page_size = "4096"
+s2_page_table_base = "0x300000"
+s2_page_size = "4096"
+
+[threads]
+base = "0x400000"
+top = "0x500000"
+stride = "0x10000"
+
+[symbolic_addrs]
+base = "0x600000"
+top = "0x600000"
+stride = "0x10"
+
+[registers]
+ignore = []
+
+[registers.defaults]
+
+[registers.renames]
+
+[reads]
+
+[writes]
+
+[cache_ops]
+
+[[toolchain]]
+name = "default"
+assembler = "true"
+objdump = "true"
+nm = "true"
+linker = "true"

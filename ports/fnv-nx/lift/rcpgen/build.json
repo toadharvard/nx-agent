@@ -1,0 +1,33 @@
+{
+ "format": "fnvnx-recipe/1",
+ "compiler": {
+  "cc": "x86_64-linux-gnu-gcc-13",
+  "cxx": "x86_64-linux-gnu-g++-13"
+ },
+ "flags": {
+  "c": [
+   "-O2",
+   "-msse2"
+  ],
+  "cxx": [
+   "-O2",
+   "-msse2"
+  ],
+  "asm": []
+ },
+ "include": [],
+ "units": "all",
+ "link": {
+  "output": "rcpgen.exe",
+  "kind": "exe",
+  "flags": [
+   "-m",
+   "elf_x86_64"
+  ],
+  "libs": {
+   "system": [
+    "/lib/x86_64-linux-gnu/libc.so.6"
+   ]
+  }
+ }
+}

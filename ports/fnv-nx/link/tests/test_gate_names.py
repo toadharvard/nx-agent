@@ -3,6 +3,9 @@
 a definition whose name cl does not define is red and named; an unnamed row, an unnamed vftable, a unit without a cl object, an
 unreadable cl object and an unreadable GCC object are red; weak, COMDAT, reference and nameless rows are outside the universe;
 an empty universe is green; the gate file and the exit status; the `u<N>` pairing of --units.  Run: python3 -I <this file>."""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import shutil
@@ -14,7 +17,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, '..'))
 import gate_names
-import l2sections
+from contract import l2sections
 import synth
 import unitpairs
 KINDS_INC = os.path.join(HERE, '..', '..', 'toolchain', 'names', 'sympair_kinds.inc')

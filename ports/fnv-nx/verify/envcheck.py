@@ -17,7 +17,7 @@ tests/test_sandbox; gcc,as,ld test_sandbox,test_sdcheck; aarch64-linux-gnu-g++ t
 aarch64-linux-gnu-nm,readelf icount.py,test_unitstage; aarch64-linux-gnu-as,ld,objcopy test_icount;
 git verdict.py,l1.py,test_gates; ldd,true test_runtime; g++,llvm-config-18 build a64access.cc (objstub.py, test_a64access).
 The a64access build set is derived the same way: every header `g++ -M` reports for a64access.cc under `llvm-config-18 --cxxflags`,
-and every library file `llvm-config-18 --libfiles` names for A64ACCESS's components (plus cc1plus, libstdc++.so above). The clang set (clang-18 plugins such as vtnames; clang -m32 compiles) is derived the same way: the headers under `llvm-config-18 --includedir` that a plugin includes (CLANG_API) with the whole clang/ tree they sit in, the libraries of CLANG_LIBS under `--libdir`, and every header `clang -m32 -M` reports for a C probe including stdint.h and stdlib.h (gnu/stubs-32.h: libc6-dev-i386). Python modules (version in python.modules, installed-files sha256 in python.installed_files_sha256, see wheel_digest; wheel file sha256 in python.wheel_sha256): capstone, unicorn (icount.py, test_icount, test_runtime); pyelftools (stage tools of contract/: objfacts, perf, check_mirror); pefile (manifest/regsites.py); numpy (lift/test/instest.py packer); z3-solver, keystone-engine, gmpy2 (lift/proof, lift/bench, lift/test)."""
+and every library file `llvm-config-18 --libfiles` names for A64ACCESS's components (plus cc1plus, libstdc++.so above). The clang set (clang-18 plugins such as vtnames; clang -m32 compiles) is derived the same way: the headers under `llvm-config-18 --includedir` that a plugin includes (CLANG_API) with the whole clang/ tree they sit in, the libraries of CLANG_LIBS under `--libdir`, and every header `clang -m32 -M` reports for a C probe including stdint.h and stdlib.h (gnu/stubs-32.h: libc6-dev-i386). Python modules (version in python.modules, installed-files sha256 in python.installed_files_sha256, see wheel_digest; wheel file sha256 in python.wheel_sha256): capstone, unicorn (icount.py, test_icount, test_runtime); pyelftools (stage tools of contract/: objfacts, perf, check_mirror); pefile (manifest/regsites.py); numpy (the retired one-instruction harness packer); z3-solver, keystone-engine, gmpy2 (lift/proof, lift/bench, lift/test)."""
 import argparse
 import csv
 import ctypes
@@ -411,7 +411,9 @@ def deb_pins(doc):
     if not (isinstance(m.get("repo"), str) and hx(m.get("commit"), 40) and hx(m.get("tree_sha256"), 64)
             and hx(m.get("wheels_tree_sha256"), 64)):
         out.append("env: debs.mirror: needs repo, a 40-hex commit, a 64-hex tree_sha256 (debs/) and wheels_tree_sha256 (wheels/)")
-    want = dict(dep_closure(doc["packages"]), **doc["packages"])
+    profiles = dp.get("profiles") if isinstance(dp.get("profiles"), dict) else {}
+    tops = set(doc["packages"]) | {t for ts in profiles.values() if isinstance(ts, list) for t in ts if isinstance(t, str)}   # the roots of the set: the declared packages and the tops of every named profile
+    want = dict(dep_closure(tops), **doc["packages"])
     for p in sorted(set(want) ^ set(dp["packages"])):
         out.append("env: debs.packages: %s %s" % (p, "has no deb pin" if p in want else "is not in the packages or their dependency closure"))
     for p, e in sorted(dp["packages"].items()):

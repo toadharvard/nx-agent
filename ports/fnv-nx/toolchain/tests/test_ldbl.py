@@ -5,6 +5,9 @@ plugbuild.py); its static_asserts hold sizeof/alignof, LDBL_MANT_DIG == 53, __LD
 a compiler that still has a 128-bit long double fails to compile. The MSVC names of the functions are read from the names plugin's
 .fnvnx.sympair rows: ?ld@@YAOON@Z (long double 'O', double 'N'), as cl writes them. No network, no game data.
 Run: python3 -I <this file> from the checkout root."""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import re
@@ -115,7 +118,7 @@ def datamodel(td, so):
     check('crossing_forbidden cites existing rows', all(c in rows for c in cf), cf)
     # regeneration: the pinned mirror (fnv-nx-build tools/cpp-docs, tree_sha256 checked by the recipe's own fetch) -> gen.py --check
     import subprocess
-    import recipe
+    from verify import recipe
     gdir = os.path.join(root, 'msvcmodel', 'datamodel')
     mirror = json.load(open(os.path.join(gdir, 'sources.json')))['mirror']
     ext = {k: mirror[k] for k in ('name', 'repo', 'ref', 'commit', 'tree_sha256', 'at')}

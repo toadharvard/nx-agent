@@ -65,17 +65,18 @@ A pure function of its arguments (no file, no process): the driver verify/gate_i
   names       text of sys_names.tsv (dll TAB name per line) from the private manifest
   spec_text   function dll -> text of the export specification of the reference environment (Wine 9.0 dlls/<dll>/<dll>.spec)
   syms        the set of symbol names that the product objects define or reference (objects.json defined + undefined); None = the rows table
-              (stage A): every row binds by rule alone (sym, data, lookup, l3), no symbol table is read and none is judged; the table is then a
-              function of the names, the specs, the name table and the extra rows only, so the import keys (contract/iat.py) are too.  The
-              symbols are judged against the rows by the gate `imports` (stage B: contract/imports.judge over derive(syms=the objects' symbols))
-  name_table  {msvcrt name: (symbol, kind)} of the name table the product serves msvcrt names from (read_name_table)
+              (stage A, the root `bridgetable`): every row binds by rule alone (link, data, sym), no symbol table is read and none is judged; the
+              table is then a function of the names, the specs, the name table, the extra rows and exports.tsv only, so the import keys (contract/iat.py)
+              are too.  The symbols are judged against the rows by the gate `imports` (contract/imports.judge over the members of the link)
+  name_table  {msvcrt name: (symbol, kind)} of the name table that serves msvcrt data names (read_name_table)
   extra       texts of rows in this 8-column format (other owners' rows: COM interfaces); a row of the same (dll, name) replaces the derived one
-bind  sym    native_symbol is a symbol of the product objects     lookup  msvcrt name served by the name table (native_symbol `-`)
-      l3     provided by the lifter runtime under native_symbol   data    the slot holds the address of the object native_symbol
+  exports     {(module, name): (symbol, kind, ret)} of exports.tsv (contract/exportgen.py: the `.fnvnx.export` records of the link set, ret from the definer's `.fnvnx.decltype`)
+bind  link   native_symbol is the symbol of the export record; exactly one member of the link defines it (imports.judge)
+      sym    native_symbol is a symbol of the root's own objects (rows of another owner's file)      data  the same for a data row without a record
       none   no implementation: the gate `imports` is red for the row
 conv  stdcall | cdecl | vararg | thiscall | fastcall | data;  ret v|i|q|f|d;  args: x86 stack slots i|q|f|d.
-A name missing from its spec, a stub in the spec, a forward that cannot be followed or an unknown argument type is an error: total or failing.
-`lookup` is decided by the name table, a declared input (a name is in it or not), not by a run.
+A function name with no export record, a name missing from its spec, a stub in the spec, a forward that cannot be followed, a struct or vector return or an unknown
+argument type is an error: total or failing.
 ```
 
 ## contract/gate_call.py
@@ -574,7 +575,7 @@ Steps:
  3 icount.py spec: range lifted = section .text.fnvl, class softfloat from the softfloat file (left out when absent)
  4 SD root: a fresh empty card directory (--root); the installed game is mounted in place at the guest's sdmc:/switch/fnv
    (--game, verify/bootpath.py). The game is GAME_DIR, else fetched by farm/gamedata_fetch.sh into $FARM_HOME/game
-   (the exe, INIs, static modules and d3dx9 DLLs; plus every Data item (gamedata/data/* of the artifacts repository: *.bsa, *.esm, Music,
+   (the exe, INIs, static modules and d3dx9 DLLs; plus every Data item that a recipe declares as an external (gamedata/data/* pinned by commit and tree_sha256; one that no recipe declares is red: *.bsa, *.esm, Music,
    Shaders; every part's and every file's sha256 checked by the fetcher), or only the Data items named in BOOT_DATA_ITEMS; `--no-data`
    there means no Data item, a run without the game's archives). FalloutNV.exe must be in it; its sha256 is printed. The fetched
    Data items are recorded in meta.json (data_items; null with GAME_DIR, whose content the job does not know)
@@ -1720,7 +1721,7 @@ Gate "assumptions" (fnvnx-gate/1): every assumption the rules rest on is in one 
 
 Registry: verify/ASSUMPTIONS.json ("fnvnx-assumptions/1"; the accepted entries are ASM-001 to ASM-009):
   {"format": "fnvnx-assumptions/1", "entries": [ENTRY...]}
-  ENTRY  {"id": "ASM-NNN", "text": STR, "used_by": [PATH...], "aliases": [STR...], "status": "OWNER" | "REMOVE", ...}
+  ENTRY  {"id": "ASM-NNN", "text": STR, "aliases": [STR...], "status": "OWNER" | "REMOVE", ...}
     OWNER   + "decision": {"file": "CLAUDE.md", "quote": STR}   the owner's acceptance, verbatim
     REMOVE  + "removed_by": STR, "owner": LEAD | LEAD+LEAD      the discharge and the stream lead(s) who owe it
     optional: "note": STR. The registry holds exactly the entries that files of THIS tree rely on: the entry of an unmerged
@@ -1737,7 +1738,7 @@ universe is (path, first line of the block). A mention is certified iff ALL hold
   2. every id in it is the id of an entry of the registry.
 The registry is certified iff ALL hold:
   3. ids are unique and well formed, aliases are unique across entries, text is not empty;
-  4. used_by is not empty and every path in it is a tracked file that contains the entry's id (the reliance is written at the
+  4. the entry has a user: at least one tracked text file other than the registry cites its id; the users are derived (users_of), never listed (the reliance is written at the
      place of reliance, so an entry nobody cites is dead and is red); 
   5. an OWNER entry has decision.file CLAUDE.md and decision.quote occurring verbatim inside exactly one numbered item under
      the line "OWNER, the only accepted ones:", no item serves two entries, and every item has an entry: the OWNER set is

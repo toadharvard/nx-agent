@@ -33,7 +33,7 @@ def main():
     defs = {}
     for m in re.finditer(r"^#[ \t]*define[ \t]+(COLOR_[A-Z0-9_]+)[ \t]+(\d+|COLOR_[A-Z0-9_]+)\b",
                          open(os.path.join(tree, IDS), encoding="utf-8", errors="replace").read(), re.M):
-        defs.setdefault(m.group(1), m.group(2))
+        defs.setdefault(m[1], m[2])
 
     def ident(n):
         v = defs.get(n)
@@ -47,7 +47,7 @@ def main():
     e = text.index("};", s.end())
     cols = []
     for m in re.finditer(r"RGB_ENTRY\(\s*(COLOR_[A-Z0-9_]+)\s*,\s*RGB\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)\s*,\s*\)", text[s.end():e]):
-        cols.append((m.group(1), [int(m.group(i)) for i in (2, 3, 4)], line_of(text, s.end() + m.start())))
+        cols.append((m[1], [int(m[i]) for i in (2, 3, 4)], line_of(text, s.end() + m.start())))
     nrows = len(re.findall(r"RGB_ENTRY\(\s*COLOR_", text[s.end():e]))
     if len(cols) != nrows or not cols:
         err.append("system_colors: %d rows, %d parsed" % (nrows, len(cols)))
@@ -67,8 +67,8 @@ def main():
         stop = dib.index("};", m.end())
         rows = [(int(a, 16), int(b, 16), int(c, 16)) for a, b, c in
                 re.findall(r"\{\s*0x([0-9a-fA-F]{2})\s*,\s*0x([0-9a-fA-F]{2})\s*,\s*0x([0-9a-fA-F]{2})\s*\}", dib[m.end():stop])]
-        if len(rows) != int(m.group(1)) or len(rows) != 1 << bpp:
-            err.append("table_%d: %d rows, declared %s" % (bpp, len(rows), m.group(1)))
+        if len(rows) != int(m[1]) or len(rows) != 1 << bpp:
+            err.append("table_%d: %d rows, declared %s" % (bpp, len(rows), m[1]))
         tabs[bpp] = (rows, line_of(dib, m.start()))
     if err:
         sys.stderr.write("\n".join(err) + "\n%d errors\n" % len(err))

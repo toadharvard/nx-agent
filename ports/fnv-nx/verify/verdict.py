@@ -105,11 +105,21 @@ def _gate_result(g, out_dir, rc):
         why = r.get("reasons") if isinstance(r.get("reasons"), dict) else {}   # optional {id: text}: why a test/item is uncertified
         more = "".join("\n  %s: %s" % (x, str(why[x]).replace("\n", " ")[-400:]) for x in r["uncertified"][:10] if isinstance(why.get(x), str))
         return "red", u, c, "certified %d < universe %d; uncertified: %s%s" % (c, u, ",".join(r["uncertified"][:50]), more)
+    if r["status"] != "green":   # the gate's own detail first: a red gate exits nonzero by contract, and the reason is what it found, not the exit code
+        return "red", u, c, "gate status red: " + r["detail"] + ("" if rc == 0 else " (exit %d)" % rc)
     if rc != 0:
-        return "red", u, c, "exit %d" % rc
-    if r["status"] != "green":
-        return "red", u, c, "gate status red: " + r["detail"]
+        return "red", u, c, "exit %d with a green result" % rc
     return "green", u, c, ""
+
+def _stderr_tail(path, n=1200):
+    """The last N characters of the gate's stderr file, newlines shown as ' | ' (the reason is one line); '(empty)' when the gate wrote nothing."""
+    try:
+        with open(path, "rb") as f:
+            t = f.read()[-4 * n:].decode("utf-8", "replace").strip()
+    except OSError as e:
+        return "(unreadable: %s)" % e
+    return t[-n:].replace("\n", " | ") if t else "(empty)"
+
 
 def _present_classes(wt):
     """The set of root classes of the admitted roots of the tree under test (gatesdir.root_classes); empty when admit.json is absent."""
@@ -165,9 +175,20 @@ def cmd_run(a):
             os.makedirs(tmp)
             t0 = time.time()
             try:
-                rc = subprocess.run(g["argv"], cwd=wt, env=dict(genv, GATE_OUT=out, TMPDIR=tmp, GATE_DETAIL=os.path.join(detail, g["name"])),
-                                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
+                errf = os.path.join(work, "stderr-%d" % len(res))   # outside the gate's TMPDIR and the worktree: the runner's own file
+                with open(errf, "wb") as ef:
+                    rc = subprocess.run(g["argv"], cwd=wt, env=dict(genv, GATE_OUT=out, TMPDIR=tmp, GATE_DETAIL=os.path.join(detail, g["name"])),
+                                        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=ef).returncode
                 st, u, c, why = _gate_result(g, out, rc)
+                if rc != 0 and st != "green" or not os.path.isfile(os.path.join(out, g["result"])):
+                    # a gate that ends without a verdict with reasons (a crash, a missing or invalid result file, a nonzero exit) is red WITH the gate's own stderr:
+                    # an exception inside a gate is a finding that names itself, never a bare exit code
+                    st = "red"
+                    tail = _stderr_tail(errf)
+                    if tail != "(empty)" or not os.path.isfile(os.path.join(out, g["result"])):
+                        why = (why + "; " if why else "") + "stderr tail: " + tail
+                    os.makedirs(os.path.dirname(detail + "/" + g["name"]), exist_ok=True)
+                    shutil.copyfile(errf, detail + "/" + g["name"] + ".stderr")
             except OSError as e:
                 st, u, c, why = "red", 0, 0, "cannot run: %s" % e
             left = sorted(os.listdir(tmp))

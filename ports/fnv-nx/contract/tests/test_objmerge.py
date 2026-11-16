@@ -4,10 +4,10 @@ import os, subprocess, sys, shutil, tempfile
 
 C = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 sys.path.insert(0, C)
-sys.path.insert(0, os.path.join(C, '..', 'verify'))
-import scratch
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: contract.X by its qualified name
+from verify import scratch
 scratch.install()
-import store
+from contract import store
 
 fails = []
 

@@ -1,0 +1,61 @@
+{
+ "format": "fnvnx-recipe/1",
+ "external": [
+  {
+   "name": "exe",
+   "repo": "fnv-nx-build",
+   "ref": "gamedata/exe",
+   "commit": "0948da1e89ab719dcf8471e45b67bc60575f6b93",
+   "tree_sha256": "ba933b684b5e221e74b8a841a0ebb35ea8599c78a4d582ca0c376ef5a424ef2b",
+   "at": "/ext/exe"
+  },
+  {
+   "name": "redist",
+   "repo": "fnv-nx-build",
+   "ref": "gamedata/redist",
+   "commit": "c53729e3bac168798fddcf4312f5a64a9b5eb08f",
+   "tree_sha256": "fe7d3b56dba13c2bb236bdd3f7681dab41029f192283b7d4ba0c81105878bfd2",
+   "at": "/ext/redist"
+  }
+ ],
+ "uses": [
+  {
+   "root": "ports/fnv-nx/loader",
+   "output": "MODULES_TSV"
+  },
+  {
+   "root": "ports/fnv-nx/loader",
+   "output": "KEYS_TSV"
+  }
+ ],
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/lift/tools/universe.py",
+   "args": [
+    "--out",
+    "/out/o",
+    "--module",
+    "d3dx9_38",
+    "--modules",
+    "/uses/ports/fnv-nx/loader/MODULES_TSV",
+    "--moddirs",
+    "/ext/exe:/ext/redist",
+    "--keys",
+    "/uses/ports/fnv-nx/loader/KEYS_TSV",
+    "--lib",
+    "/in/ports/fnv-nx/lift"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/fnvlift",
+    "ports/fnv-nx/lift/proof"
+   ],
+   "outputs": [],
+   "dirs": [
+    "o"
+   ]
+  }
+ ],
+ "outputs": {
+  "IMG": "o"
+ }
+}
