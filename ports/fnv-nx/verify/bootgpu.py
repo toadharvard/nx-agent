@@ -10,7 +10,7 @@ leaves two symbols for the embedder: nxgl4_guest_ptr(addr, size) (guest range ->
 one mapping readable and writable for the guest: Machine.host_ptr) and nxgl4_on_present(frame). The library does not ship them, so
 this file loads the recipe product of the host-target root tests/bootrt (libnxgl4rt.so, built by recipe.py in the verdict's store, $GATE_CACHE;
 no compiler is called here) RTLD_GLOBAL, then the library. bootrt defines the two embedder symbols (forwarding to the function pointers set through
-nxgl4_shim_set(ptr, present, exit)) and fnvnx_reach_violation (hostabi/include/fnvnx/reach.h) for every host object. The environment of the library (LIBGL_ALWAYS_SOFTWARE,
+nxgl4_shim_set(ptr, present, exit)) for every host object. The environment of the library (LIBGL_ALWAYS_SOFTWARE,
 GALLIUM_DRIVER, EGL_PLATFORM, NXGL4_FRAMES) is the caller's: boot.py sets it before Gpu() loads the library.
 """
 import ctypes
@@ -63,7 +63,6 @@ def _load_shim(gate_cache=None):
     if "lib" not in _shim:
         lib = ctypes.CDLL(bootrt_path(gate_cache), mode=ctypes.RTLD_GLOBAL)
         lib.nxgl4_shim_set.argtypes, lib.nxgl4_shim_set.restype = [PTR_CB, PRESENT_CB, EXIT_CB], None
-        lib.fnvnx_reach_violation.argtypes, lib.fnvnx_reach_violation.restype = [ctypes.c_uint32], None
         _shim["lib"] = lib
     return _shim["lib"]
 
@@ -88,16 +87,16 @@ def load(gate_cache=None):
 class Gpu:
     """one renderer library bound to one machine; at most one live Gpu per process (the library holds one GL context)"""
 
-    def __init__(self, machine, profile="handheld", on_present=None, on_first_call=None, on_exit=None, gate_cache=None):
+    def __init__(self, machine, profile="handheld", on_present=None, on_first_call=None, gate_cache=None, *, on_exit):
         if profile not in SIZES:
             raise GpuError("profile must be handheld or docked, got %r" % (profile,))
         self.m, self.presents, self.first_call, self.hook_present, self.hook_first = machine, 0, None, on_present, on_first_call
         shim, self.lib, path = load(gate_cache)
         with open(path, "rb") as f:
             self.sha256 = hashlib.sha256(f.read()).hexdigest()
-        # on_exit(code): a host object ended the process through fnvnx_reach_violation with the full 32-bit code; it
-        # ends the process itself. None registers no exit callback: the violation then ends the process with status 1 after its log line.
-        self._cbs = (PTR_CB(self._guest_ptr), PRESENT_CB(self._present), EXIT_CB(on_exit) if on_exit else EXIT_CB())   # alive as long as the library may call them
+        # on_exit(code), required: the host exit slot. A host object ends the process through it with the full 32-bit code; the callback
+        # ends the process itself. The protocol sets it before the renderer loads: there is no state without it.
+        self._cbs = (PTR_CB(self._guest_ptr), PRESENT_CB(self._present), EXIT_CB(on_exit))   # alive as long as the library may call them
         shim.nxgl4_shim_set(*self._cbs)
         lib = self.lib
         err = ctypes.create_string_buffer(256)
