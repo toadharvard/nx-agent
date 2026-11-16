@@ -1,6 +1,6 @@
 /* FNVNX_EXPORT(module, name, symbol, kind): one record of the section `.fnvnx.export` (contract/exportgen.py reads it into exports.tsv).
  * It says: the function or data object `symbol`, defined in this translation unit, is what the import `name` of the declared-machine module `module`
- * (a lower-case file name, e.g. "msvcrt.dll") resolves to.  `kind` is `func` or `data`.  The record is placed beside the definition and is the only
+ * (a lower-case file name, e.g. "msvcrt.dll") resolves to.  `kind` is `func` (a native function: the bridge marshals it by the type of its definer), `entry` (a body that works on the guest state itself: the bridge jumps to it, nothing is marshalled; its definer is `void(void)`) or `data`.  The record is placed beside the definition and is the only
  * place that fact is written: the bridge table (contract/bridgetable.py) reads exports.tsv and no hand list names a symbol for an import.
  * Text, LF-terminated, TAB-separated, not loaded. */
 #ifndef FNVNX_EXPORT_H

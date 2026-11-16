@@ -143,5 +143,55 @@ with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as td:
         check("the reader refuses an unknown name", False)
     except ValueError as x:
         check("the reader refuses an unknown name", "declares no external" in str(x), x)
+    # --ext: a build that names its external cache (not CACHE/external) fetched there; the reader goes where the writer wrote, through the one accessor
+    cache2 = os.path.join(td, "cache2")
+    os.makedirs(os.path.join(cache2, "store"), exist_ok=True)
+    xext = os.path.join(td, "elsewhere")
+    os.makedirs(xext)
+    recipe.set_artifacts(xext, e1[0])
+    recipe.fetch_externals([o1], os.path.join(cache2, "store"), xext, os.path.join(td, "ws3"))
+    hx, tx = recipe.resolve_input(T + "con", ref, repo, cache2, rc, xext)
+    check("with --ext the reader mounts from the build's external cache", tx == t1 and open(hx).read() == "one\n", tx)
+    # --- {include_of: ROOT}: the repository include directories of ROOT's recipe, as its compile stage resolves them
+    ir = os.path.join(td, "inc")
+    os.makedirs(ir)
+    git(ir, "init", "-q")
+    own = {"format": "fnvnx-recipe/1", "include": [T + "own/inc", "/ext/sdk/include"], "external": [{"name": "sdk", "repo": "x", "ref": "r", "commit": e1[1], "tree_sha256": e1[2], "at": "/ext/sdk"}],
+           "outputs": {"o": "o.txt"}, "generated": [{"tool": T + "own/g.py", "args": [], "inputs": [], "outputs": ["o.txt"]}]}
+    con = {"format": "fnvnx-recipe/1", "outputs": {"c": "c.txt"}, "uses": [{"root": T + "own", "output": "o"}],
+           "generated": [{"tool": T + "con/g.py", "args": [], "inputs": [{"include_of": T + "own"}], "outputs": ["c.txt"]}]}
+    w(ir, T + "own/build.json", json.dumps(own))
+    w(ir, T + "own/g.py", "open('/out/o.txt','w').write('x')\n")
+    w(ir, T + "own/inc/a.h", "int a;\n")
+    w(ir, T + "own/inc/sub/b.h", "int b;\n")
+    w(ir, T + "own/other/c.h", "int c;\n")
+    w(ir, T + "con/build.json", json.dumps(con))
+    w(ir, T + "con/g.py", "open('/out/c.txt','w').write('x')\n")
+    w(ir, T + "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [
+        {"path": T + "own", "class": "product", "target": "host", "recipe": T + "own/build.json"},
+        {"path": T + "con", "class": "product", "target": "host", "recipe": T + "con/build.json"}]}))
+    w(ir, T + "verify/env.json", open(os.path.join(HERE, "..", "env.json")).read())
+    git(ir, "add", "-A")
+    git(ir, "commit", "-q", "-m", "toy")
+    iroots = recipe.load_admit(ir)
+    irec = recipe.load_recipe(ir, iroots, T + "con")
+    ie = lambda ref, r=irec, rt=ir, ro=iroots, root="con": recipe.include_of_errors("t", ref, T + root, r, ro, rt)   # noqa: E731
+    check("include_of a used root: green", ie({"include_of": T + "own"}) == [], ie({"include_of": T + "own"}))
+    check("include_of: the repository include dirs only (a dir inside an external is no tracked tree)", recipe.include_of_dirs(T + "own", iroots, ir) == [T + "own/inc"], recipe.include_of_dirs(T + "own", iroots, ir))
+    check("include_of this root itself is red", any("itself" in e for e in ie({"include_of": T + "con"})))
+    check("include_of a root that is no admitted root is red", any("not an admitted root" in e for e in ie({"include_of": T + "ghost"})))
+    check("include_of a root that is neither used nor imported is red", any("declare the dependency" in e for e in ie({"include_of": T + "own"}, dict(irec, uses=[]))))
+    check("a malformed include_of is red", any("is not {include_of" in e for e in ie({"include_of": 1})) and recipe.is_include_of({"include_of": T + "own"}) and not recipe.is_include_of({"include_of": "x", "k": "y"}))
+    ee = recipe.check(irec, T + "con", recipe.tracked(ir), iroots, None, ir)
+    check("recipe.check of the consuming root holds no include_of error", not [e for e in ee if "include_of" in e], ee)
+    ij = recipe.Job(ir, T + "con", os.path.join(td, "istore"), 1, os.path.join(td, "iext"))
+    t1_ = ij.include_of_tree({"include_of": T + "own"})
+    t2_ = recipe.Job(ir, T + "con", os.path.join(td, "istore2"), 1, os.path.join(td, "iext")).include_of_tree({"include_of": T + "own"})
+    w(ir, T + "own/inc/a.h", "int a2;\n")
+    git(ir, "add", "-A")
+    git(ir, "commit", "-q", "-m", "edit")
+    ij3 = recipe.Job(ir, T + "con", os.path.join(td, "istore3"), 1, os.path.join(td, "iext"))
+    t3_ = ij3.include_of_tree({"include_of": T + "own"})
+    check("the mounted tree is the include dirs (not the sibling dir) and a changed header is a changed tree", t1_ != t3_ and t1_ == t2_, (t1_, t3_))
 print("fails: %d" % fails)
 sys.exit(1 if fails else 0)

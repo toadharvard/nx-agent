@@ -4,8 +4,8 @@
   gen_export_lookup.py --exports exports.tsv --bridge bridge.tsv --out lookup.cpp      (run with python3 -I)
 
 Sources (the only two; nothing is written by hand):
-  exports.tsv  contract/exports: `module TAB name TAB symbol TAB func|data TAB ret`, one row per FNVNX_EXPORT record of the link set (contract/exportgen.py).
-  bridge.tsv   bridgetable: one row per import of the declared machine, `dll name ordinal conv ret args native_symbol bind`. A row of a `*.dll` module with bind `link` names the
+  exports.tsv  contract/exports: `module TAB name TAB symbol TAB func|entry|data TAB ret TAB args`, one row per FNVNX_EXPORT record of the link set (contract/exportgen.py).
+  bridge.tsv   bridgetable: one row per import of the declared machine, `dll name ordinal conv ret args native_symbol bind`. A row of a `*.dll` module with bind `link` or `entry` names the
                symbol the import resolves to along its forward chain (wsock32!send -> ws2_32!send); it supplies the (module, name) keys that a forwarded import has no record for.
 RULE (total): the rows are the union of the exports.tsv rows and the bridge `link` rows; a key in both with two symbols, a key twice in one file, a symbol that is not a C identifier, or an
 empty union is an error (exit 2). The system modules are the modules of that union and the `*.dll` modules of the bridge (a module with bridge rows but no export record, d3d9, is one).
@@ -31,7 +31,7 @@ def read_exports(text):
         if not ln:
             continue
         f = ln.split("\t")
-        if len(f) != 5 or not MODULE.match(f[0]) or not f[1] or not IDENT.match(f[2]) or f[3] not in ("func", "data"):
+        if len(f) != 6 or not MODULE.match(f[0]) or not f[1] or not IDENT.match(f[2]) or f[3] not in ("func", "entry", "data"):
             raise ValueError("exports.tsv line %d: bad row" % n)
         if (f[0], f[1]) in rows:
             raise ValueError("exports.tsv line %d: %s!%s twice" % (n, f[0], f[1]))
@@ -40,7 +40,7 @@ def read_exports(text):
 
 
 def read_bridge(text):
-    """-> ({(dll, name): symbol} of the `link` rows of `*.dll` modules, set of those modules' names, {(dll, ordinal): name} of every `*.dll` row with an ordinal)"""
+    """-> ({(dll, name): symbol} of the `link` and `entry` rows of `*.dll` modules, set of those modules' names, {(dll, ordinal): name} of every `*.dll` row with an ordinal)"""
     rows, mods, ords = {}, set(), {}
     for n, ln in enumerate(text.split("\n"), 1):
         if not ln or ln.startswith("dll\t"):
@@ -56,7 +56,7 @@ def read_bridge(text):
             if not f[2].isdigit() or (dll, int(f[2])) in ords:
                 raise ValueError("bridge.tsv line %d: bad or repeated ordinal %r of %s" % (n, f[2], dll))
             ords[(dll, int(f[2]))] = name
-        if bind != "link":
+        if bind not in ("link", "entry"):
             continue
         if not IDENT.match(sym):
             raise ValueError("bridge.tsv line %d: symbol %r is not a C identifier" % (n, sym))

@@ -107,6 +107,11 @@ def main():
     check("native guest root with the full plugin set has no plugin error", pl(errs(repo, REC)) == [], pl(errs(repo, REC)))
     hrepo = make_repo("native-host", REC, "native", target="host")
     check("target profile: a host root with no plugin has no plugin error", pl(errs(hrepo, mut(plugins=[]))) == [], pl(errs(hrepo, mut(plugins=[]))))
+    he = pl(errs(hrepo, mut(plugins=PLUGS)))
+    check("target profile: a host root that loads the plugins is red (host = the empty set)", any("host root" in x and "loads plugin" in x for x in he), he)
+    he1 = pl(errs(hrepo, mut(plugins=[P["fnvnx_ftoi"]])))
+    check("target profile: a host root that loads one plugin is red", any("loads plugin(s) fnvnx_ftoi" in x for x in he1), he1)
+    check("target profile: a host native C++ root needs no SDD flag", not any("lacks" in x for x in errs(hrepo, mut(plugins=[], flags={"c": [], "cxx": ["-O2"], "asm": []}))))
     for gone in recipe.PLUGIN_SOURCES:
         r = mut(plugins=[p for p in PLUGS if p["name"] != gone])
         e = errs(repo, r)

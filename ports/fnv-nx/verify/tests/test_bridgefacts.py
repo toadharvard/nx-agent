@@ -26,20 +26,18 @@ BF = "ports/fnv-nx/bridgefacts"
 roots = recipe.load_admit(repo)
 check("bridgefacts is an admitted tool root with a recipe", roots.get(BF, {}).get("class") == "tool", roots.get(BF))
 rec = recipe.load_recipe(repo, roots, BF)
-check("it declares the COM rows, COM spec, COM words, d3d9 rows and the import bridge table as outputs and uses nothing (a root below every consumer: no uses cycle)",
-      rec["outputs"] == {"COM_ROWS": "com_rows.tsv", "COM_SPEC": "com_spec.json", "COM_WORDS": "com_words.tsv", "D9_ROWS": "d9bridge_rows.tsv", "BRIDGE": "bridge.tsv"} and not rec.get("uses"), rec.get("outputs"))
+check("it declares the COM rows, COM spec, COM words and d3d9 rows as outputs and uses nothing (a root below every consumer: no uses cycle); the bridge table is the bridgetable root's",
+      rec["outputs"] == {"COM_ROWS": "com_rows.tsv", "COM_SPEC": "com_spec.json", "COM_WORDS": "com_words.tsv", "D9_ROWS": "d9bridge_rows.tsv"} and not rec.get("uses"), rec.get("outputs"))
+BT = "ports/fnv-nx/bridgetable"
 u = recipe.load_recipe(repo, roots, "ports/fnv-nx/loader").get("uses") or []
-check("ports/fnv-nx/loader takes the import bridge table BRIDGE through uses", {"root": BF, "output": "BRIDGE"} in u, u)
-plat = recipe.load_recipe(repo, roots, "ports/fnv-nx/platform")
+check("ports/fnv-nx/loader takes the import bridge table BRIDGE from the bridgetable root through uses", {"root": BT, "output": "BRIDGE"} in u, u)
 with open(os.path.join(repo, "ports/fnv-nx/platform/imports.in.json")) as fh:
-    nt = json.load(fh).get("name_table")
-check("ports/fnv-nx/platform names the msvcrt name table (empty: every msvcrt export is a record; the lookup tables are generated from exports.tsv) by the tracked path of the tool root", nt == {"root": BF, "path": "crt/msvcrt_names.tsv"}, nt)
-check("no platform generate step reads the name table", not any(BF + "/crt/msvcrt_names.tsv" in str(g["inputs"]) for g in plat["generated"]))
+    decl = json.load(fh)
+check("the platform's imports declaration has no name table (every msvcrt export is a record; the lookup tables are generated from exports.tsv)", "name_table" not in decl, sorted(decl))
 check("no consumer root owns a copy of the inputs (spec, name table): the old paths are gone",
-      not any(os.path.exists(os.path.join(repo, "ports/fnv-nx", p)) for p in ("platform/com/com_spec.json", "platform/crt/msvcrt_names.tsv", "platform/com/spec_extract.py")))
-# the tool root's inputs are tracked files (a generate input by repo-relative path; recipe.check, run by load_recipe above, judges the declaration)
+      not any(os.path.exists(os.path.join(repo, "ports/fnv-nx", p)) for p in ("platform/com/com_spec.json", "platform/crt/msvcrt_names.tsv", "bridgefacts/crt/msvcrt_names.tsv", "platform/com/spec_extract.py")))
 tracked = subprocess.run(["git", "-C", repo, "ls-files", "--", BF + "/crt"], capture_output=True, text=True).stdout.split()
-check("the name table and the va record are tracked files of the tool root", {BF + "/crt/msvcrt_names.tsv", BF + "/crt/msvcrt_va.tsv"} <= set(tracked), tracked)
+check("the va record is a tracked file of the tool root", BF + "/crt/msvcrt_va.tsv" in tracked, tracked)
 # {root, output}: needs the consumer's `uses`; an undeclared output or an output not used is red (checked before any build)
 for why, ref in (("an output the consumer does not use", {"root": BF, "output": "COM_WORDS_X"}), ("another root's output without `uses`", {"root": BF, "output": "COM_WORDS"})):
     try:
