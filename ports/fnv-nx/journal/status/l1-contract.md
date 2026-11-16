@@ -2374,3 +2374,4 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - ELF-path blocker (L2): the recipe-path compiler build is red at stage 1 (cand4b 899545528). pathflow misses path constants used as default arguments (verify/targets.py TARGETS), so targets.json is not mounted.
   - Top item for w28: every module-level repo-path constant is a declared file of its module, covering every reference form.
 - bottleneck: the cand3b verdict (farm) and this pathflow fix.
+- w28 35cdcd88f: pathflow counts parameter defaults as reads (6 tests pass); targets.py mounts targets.json, ASSUMPTIONS.json and guest_compiler.json. Handed to L2 for the recipe-path compiler build.
