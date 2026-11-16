@@ -45,6 +45,7 @@ def lift_with_paths(a):
         t, m = L.lift_entry(S['img'], a)
     except L.Unsupported as e:
         return None, str(e), None
+    S['flagdrop'] = m['flagdrop']      # addr -> mask of the flag writes the lifter left out (fnvlift/flaglive.py), read by the generator for the side file
     return t, S['cap'][-1][0], m['paths']
 
 
