@@ -1,0 +1,239 @@
+{
+ "format": "fnvnx-recipe/1",
+ "compiler": {
+  "name": "stage1",
+  "root": "ports/fnv-nx/toolchain-stage1",
+  "output": "STAGE1",
+  "at": "/ext/stage1"
+ },
+ "plugins": [
+  {
+   "name": "fnvnx_ftoi"
+  },
+  {
+   "name": "fnvnx_order"
+  },
+  {
+   "name": "fnvnx_sdd"
+  },
+  {
+   "name": "fnvnx_pi"
+  },
+  {
+   "name": "fnvnx_dispatch"
+  },
+  {
+   "name": "fnvnx_addr"
+  },
+  {
+   "name": "fnvnx_names"
+  },
+  {
+   "name": "fnvnx_layout"
+  }
+ ],
+ "external": [
+  {
+   "name": "gcc-src",
+   "repo": "fnv-nx-build",
+   "ref": "tools/gcc-src-13.3.0",
+   "commit": "f445876db6a60cbbeaabb74496feb3ac4d8dd9c0",
+   "tree_sha256": "f50e0b054a167e54dc26e28a4df50dcd1a263f406264904c8b90083b978d20ea",
+   "at": "/ext/gcc"
+  },
+  {
+   "name": "newlib-src",
+   "repo": "fnv-nx-build",
+   "ref": "tools/newlib-4.6.0.20260123",
+   "commit": "2fb73524ccbb9e2877b43376561ae6fd5dbd169f",
+   "tree_sha256": "af2b544d2f73809053d82ac46ca194ea49ba5d597ee3499077ecb2d10e61ad9e",
+   "at": "/ext/newlib"
+  },
+  {
+   "name": "autotools-src",
+   "repo": "fnv-nx-build",
+   "ref": "tools/autotools-src",
+   "commit": "2dee10986af8b42c2da5af3cde7bddc0cd0c1905",
+   "tree_sha256": "6dbd091d6837b4e4a980710334b210d30107829dae63ed63a1964313b8999ed3",
+   "at": "/ext/autotools"
+  },
+  {
+   "name": "devkitpro-buildscripts",
+   "repo": "fnv-nx-build",
+   "ref": "tools/devkitpro-buildscripts-5740da9b",
+   "commit": "f34068c82a55f7020028b40e9313cf0fe177f63c",
+   "tree_sha256": "f0923ebe46119eacc98a29483651927dd528b3993a8fac3f73c3c92140aef0e0",
+   "at": "/ext/buildscripts"
+  }
+ ],
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/toolchain/msvcmodel/records.py",
+   "args": [
+    "stage2",
+    "/out/records2.sh",
+    "/in/ports/fnv-nx/verify"
+   ],
+   "inputs": [
+    "ports/fnv-nx/verify"
+   ],
+   "outputs": [
+    "records2.sh"
+   ]
+  }
+ ],
+ "run": [
+  {
+   "name": "rt",
+   "exec": "/usr/bin/bash",
+   "args": [
+    "/in/1"
+   ],
+   "inputs": [
+    "ports/fnv-nx/toolchain/msvcmodel/rt.sh",
+    {
+     "stage": "ports/fnv-nx/toolchain:gen:0",
+     "path": "records2.sh"
+    },
+    "ports/fnv-nx/toolchain/msvcmodel/msvcmodel.patch",
+    "ports/fnv-nx/toolchain/gcc/x19-x27.patch",
+    "ports/fnv-nx/toolchain/gcc/libstdcxx-nosized.patch",
+    "ports/fnv-nx/toolchain/gcc/newlib-guest.patch",
+    "ports/fnv-nx/toolchain/gcc/cfg_link.py",
+    "ports/fnv-nx/link/guest.ld",
+    "ports/fnv-nx/toolchain/dispatch/fnvnx_dispatch.cc",
+    {
+     "plugin": "fnvnx_ftoi"
+    },
+    {
+     "plugin": "fnvnx_order"
+    },
+    {
+     "plugin": "fnvnx_sdd"
+    },
+    {
+     "plugin": "fnvnx_pi"
+    },
+    {
+     "plugin": "fnvnx_dispatch"
+    },
+    {
+     "plugin": "fnvnx_addr"
+    },
+    {
+     "plugin": "fnvnx_names"
+    },
+    {
+     "plugin": "fnvnx_layout"
+    }
+   ],
+   "debs": [
+    "base-files",
+    "bash",
+    "coreutils",
+    "sed",
+    "grep",
+    "patch",
+    "xz-utils",
+    "tar",
+    "gzip",
+    "findutils",
+    "diffutils",
+    "mawk",
+    "make",
+    "m4",
+    "perl",
+    "perl-base",
+    "perl-modules-5.38",
+    "libperl5.38t64",
+    "python3",
+    "python3-minimal",
+    "python3.12",
+    "python3.12-minimal",
+    "libpython3.12-stdlib",
+    "libpython3.12-minimal",
+    "libpython3-stdlib",
+    "binutils-aarch64-linux-gnu",
+    "binutils-common",
+    "libbinutils",
+    "libctf0",
+    "libctf-nobfd0",
+    "libsframe1",
+    "libgprofng0",
+    "libjansson4",
+    "gcc-13",
+    "g++-13",
+    "cpp-13",
+    "gcc-13-base",
+    "libgcc-13-dev",
+    "libstdc++-13-dev",
+    "libc6",
+    "libc6-dev",
+    "libc-dev-bin",
+    "linux-libc-dev",
+    "libcrypt-dev",
+    "libcrypt1",
+    "libgmp10",
+    "libgmp-dev",
+    "libmpfr6",
+    "libmpfr-dev",
+    "libmpc3",
+    "libmpc-dev",
+    "libisl23",
+    "libzstd1",
+    "zlib1g",
+    "libcc1-0",
+    "libgomp1",
+    "libitm1",
+    "libatomic1",
+    "libasan8",
+    "liblsan0",
+    "libtsan2",
+    "libubsan1",
+    "libhwasan0",
+    "libquadmath0",
+    "libstdc++6",
+    "libgcc-s1",
+    "libtinfo6",
+    "libselinux1",
+    "libpcre2-8-0",
+    "libacl1",
+    "libattr1",
+    "libmd0",
+    "liblzma5",
+    "libbz2-1.0",
+    "libreadline8t64",
+    "readline-common",
+    "libdb5.3t64",
+    "libgdbm6t64",
+    "libgdbm-compat4t64",
+    "debianutils",
+    "libc-bin",
+    "libexpat1",
+    "libffi8",
+    "libssl3t64",
+    "libsqlite3-0",
+    "gcc-x86-64-linux-gnu",
+    "gcc",
+    "cpp",
+    "g++",
+    "gcc-13-x86-64-linux-gnu",
+    "cpp-13-x86-64-linux-gnu",
+    "g++-13-x86-64-linux-gnu",
+    "binutils",
+    "binutils-x86-64-linux-gnu"
+   ],
+   "outputs": [],
+   "dirs": [
+    "COMPILER"
+   ],
+   "scratch": [
+    "/scratch"
+   ],
+   "timeout_s": 14400
+  }
+ ],
+ "outputs": {
+  "COMPILER": "COMPILER"
+ }
+}
