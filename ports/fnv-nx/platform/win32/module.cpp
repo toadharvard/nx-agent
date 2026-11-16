@@ -751,8 +751,6 @@ extern "C" void OutputDebugStringA(LPCSTR s)
         os_debug_print(s);
 }
 
-/* DebugBreak: EXCEPTION_BREAKPOINT raised by the platform; it returns when the exception was continued. */
-extern "C" void DebugBreak(void) { w32_raise(0x80000003u, 0, 0, NULL); }
 
 FNVNX_EXPORT("kernel32.dll", "FatalAppExitA", FatalAppExitA, "func");
 /* FatalAppExitA: Wine 9.0 dlls/kernelbase/debug.c FatalAppExitA, as it is there: user32's MessageBoxA when the module and the export exist

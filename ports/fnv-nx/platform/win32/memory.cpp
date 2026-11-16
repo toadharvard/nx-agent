@@ -920,7 +920,7 @@ static DWORD heap_eff(HANDLE hh, DWORD flags) { return W32_DW(flags) | heap_of(h
 static void *heap_failed(DWORD eff)
 {
     if (eff & HEAP_GENERATE_EXCEPTIONS)
-        RaiseException(STATUS_NO_MEMORY, 0, 0, NULL);
+        w32_raise(STATUS_NO_MEMORY, 0, 0, NULL);
     return NULL;
 }
 

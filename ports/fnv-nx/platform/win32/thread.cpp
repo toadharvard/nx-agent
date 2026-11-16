@@ -705,4 +705,3 @@ extern "C" void w32_raise(DWORD code, DWORD flags, DWORD nargs, const ULONG_PTR 
     }
 }
 
-extern "C" void RaiseException(DWORD code, DWORD flags, DWORD nargs, const ULONG_PTR *args) { w32_raise(code, flags, nargs, args); }
