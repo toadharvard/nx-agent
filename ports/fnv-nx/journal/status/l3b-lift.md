@@ -479,3 +479,15 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - blocked (owner L1 w28): foreach reading a stage-output table. The prover queue is derived from the exe, so it cannot be a tracked file. It blocks the prover root and the re-prove.
 - asked (L3a lead): reachability of the 368 unimplemented-opcode keys (arpl, bound, ins/outs, mov sreg, call far). If unreachable, the code-range rule removes them; otherwise the orchestrator rules on the SDM source.
 - doing: farm 2 runs L3a facts jobs (w7, w13); SIMD shards 1 and 2 (farms 1 and 3, prover eb53b3aa7, wall clock: a measurement).
+
+### 2026-11-16 04:40Z: reachability of the 368 model-gap keys; prover identity
+- Reachability census (w7): fnv-nx-build l3a-lift/udreach/f5d49d6fa, facts @f5d49d6fa. Covers the exe, atimgpud, binkw32, libvorbis, libvorbisfile and gdffalloutnv; d3dx9_31/38 pending.
+  - 333 of the 368 keys have no site in the entry ranges.
+  - 1,667 sites of 35 keys are in the ranges.
+  - 87 sites are under a proven root: rdtsc 3, int3 5, xlat 1, mov r/m16 from a segment register (66 8c) 78.
+  - 1,580 sites have only a candidate root. They are owned by L3a's code-range rule.
+- The source of semantics for the 4 proven-reachable classes (OWNER 10 SDM spec) is asked of the orchestrator. Blocked: orchestrator ruling.
+- prover_sha is the import closure of the prover modules (w4 73445881c, 25 files). Under review, not taken: relative imports, the importlib load in x87spec, data files, and the catch-all in stale_reason are sent back to w4.
+- The re-prove queue (w4) has 18,697 rows. It is not published and is rebuilt as a recipe stage output.
+  - Its universe is taken from the facts stage's shapes_<img>.tsv.
+  - Blocked: L1 w28, foreach over a stage-output table.
