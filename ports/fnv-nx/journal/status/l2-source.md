@@ -727,3 +727,7 @@ After the first frame:
   - The per-function .wc tests wait on the product ELF root (the boot machine runs only full ELFs). No harness.
 - bottleneck: the L2 farm's recipe-path gcc1/rt -> w3's pin commit.
 - 2026-11-16 06:25Z: coremath: all 7 CC argv carry -frounding-math from the pin's flags.semantics (checked from the stage docs). The RZ and .wc tests wait on the product ELF root; there is no static stand-in. w2 waits on the orchestrator's atan2 ruling.
+- 2026-11-16 06:30Z: orchestrator ruling (a), integ 5009d67dd: atan2's undecided-rounding branch calls mpfr_atan2 at 53 bits in the current rounding mode, via a declared core-math.patch stage. To w2:
+  - GMP and MPFR mirrors and guest roots;
+  - the patch at the atan2.c callers.
+  - GMP is generic C: its aarch64 asm does not target ILP32, and it runs only on that cold branch.
