@@ -63,7 +63,9 @@ import sys
 import tokenize
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import gatesdir  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import gatesdir  # noqa: E402
 
 TREE = "ports/fnv-nx"
 REGISTRY = TREE + "/verify/ASSUMPTIONS.json"
@@ -746,8 +748,8 @@ def main():
     detail += "; perfdebt: %d open" % pd_open
     detail += "; %d findings, full list: %s" % (len(allf), where)
     res = {"format": "fnvnx-gate/1", "name": "assumptions", "status": status, "universe": len(mentions), "certified": n,
-           "uncertified": ["%s:%d" % k for k in sorted(bad)][:50], "detail": "; ".join(errors[:20] + [detail])[:2000],
-           "reasons": {"%s:%d" % k: bad[k] for k in sorted(bad)[:50]}, "errors": errors[:50],
+           "uncertified": ["%s:%d" % k for k in sorted(bad)], "detail": "; ".join(errors + [detail]),
+           "reasons": {"%s:%d" % k: bad[k] for k in sorted(bad)}, "errors": errors[:50],
            "entries": count, "perfdebt": {"open": pd_open, "first_frame": (load(PERFDEBT) or {}).get("first_frame") is True}}
     with open(os.path.join(out, "assumptions.json"), "w") as fh:
         json.dump(res, fh, indent=1, sort_keys=True)

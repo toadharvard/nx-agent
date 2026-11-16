@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for verify/gate_linkstrict.py (class 3): the rules on synthetic objects (compiled with aarch64-linux-gnu-gcc) and the gate on the
 toy product root of test_recipe.py (reused by import). Plain script: PASS/FAIL lines, exit 0 on pass."""
 import json
@@ -13,11 +12,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
 sys.path.insert(0, HERE)
-import gate_linkstrict as L  # noqa: E402
-import test_recipe as TR  # noqa: E402
-import verdict  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import gate_linkstrict as L  # noqa: E402
+from fnvnx.verify.tests import test_recipe as TR  # noqa: E402
+from fnvnx.verify import verdict  # noqa: E402
 
-import scratch  # noqa: E402
+from fnvnx.verify import scratch  # noqa: E402
 
 scratch.install()
 ROOT = tempfile.mkdtemp(prefix="linkstrict-")
@@ -221,6 +222,13 @@ items, finds = L.judge({"g/o.o": L.elf_symbols(an)}, {}, {}, {}, None, ["g/"])
 check("(e) the same code with -mno-outline-atomics: no reference, no finding", not finds, finds)
 items, finds = L.judge({"h/o.o": L.elf_symbols(ao)}, {}, {}, {}, None, ["g/"])
 check("(e) outside a guest root the clause does not apply (an undefined name only)", [k for _, _, k, _ in finds] == ["undefined"], finds)
+# (g) the pinned runtime and the link script define names for the guest root's references
+items, finds = L.judge({"g/o.o": hs}, {}, {}, {}, None, ["g/"], {"printf"})
+check("(g) a guest reference that the runtime defines (printf) is certified, the name nothing defines stays undefined", [(o, n, k) for o, n, k, _ in finds] == [("g/o.o", "nothere", "undefined")], finds)
+items, finds = L.judge({"g/o.o": hs}, {}, {}, {}, None, ["g/"], set())
+check("(g) with no runtime name both stay undefined", sorted(n for _, n, _, _ in finds) == ["nothere", "printf"], finds)
+items, finds = L.judge({"h/o.o": hs}, {}, {}, {}, None, ["g/"], {"printf", "nothere"})
+check("(g) outside a guest root the runtime does not apply", sorted(n for _, n, _, _ in finds) == ["nothere", "printf"], finds)
 ABI[0] = "lp64"
 print("%d failed, wall %.1f s" % (len(FAILED), time.time() - T0))
 sys.exit(1 if FAILED else 0)

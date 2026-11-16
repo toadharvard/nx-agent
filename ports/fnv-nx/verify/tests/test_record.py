@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/contract ports/fnv-nx/verify
 """Tests for the one set of files of a pinned python module (envcheck.record_files: the wheel's RECORD): the digest, the mount and the red cases,
 on a toy wheel that keeps a library in a sibling *.libs directory (as gmpy2 and numpy do). No game data."""
 import base64
@@ -14,11 +13,13 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
-import scratch  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import scratch  # noqa: E402
 
 scratch.install()
-import envcheck  # noqa: E402
-import runtime  # noqa: E402
+from fnvnx.verify import envcheck  # noqa: E402
+from fnvnx.verify import runtime  # noqa: E402
 
 FAILED = []
 

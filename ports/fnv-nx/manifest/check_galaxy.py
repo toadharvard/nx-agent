@@ -7,9 +7,9 @@ those two modules is a reached name.
           + { (dll, name) : a dynsites.tsv row (LoadLibrary / GetProcAddress) whose operand names galaxy.dll or galaxywrp.dll
               (a GetProcAddress row carries "<dll> <name>" in the operand's resolved form; a row whose module is not statically
               resolved is a measurement build: reported, exit 1) }
-  bodies  = the E("steam_api", <name>) rows of platform/win32/exports.cpp (galaxywrp is its alias, g_alias), and no other name of the alias
-Checks (one line per violation, exit 1): a reached name with no body; a body that is not reached; an alias of galaxy.dll or galaxywrp.dll
-other than the one to steam_api; a body without a row of env_const.tsv or a definition in services.cpp.
+  bodies  = the FNVNX_EXPORT("galaxywrp.dll", <name>, ...) records of the platform tree (the module of a record is the module the import table binds the name to)
+Checks (one line per violation, exit 1): a reached name with no body; a body that is not reached; a record under galaxy.dll or steam_api.dll;
+a body without a row of env_const.tsv or a definition in services.cpp.
 The facts are a PATH ARGUMENT (the private exe-derived manifest directory of fnv-nx-build, branch l5-manifest); none is embedded here.
 --selftest: builds three fact directories in a temp dir from the real one and requires exit 1 on each: (a) a galaxy.dll import row for a name
 without a body, (b) a dynamic site whose operand names galaxy.dll and a function, (c) an import row removed so that a body is reached by nothing.
@@ -84,15 +84,16 @@ def main(argv):
                     reached.setdefault(toks[-1], []).append("dynamic %s %s" % (r["module"], r["site"]))
                 else:
                     errs.append("dynsites %s %s: names %s without a resolved function name (measurement build)" % (r["module"], r["site"], g))
-    exp = open(os.path.join(root, "platform/win32/exports.cpp"), encoding="utf-8").read()
-    bodies = set(re.findall(r'E\("steam_api",\s*([A-Za-z_]\w*)\)', exp))
-    alias = re.search(r"g_alias\[\]\[2\]\s*=\s*\{(.*?)\};", exp, re.S)
-    pairs = re.findall(r'\{\s*"(\w+)",\s*"(\w+)"\s*\}', alias.group(1)) if alias else []
-    for a, t in pairs:
-        if a in ("galaxy", "galaxywrp") and t != "steam_api":
-            errs.append("exports.cpp: alias %s -> %s (only steam_api is the declared-machine body set)" % (a, t))
-    if ("galaxywrp", "steam_api") not in pairs:
-        errs.append("exports.cpp: no alias galaxywrp -> steam_api")
+    recs = []   # (module, name) of every FNVNX_EXPORT record of the platform tree (contract/exporthdr/include/fnvnx_export.h)
+    for d, _, fs in os.walk(os.path.join(root, "platform")):
+        for f in sorted(fs):
+            if f.endswith((".c", ".cc", ".cpp", ".h", ".inc")):
+                with open(os.path.join(d, f), encoding="utf-8", errors="replace") as fh:
+                    recs += re.findall(r'FNVNX_EXPORT\(\s*"([^"]+)"\s*,\s*"([^"]+)"\s*,', fh.read())
+    bodies = {n for m, n in recs if m == "galaxywrp.dll"}
+    for m, n in recs:
+        if m in ("galaxy.dll", "steam_api.dll"):
+            errs.append("a record %s!%s: the exe binds these names under galaxywrp.dll only (the module of a record is the module its import table binds)" % (m, n))
     env = {r["symbol"] for r in rows(os.path.join(root, "manifest/env_const.tsv"))}
     svc = open(os.path.join(root, "platform/win32/services.cpp"), encoding="utf-8").read()
     for n in sorted(reached):

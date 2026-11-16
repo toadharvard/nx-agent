@@ -14,8 +14,9 @@ uncertified = the basenames of the others (sorted).
 """
 import argparse, collections, glob, os, re, subprocess, sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import gatefile
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name (contract.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.contract import gatefile
 
 SEC = re.compile(r"Relocation section '\.rela(\.text[^']*)'")
 CALLS = ('__dynamic_cast', '__cxa_bad_cast', '__cxa_bad_typeid', '_ZNKSt9type_infoeqERKS_', '_ZNKSt9type_info6beforeERKS_')

@@ -32,10 +32,12 @@ import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import envcheck  # noqa: E402
-import cas  # noqa: E402
-import gatesdir  # noqa: E402
-import verdict  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import envcheck  # noqa: E402
+from fnvnx.verify import cas  # noqa: E402
+from fnvnx.verify import gatesdir  # noqa: E402
+from fnvnx.verify import verdict  # noqa: E402
 
 GATES = "ports/fnv-nx/verify/gates.d"
 ENV = "ports/fnv-nx/verify/env.json"
@@ -82,9 +84,15 @@ def _check(repo, commit, vdir, budget, gates, td, env_id, started):
         verdict.cmd_store(["--verdict", outp, "--verdicts", vdir])
     return json.load(open(outp))
 
+def _artifacts(o):
+    """The artifacts repository is a required argument; it is recorded beside the verdict's external cache (recipe.set_artifacts), where every gate reads it."""
+    from fnvnx.verify import recipe
+    recipe.set_artifacts(recipe.ext_dir(os.path.join(os.path.abspath(o["--verdicts"]), "cache")), o["--artifacts"])
+
 def cmd_verdict(a):
     started = time.time()
-    o = _opts(a, ("--commit",))
+    o = _opts(a, ("--commit", "--artifacts"))
+    _artifacts(o)
     env_id, bad = _env(o["--repo"], o["--commit"])
     if bad:
         return _blocked_env(bad)
@@ -95,7 +103,8 @@ def cmd_verdict(a):
 
 def cmd_merge(a):
     started = time.time()
-    o = _opts(a, ("--into", "--from"), ("--remote",))
+    o = _opts(a, ("--into", "--from", "--artifacts"), ("--remote",))
+    _artifacts(o)
     o.setdefault("--remote", None)
     repo, vdir, remote, bname = o["--repo"], o["--verdicts"], o["--remote"], o["--into"]
     if remote:

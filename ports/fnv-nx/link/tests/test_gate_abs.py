@@ -2,6 +2,9 @@
 """Check of link/gate_abs.py (H3a): a relocation to an absolute symbol is red, in a loose object and in an archive member; so are an absolute
 definition and a reference to a name the linked image defines as absolute; clean inputs are green.  Needs the AArch64 cross toolchain
 (as test_link_synth.py)."""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import subprocess
@@ -10,11 +13,11 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..'))
-sys.path.append(os.path.join(HERE, '..', '..', 'verify'))
-import scratch
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import scratch
 scratch.install()
-import gate_abs
-import relocs
+from fnvnx.link import gate_abs
+from fnvnx.link import relocs
 
 X = 'aarch64-linux-gnu-'
 fails = []
@@ -76,8 +79,7 @@ check('exit status red', r.returncode, 1)
 with open(os.path.join(go, 'abs.json')) as fh:
     j = json.load(fh)
 check('gate file', (j['name'], j['status'], j['format'], j['universe'] - j['certified'], len(j['uncertified'])), ('abs', 'red', 'fnvnx-gate/1', 3, 3))
-with open(os.path.join(go, 'abs.ids')) as fh:
-    check('ids file', fh.read().split('\n')[:-1], sorted(j['uncertified']))
+check('the file has every id and their count', (j['uncertified'] == sorted(j['uncertified']), j['uncertified_n']), (True, len(j['uncertified'])))
 if fails:
     print('\n'.join(fails))
     sys.exit(1)

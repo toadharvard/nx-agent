@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Gate items as results of the verdict's store (gate_build.memo: GATE_CACHE/memo/<gate>/<key>.json, the key holds everything the item reads).
 memo itself: a miss makes and publishes, a hit reads and does not make, another key makes again, a value that KEEP refuses is not stored, no cache means
 make every time, two processes on one key leave one complete file. exepin on a toy git tree: a second run is a hit (one memo file, under 5 s), one changed
@@ -14,7 +13,9 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
-import gate_build  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import gate_build  # noqa: E402
 
 FAILS = 0
 

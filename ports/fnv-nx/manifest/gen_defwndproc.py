@@ -17,8 +17,8 @@ import os
 import re
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from gen_wine_cites import strip_comments  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.manifest.gen_wine_cites import strip_comments  # noqa: E402
 
 FILE = "dlls/win32u/defwnd.c"
 FUNC = "default_window_proc"
@@ -43,7 +43,7 @@ def labels(tree):
         j += 1
     out = []
     for lm in re.finditer(r"\bcase (WM_[A-Z0-9_]+)\s*:", text[start:j]):
-        out.append((lm.group(1), text.count("\n", 0, start + lm.start()) + 1))
+        out.append((lm[1], text.count("\n", 0, start + lm.start()) + 1))
     return out
 
 
@@ -53,7 +53,7 @@ def main():
     defs = {}
     for f in IDS:
         for m in re.finditer(r"^#[ \t]*define[ \t]+(WM_[A-Z0-9_]+)[ \t]+(0x[0-9A-Fa-f]+|[0-9]+|WM_[A-Z0-9_]+)\b", open(os.path.join(tree, f), encoding="utf-8", errors="replace").read(), re.M):
-            defs.setdefault(m.group(1), m.group(2))
+            defs.setdefault(m[1], m[2])
     ids = {}
     for n in defs:
         v, hops = defs[n], 0
@@ -64,9 +64,9 @@ def main():
     labs = labels(tree)
     handlers = {}
     for m in HANDLER.finditer(open(cpp, encoding="utf-8").read()):
-        if m.group(2) in handlers:
-            errors.append("handler %s is defined twice" % m.group(1))
-        handlers[m.group(2)] = m.group(1)
+        if m[2] in handlers:
+            errors.append("handler %s is defined twice" % m[1])
+        handlers[m[2]] = m[1]
     names = [n for n, _ in labs]
     for n, line in labs:
         if n not in ids:

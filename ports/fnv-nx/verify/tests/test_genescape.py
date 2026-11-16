@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """gen:file-escape (recipe.check, pathflow.escapes: the rule the abspath gate runs too): a generator tool (or a module it imports) that reads a file by a path built from
 __file__ / __path__ / sys.argv[0] is red when the path leaves the tree the stage mounts the tool from, or cannot be decided; green for a file inside that tree and for a
-read guarded by require_mounted/require_under. Toy repos in temp git dirs; `recipe.check` only (no stage runs)."""
+read guarded by require_mounted. Toy repos in temp git dirs; `recipe.check` only (no stage runs)."""
 import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import test_recipe as TR  # noqa: E402
-import test_link as TL  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify.tests import test_recipe as TR  # noqa: E402
+from fnvnx.verify.tests import test_link as TL  # noqa: E402
 
 recipe, T, ROOT, check = TR.recipe, TR.T, TR.ROOT, TR.check
 OUT = "import sys\nopen('/out/gen/o.c', 'w').write('int o;\\n')\n"
@@ -34,7 +36,7 @@ def main():
     check("red: a path with a part the rule cannot decide is never green", len(e) == 1, e)
     e = errs("ge5", "import os, sys\nsys.path.insert(0, os.path.dirname(__file__))\nopen(sys.argv[1])\n")
     check("green: a read of an argument (declared `uses` input passed as an argument)", e == [], e)
-    e = errs("ge6", "import os\nimport helper\n", {"gen/helper.py": "import os\nopen(os.path.join(os.path.dirname(__file__), '..', '..', 'x'))\n"})
+    e = errs("ge6", "import os\nfrom . import helper\n", {"gen/helper.py": "import os\nopen(os.path.join(os.path.dirname(__file__), '..', '..', 'x'))\n"})
     check("red: the escape is found in a module of the tool's import closure too", len(e) == 1 and "helper.py" in e[0], e)
     print("%d FAILED" % len(TR.FAILED) if TR.FAILED else "all passed")
     return 1 if TR.FAILED else 0

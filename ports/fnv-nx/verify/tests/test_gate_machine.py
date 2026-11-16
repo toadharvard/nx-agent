@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for verify/gate_machine.py (class G): the driver on the toy product root of test_recipe.py with a synthetic regsites.tsv published as an
 external of a stand-in artifacts repository; the pure rules are tested by contract/tests/test_hive.py. Plain script: exit 0 on pass."""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import sys
@@ -9,10 +11,10 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), "contract"))
-import gate_machine as G  # noqa: E402
-import hive  # noqa: E402
-import test_recipe as TR  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import gate_machine as G  # noqa: E402
+from fnvnx.contract import hive  # noqa: E402
+from fnvnx.verify.tests import test_recipe as TR  # noqa: E402
 
 FAILED = []
 
@@ -23,7 +25,7 @@ def check(name, ok, extra=""):
         FAILED.append(name)
 
 
-os.environ["ARTIFACTS_URL"] = TR.BASE + "/artifacts.git"
+TR.recipe.ARTIFACTS = TR.BASE + "/artifacts.git"
 TR.subprocess.run(["git", "init", "-q", "--bare", TR.BASE + "/artifacts.git"], check=True)
 GC = TR.BASE + "/cache"
 LM = "HKEY_LOCAL_MACHINE"
@@ -87,6 +89,10 @@ check("seed include that differs from the generator output: red", rc == 2 and g[
 
 rc, g, txt = run(toy_repo("foreign", SH + READ, unit="other.c"), "foreign")
 check("writer outside the seed unit: red", rc == 2 and g["status"] == "red" and "writer:seed.c\tforeign-writer" in open(TR.BASE + "/o-foreign/machine.ids").read(), (g, txt))
+
+TABLE = '#include "toy.h"\nint RegSetValueExA(void);\nvoid *const reg_export[] = {(void *)RegSetValueExA};\nint seed(void) { return reg_export != 0 && TOY; }\n'
+rc, g, txt = run(toy_repo("addr", SH + READ, unit="other.c", writers={"toy/seed.c": TABLE}), "addr")
+check("an address taken in a table (no call relocation) is not a write: green with the unit outside the seed unit", rc == 0 and g["status"] == "green" and g["universe"] == g["certified"], (g, txt))
 
 rc, g, txt = run(toy_repo("unread", SH, seed=""), "unread")
 check("declared row with no read site: red", rc == 2 and g["status"] == "red" and "no-read-site" in open(TR.BASE + "/o-unread/machine.ids").read(), (g, txt))

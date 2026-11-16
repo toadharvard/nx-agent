@@ -5,9 +5,13 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-import ctypes_compat as C
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.link import ctypes_compat as C
 
 fails = []
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'toolchain', 'layout', 'decltype_spell.inc')) as _f:
+    REASONS = C.decltype_reasons(_f.read())
 
 
 def ok(a, b, want, what):
@@ -38,6 +42,8 @@ ok('(?)int', '(int,*char)int', True, 'K&R against promoted-free prototype')
 ok('(?)int', '(char)int', False, 'K&R against a prototype with a promoted parameter')
 ok('struct:L{next:*struct:L}', 'struct:L{next:*struct:L}', True, 'recursive')
 ok('struct:L{next:*struct:L{v:int}}', 'struct:L{next:*struct:L{v:long}}', False, 'recursive, inner member differs')
+ok('struct:L{next:*struct:L{v:int};a:struct:-{w:int}}', 'struct:L{next:*struct:L{v:int};a:struct:-{w:int}}', True, 'recursive named pair with an anonymous member (no memo entry for the anonymous one)')
+ok('struct:L{next:*struct:L{v:int};a:struct:-{w:int}}', 'struct:L{next:*struct:L{v:int};a:struct:-{w:long}}', False, 'recursive named pair, anonymous member differs')
 ok('enum:E=unsigned_int', 'enum:E=unsigned_int', True, 'enum')
 ok('enum:E=unsigned_int', 'enum:E=int', False, 'enum underlying type')
 # per symbol over objects: every pair is judged
@@ -56,23 +62,23 @@ for bad in ('struct:S{x:int', '[x]int', '(int', 'const:', '*'):
         fails.append('parsed %r' % bad)
     except ValueError:
         pass
-if C.parse_decltype(b'f\tint\n', 'x') != {'f': 'int'}:
+if C.parse_decltype(b'f\tint\n', 'x', REASONS) != {'f': 'int'}:
     fails.append('parse_decltype')
 for bad in (b'f\tint', b'f\tint\nf\tint\n', b'f\t[\n'):
     try:
-        C.parse_decltype(bad, 'x')
+        C.parse_decltype(bad, 'x', REASONS)
         fails.append('parse_decltype accepted %r' % bad)
     except ValueError:
         pass
 # RULE DECLTYPE-COMPLETE: a line is `symbol<TAB>type` or `symbol<TAB>-reason`, the reasons being the plugin's closed set
-types, why = C.parse_decltype_lines(b'f\t(int)int\n_ZN1AC1Ev\t-mangled\nmemcpy\t-builtin\n__addtf3\t-libcall\nx\t-cxx\ny\t-noname\n', 'x')
+types, why = C.parse_decltype_lines(b'f\t(int)int\n_ZN1AC1Ev\t-mangled\nmemcpy\t-builtin\n__addtf3\t-libcall\nx\t-cxx\ny\t-noname\n', 'x', REASONS)
 if types != {'f': '(int)int'} or why != {'_ZN1AC1Ev': 'mangled', 'memcpy': 'builtin', '__addtf3': 'libcall', 'x': 'cxx', 'y': 'noname'}:
     fails.append('parse_decltype_lines: %r %r' % (types, why))
-if C.parse_decltype(b'f\t(int)int\ng\t-mangled\n', 'x') != {'f': '(int)int'}:
+if C.parse_decltype(b'f\t(int)int\ng\t-mangled\n', 'x', REASONS) != {'f': '(int)int'}:
     fails.append('parse_decltype keeps the typed rows only')
 for bad in (b'f\t-unknown\n', b'f\t-mangled\nf\t-mangled\n', b'f\t(int)int\nf\t-cxx\n'):
     try:
-        C.parse_decltype_lines(bad, 'x')
+        C.parse_decltype_lines(bad, 'x', REASONS)
         fails.append('parse_decltype_lines accepted %r' % bad)
     except ValueError:
         pass

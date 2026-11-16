@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Gate "tlsmodel" (fnvnx-gate/1, class A of VERDICT.md): every thread-local reference of a guest object and of a linked guest output uses a
 TLS access model the loader supports, and one symbol is accessed with one model.
-    python3 -I gate_tlsmodel.py    cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/tlsmodel.json
+    python3 -I gate_tlsmodel.py    cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/tlsmodel.json
 Roots: every product and test root of verify/admit.json with "target": "guest", built by gate_build.ensure; a root's link group is its own
 objects plus the objects of its derived link members (ld's archive selection, recipe.link_candidates) (the objects that one linked output is made of), and its linked ELF.
 Facts are the relocations of the pinned binutils' own decoding (`aarch64-linux-gnu-readelf -rW`, the binutils of verify/env.json): the type
@@ -32,9 +32,11 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import gate_build  # noqa: E402
-import gate_linkstrict  # noqa: E402
-import recipe  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import gate_build  # noqa: E402
+from fnvnx.verify import gate_linkstrict  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
 
 READELF = "aarch64-linux-gnu-readelf"
 ROW = re.compile(r"^\s*([0-9a-fA-F]+)\s+([0-9a-fA-F]+)\s+(R_\w+)\s*(.*)$")
@@ -168,7 +170,7 @@ def main():
     else:
         status, detail = "green", "%d items of %d guest roots; relocations by family: %s" % (len(items), len(groups), cnt)
     res = {"format": "fnvnx-gate/1", "name": "tlsmodel", "status": status, "universe": len(items), "certified": cert,
-           "uncertified": sorted("%s:%s" % x for x in bad)[:50], "detail": detail}
+           "uncertified": sorted("%s:%s" % x for x in bad), "detail": detail}
     with open(os.path.join(os.environ["GATE_OUT"], "tlsmodel.json"), "w") as fh:
         json.dump(res, fh, sort_keys=True)
     print("tlsmodel: %s %d/%d %s" % (status, cert, len(items), detail[:300]))

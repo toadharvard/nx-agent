@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Gate "datamodel" (fnvnx-gate/1, VERDICT.md class A: data model): every unit of a guest product root is compiled by the pinned game
 compiler in the exe's data model.
-    python3 -I gate_datamodel.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/datamodel.json
+    python3 -I gate_datamodel.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/datamodel.json
 Universe (through gate_build.quantify): the admitted product roots with "target": "guest" (a host root has none); per root one item
 `<root>:compiler` plus one item `<root>/<unit>` per unit of the build. No guest root: universe 0, green.
 Certificate, read from the build's own outputs (objects.json of the root, the CC stage documents of its units in GATE_CACHE/store/stage-docs,
@@ -29,9 +29,11 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import gate_build  # noqa: E402
-import recipe  # noqa: E402
-import targets  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import gate_build  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): `verify` is imported by its qualified name
+from fnvnx.verify import targets  # noqa: E402
 
 ILP32 = targets.abi_flag(targets.load())   # the declared guest platform record, not a literal
 DATAMODEL = targets.load()["references"]["datamodel"]   # the one table of the exe's data model (L2, fnvnx-datamodel/2): its path is a reference of the declared targets
@@ -43,24 +45,6 @@ def case_of(row):
     c = row.get("check")
     m = CASE.match(c) if isinstance(c, str) else None
     return (m.group(2), m.group(1)) if m else None
-
-
-def test_check(row):
-    """-> (file relative to ports/fnv-nx/, function id) when the row's `check` is the structured {"kind": "test", "file", "id"} (the form gen.py validates), else None."""
-    c = row.get("check")
-    if isinstance(c, dict) and c.get("kind") == "test" and isinstance(c.get("file"), str) and isinstance(c.get("id"), str):
-        return c["file"], c["id"]
-    return None
-
-
-def test_check_why(repo, row):
-    """[] when the row's structured test check names a test file of the tree that defines the function `id` (`def <id>(`), else the reasons. The function itself is run by
-    the test file's own gate; this gate reads that the row's evidence exists and is named by the table, never a name in a comment."""
-    f, i = test_check(row)
-    path = os.path.join(repo, "ports/fnv-nx", f)
-    if not os.path.isfile(path):
-        return ["no test file " + f]
-    return [] if re.search(r"^def %s\(" % re.escape(i), open(path, encoding="utf-8", errors="replace").read(), re.M) else ["%s defines no function %s" % (f, i)]
 
 
 def case_file(row):
@@ -149,13 +133,7 @@ def model_rows(repo, root, cxx, sem):
         return 1, [root + ":datamodel"], ["no " + DATAMODEL]
     rows = json.load(open(path))["rows"]
     bad, why = [], []
-    for r in rows:
-        if test_check(r):
-            w = test_check_why(repo, r)
-            if w or (r.get("flag") and r["flag"] not in sem):
-                bad.append("%s:datamodel:%s" % (root, r["id"]))
-                why.append("%s: %s" % (r["id"], ", ".join(w) or "flag %s is not in the semantic set" % r["flag"]))
-    unjudged = [r for r in rows if case_of(r) is None and not test_check(r)]
+    unjudged = [r for r in rows if case_of(r) is None]
     for r in unjudged:
         bad.append("%s:datamodel:%s" % (root, r["id"]))
         why.append("%s: check is not a static_assert case: %r" % (r["id"], r.get("check")))
@@ -187,7 +165,7 @@ def judge_root(root, repo, cache):
     try:
         res, _ = gate_build.ensure(root, cache, repo)
     except recipe.RecipeError as e:
-        us = [root + "/" + u for u in recipe.units_of(rec, root, files)] if isinstance(rec, dict) else []
+        us = [root + "/" + u for u in recipe.units_of(rec, root, files, roots, repo)] if isinstance(rec, dict) else []
         return len(us) + 1, 0, [item] + us, "invalid recipe: %s" % "; ".join(e.errors)[:300]
     units = [recipe.split_spec(root)[0] + "/" + u for u in res.get("units", [])]
     if res["status"] != "green":

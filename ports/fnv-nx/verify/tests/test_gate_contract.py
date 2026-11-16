@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for verify/gate_contract.py: inputs validation, missing input is RED (never green by absence), the n2 rule. No game data."""
 import json
 import os
@@ -10,10 +9,12 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
-import scratch  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import scratch  # noqa: E402
 
 scratch.install()
-import gate_contract as gc  # noqa: E402
+from fnvnx.verify import gate_contract as gc  # noqa: E402
 
 FAILED = []
 
@@ -62,7 +63,7 @@ check("ranges shape", "ranges needs" in (raises(dict(good, ranges={"exe": "x/r"}
 check("optional keys accepted", raises(dict(good, root_results=dict(RR, disp_rows="e", native_disp_rows="e2"))) is None)
 
 # the shared universe convention (gate_build.quantify)
-import gate_build as gb  # noqa: E402
+from fnvnx.verify import gate_build as gb  # noqa: E402
 repo = tempfile.mkdtemp(prefix="gc-repo-")
 subprocess.run(["git", "init", "-q", repo], check=True)
 os.makedirs(repo + "/ports/fnv-nx/verify")

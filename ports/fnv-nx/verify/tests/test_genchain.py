@@ -15,7 +15,9 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
-import recipe  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import recipe  # noqa: E402
 
 fails = 0
 T = "ports/fnv-nx/"
@@ -76,7 +78,7 @@ def build(repo, td, tag):
 
 def produced(repo, td, tag):
     """The root's generated outputs as the stages left them: the directory the consumers read (ws/root), after the same externals + generate steps a build runs."""
-    j = recipe.Job(repo, R, os.path.join(td, "store"), 2, os.path.join(td, "store", "external"))
+    j = recipe.Job(repo, R, os.path.join(td, "store"), 2, recipe.ext_of_store(os.path.join(td, "store")))
     ws = tempfile.mkdtemp(prefix="gc-" + tag, dir=td)
     recipe._copy(repo, [f for f in j.files if recipe.under(f, R)], R, os.path.join(ws, "root"))
     j.externals(ws)
@@ -146,7 +148,7 @@ def make2(td, name, in_txt="abc\n", noise="n\n", toolb=TOOLB):
 
 def b_keys(repo, td, tag):
     """(B's stage keys, B's produced b.txt or None, B's red stages): B built through the recipe machinery, A's output read through `uses`."""
-    j = recipe.Job(repo, B, os.path.join(td, "store"), 2, os.path.join(td, "store", "external"))
+    j = recipe.Job(repo, B, os.path.join(td, "store"), 2, recipe.ext_of_store(os.path.join(td, "store")))
     ws = tempfile.mkdtemp(prefix="gb-" + tag, dir=td)
     recipe._copy(repo, [f for f in j.files if recipe.under(f, B)], B, os.path.join(ws, "root"))
     j.externals(ws)

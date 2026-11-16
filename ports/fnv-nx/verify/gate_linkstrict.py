@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Gate "linkstrict" (fnvnx-gate/1, class 3 of VERDICT.md): no symbol is unresolved or substitutable. Decides on symbol tables only.
-    python3 -I gate_linkstrict.py    cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/linkstrict.json
+    python3 -I gate_linkstrict.py    cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/linkstrict.json
 Roots come from verify/admit.json: for every product root the gate calls gate_build.ensure(root, GATE_CACHE) and reads the ELF `.symtab` of
 its objects (relocatable) and of its linked ELF, never a name's text. Rules:
   (a) a root that links an ELF (the linked output of every product and test root, whatever flags the link used): the ELF has no undefined
@@ -32,6 +32,9 @@ its objects (relocatable) and of its linked ELF, never a name's text. Rules:
       the root links no ELF), and two listed symbols with DIFFERENT body ids may not share one address (`contract-alias`: an alias stub
       that serves two contracts with one body). Two names with the same body id on one address are fine. A symbol listed twice with
       two body ids is `contract-duplicate`. Without the key rule (c) has universe 0 for that root.
+  (g) The runtime of a guest root. A reference of a GUEST root's object that no object defines is certified iff the link it enters defines it from outside the roots: the pinned runtime
+      (the start and end files and libraries of the guest driver's own link command, read from the compiler external guest_compiler.json pins) or the link script's own
+      assignments (linkset.runtime_defs, the one accessor that gate imports reads too). The names the pinned ld synthesises (linkset.synth_defs) are in the set too.
   (e) No guest object references a libgcc outline-atomics helper (__aarch64_{cas,swp,ldadd,ldclr,ldeor,ldset}<bytes>_<memory model>): the helpers
       choose LSE or LL/SC through getauxval, which Horizon lacks, and the declared CPU (Cortex-A57) has no LSE, so guest roots build with
       -mno-outline-atomics (a member of guest_compiler.json "flags"."semantics", appended by the recipe and read back by gate datamodel). Finding `outline-atomic`, per reference.
@@ -60,10 +63,13 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "link"))
-import comdat as comdat_id  # noqa: E402
-import gate_build  # noqa: E402
-import producers  # noqa: E402
-import recipe  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.link import comdat as comdat_id  # noqa: E402
+from fnvnx.verify import gate_build  # noqa: E402
+from fnvnx.verify import linkset  # noqa: E402
+from fnvnx.verify import producers  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
 
 COMMON, GLOBAL, WEAK, UNIQUE, IFUNC = 0xFFF2, 1, 2, 10, 10
 LOCAL, NOTYPE = 0, 0
@@ -164,10 +170,12 @@ def host_exports(cache):
     return names, key
 
 
-def judge(objs, elfs, tables, comdat=None, host=None, guest=()):
+def judge(objs, elfs, tables, comdat=None, host=None, guest=(), runtime=None):
     """OBJS {object id: [symbol tuples]}; ELFS {elf id: symbols or None}; TABLES {(root id, elf id or None): [(symbol, body id)]};
     COMDAT {object id: (member, groups)} as elf_comdat (an object missing from it has no COMDAT group)
     GUEST ["<root>/"] prefixes of guest roots: rule (e)
+    RUNTIME ({name} or None): the names the link of a guest root takes from the pinned runtime (start and end files, libraries) and from the link script (linkset.runtime_defs); a
+    reference of a GUEST root's object that no object defines is certified iff the runtime defines it (the link resolves it from there)
     HOST (host root prefixes ["<root>/"], exports {name}) or None: rule (d), the host boundary
     -> (items [(id, name)], findings [(id, name, KIND, detail)] sorted). Pure function of its arguments."""
     items, out, comdat = [], set(), comdat or {}
@@ -235,6 +243,8 @@ def judge(objs, elfs, tables, comdat=None, host=None, guest=()):
         if name not in defs:
             if host and name in host[1] and any(oid.startswith(p) for p in host[0]):
                 pass   # (d): an import of a host-target root, exported by the pinned host runtime
+            elif runtime and name in runtime and any(oid.startswith(p) for p in guest):
+                pass   # a guest root's reference that the pinned runtime or the link script defines (linkset.py)
             elif not any(oid.startswith(eid.rsplit("/", 1)[0] + "/") and name in names for eid, names in script.items()):
                 out.add((oid, name, "undefined", "no object of any product root defines it, nor the link script of its root"))
         elif name in bad:
@@ -299,11 +309,13 @@ def main():
     tmp = None if os.environ.get("GATE_CACHE") else tempfile.mkdtemp(prefix="gate-linkstrict-")
     cache, repo = os.environ.get("GATE_CACHE") or tmp, "."
     items, finds, why, objs, elfs, tables, roots, comdat = [], [], "", {}, {}, {}, gate_build.buildable_roots(repo), {}
-    host, guest = None, []
+    host, guest, runtime = None, [], None
     try:
         hroots = [r + "/" for r, e in recipe.load_admit(repo).items() if e.get("class") in ("product", "test") and e.get("target") == "host"]
         host = (hroots, set(host_exports(cache)[0])) if hroots else None
         guest = [r + "/" for r, e in recipe.load_admit(repo).items() if e.get("class") == "product" and e.get("target") == "guest"]
+        if guest:
+            runtime = set(linkset.runtime_defs(repo, cache)) | set().union(*(set(linkset.synth_defs(g[:-1], recipe.load_admit(repo), repo, cache)) for g in guest))   # the pinned runtime, the script's names and ld's own: the one accessor of the link set
         for root in roots:
             res, _ = gate_build.ensure(root, cache, repo)
             if res["status"] == "red":
@@ -329,6 +341,8 @@ def main():
                 if any(len(r) != 2 or not r[0] or not r[1] for r in rows):
                     raise ValueError("%s: contract names must be `symbol<TAB>body_id` rows" % root)
                 tables[(root, eid)] = [tuple(r) for r in rows]
+    except recipe.BuildRed as e:
+        why = "derivation red: %s" % (" | ".join(e.args[0].get("stderr", []))[:300] or str(e.args[0])[:300])
     except recipe.RecipeError as e:
         why = "invalid recipe: %s" % "; ".join(e.errors)[:300]
     except (ValueError, KeyError, OSError, struct.error) as e:
@@ -336,7 +350,7 @@ def main():
     finally:
         if tmp and not os.environ.get("GATE_KEEP"):
             shutil.rmtree(tmp, ignore_errors=True)
-    its, fs = judge(objs, elfs, tables, comdat, host, guest)
+    its, fs = judge(objs, elfs, tables, comdat, host, guest, runtime)
     items, finds = items + its, finds + fs
     bad = {(o, s) for o, s, _, _ in finds}
     cert = len([it for it in items if it not in bad])
@@ -352,7 +366,7 @@ def main():
     else:
         status, detail = "green", "%d items of %d roots: every reference has one strong definition" % (len(items), len(roots))
     res = {"format": "fnvnx-gate/1", "name": "linkstrict", "status": status, "universe": len(items), "certified": cert,
-           "uncertified": sorted("%s:%s" % x for x in bad)[:50], "detail": detail}
+           "uncertified": sorted("%s:%s" % x for x in bad), "detail": detail}
     with open(os.path.join(os.environ["GATE_OUT"], "linkstrict.json"), "w") as fh:
         json.dump(res, fh, sort_keys=True)
     print("linkstrict: %s %d/%d %s" % (status, cert, len(items), detail[:200]))

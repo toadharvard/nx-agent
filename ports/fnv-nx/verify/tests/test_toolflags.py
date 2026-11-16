@@ -11,7 +11,9 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
-import toolflags  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import toolflags  # noqa: E402
 
 FAILED = []
 TMP = tempfile.mkdtemp(prefix="toolflags-test-")
@@ -79,6 +81,16 @@ for k in ("LANG", "LANGUAGE", "LC_TIME", "PYTHONPATH", "HOME", "USER", "LOGNAME"
           "CPLUS_INCLUDE_PATH", "DEPENDENCIES_OUTPUT", "SUNPRO_DEPENDENCIES", "MAKEFLAGS", "MFLAGS", "MAKELEVEL",
           "PYTHONSTARTUP"):
     expect("env forbidden %s" % k, doc("gcc", GCC, env_with(**{k: "x"})), ["env-forbidden"])
+expect("env PYTHONPATH under declared inputs ok (the /imp dirs of a generator stage)", doc("gcc", GCC, env_with(PYTHONPATH="/tc/lib:/src/x")), [])
+expect("env PYTHONPATH with a component outside the inputs", doc("gcc", GCC, env_with(PYTHONPATH="/tc/lib:/usr/lib/python3")), ["env-forbidden"])
+IMPIN = INPUTS + [{"at": "/imp/fnvnx/verify", "tree": "i"}, {"at": "/imp/fnvnx/contract", "tree": "c"}]
+expect("PYTHONPATH=/imp (the import root) with the closure mounts under it is green", doc("gcc", GCC, env_with(PYTHONPATH="/imp"), {"inputs": IMPIN}), [])
+expect("PYTHONPATH=/imp with a declared output under it is red", doc("gcc", GCC, env_with(PYTHONPATH="/imp"), {"inputs": IMPIN, "outputs": ["/out", "/imp/fnvnx/out"]}), ["env-forbidden"])
+expect("PYTHONPATH=/imp with TMPDIR under it is red", doc("gcc", GCC, env_with(PYTHONPATH="/imp", TMPDIR="/imp/tmp"), {"inputs": IMPIN, "outputs": ["/imp/tmp"]}), ["env-forbidden"])
+expect("PYTHONPATH=/imp with an input under it that is not the closure mount is red", doc("gcc", GCC, env_with(PYTHONPATH="/imp"), {"inputs": INPUTS + [{"at": "/imp/other", "tree": "o"}]}), ["env-forbidden"])
+expect("PYTHONPATH=/imp with nothing mounted under it is red", doc("gcc", GCC, env_with(PYTHONPATH="/imp")), ["env-forbidden"])
+expect("PYTHONPATH=/x where nothing is mounted is red", doc("gcc", GCC, env_with(PYTHONPATH="/x"), {"inputs": IMPIN}), ["env-forbidden"])
+expect("PYTHONPATH under an input (/imp/fnvnx/verify) is green", doc("gcc", GCC, env_with(PYTHONPATH="/imp/fnvnx/verify"), {"inputs": IMPIN}), [])
 expect("env PATH outside inputs", doc("gcc", GCC, env_with(PATH="/tc/bin:/usr/bin")), ["env-path"])
 expect("env PATH prefix lookalike", doc("gcc", GCC, env_with(PATH="/tcx/bin")), ["env-path"])
 expect("env TMPDIR under output ok", doc("gcc", GCC, env_with(TMPDIR="/out/tmp")), [])
@@ -235,9 +247,12 @@ case("cli missing file exit 1", run("check", os.path.join(TMP, "none.json"))[0] 
 case("cli usage exit 1", run()[0] == 1 and run("bogus")[0] == 1 and run("check")[0] == 1)
 rc, out = run("policy")
 case("cli policy table", rc == 0 and "gcc" in out and "reproducible-builds.org" in out, out[:200])
-pg = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "puregate.py"), "check",
-                     os.path.join(VERIFY, "toolflags.py"), os.path.join(VERIFY, "toolflags_policy.py")],
-                    capture_output=True, text=True)
+with tempfile.TemporaryDirectory() as view:   # puregate's view of the module path: the files at <view>/fnvnx/verify (a copy: puregate does not follow symlinks)
+    os.makedirs(os.path.join(view, "fnvnx", "verify"))
+    for f in ("toolflags.py", "toolflags_policy.py"):
+        shutil.copyfile(os.path.join(VERIFY, f), os.path.join(view, "fnvnx", "verify", f))
+    pg = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "puregate.py"), "check", os.path.join(view, "fnvnx", "verify", "toolflags.py"),
+                         os.path.join(view, "fnvnx", "verify", "toolflags_policy.py"), "--base", view], capture_output=True, text=True)
 case("toolflags passes puregate", pg.returncode == 0, pg.stdout[-300:])
 
 shutil.rmtree(TMP, ignore_errors=True)

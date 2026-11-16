@@ -36,15 +36,18 @@ nothing); vtpair rows with a name.  Pairing is by file stem (the `u<N>` rule of 
 """
 import os
 import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
+import os
+import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.join(HERE, '..', 'contract'))
-import coffobj
-import elfobj
-import l2sections
-import objsections
-import unitpairs
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.link import coffobj
+from fnvnx.link import elfobj
+from fnvnx.contract import l2sections
+from fnvnx.link import objsections
+from fnvnx.link import unitpairs
 
 NAME = 'names'
 NAMED = frozenset(('func', 'data', 'ctor.c1', 'ctor.c2', 'dtor.d2', 'dtor.d1', 'dtor.d0', 'dtor.sdd', 'dtor.sdd.thunk'))
@@ -62,11 +65,11 @@ def strong_defs(elf):
     return out
 
 
-def unit_rows(stem, gpath, cpaths):
+def unit_rows(stem, gpath, cpaths, kinds):
     """[(stem, symbol, msvc name, reason)] of one unit; reason '' = certified"""
     try:
         elf = elfobj.read(gpath)
-        sp = l2sections.parse_sympair(objsections.section(elf, '.fnvnx.sympair'), stem + ':.fnvnx.sympair')
+        sp = l2sections.parse_sympair(objsections.section(elf, '.fnvnx.sympair'), stem + ':.fnvnx.sympair', kinds)
         vt = l2sections.parse_vtpair(objsections.section(elf, '.fnvnx.vtpair'), stem + ':.fnvnx.vtpair')
         strong = strong_defs(elf)
     except ValueError as e:
@@ -95,10 +98,10 @@ def unit_rows(stem, gpath, cpaths):
     return out
 
 
-def rows(gcc_objs, cl_objs, units=None):
+def rows(gcc_objs, cl_objs, kinds, units=None):
     """Library entry (no GATE_OUT, no printing, no exit): the sorted list of (stem, symbol, msvc_name, reason), one row per item
     of the universe.  gcc_objs / cl_objs: lists of object FILE paths (directories are accepted too, as in unitpairs.pairs); units:
-    path of units.json or None.  stem: the unit (unitpairs); symbol: the GCC assembler symbol (the stem is part of the item because
+    path of units.json or None; kinds: the sympair kinds (l2sections.load_kinds).  stem: the unit (unitpairs); symbol: the GCC assembler symbol (the stem is part of the item because
     two units can define one symbol strongly); msvc_name: the plugin's name (certified when reason is ''; for a nameless item ''
     or the `nodecor:` text); reason: '' certified, else `<name> is not a definition of the cl object[...]`, `no cl object for the
     unit`, `the cl object is unreadable: ...`, `unnamed` (a sympair row no rule names), `vftable-unnamed` (symbol = the _ZTV
@@ -106,7 +109,7 @@ def rows(gcc_objs, cl_objs, units=None):
     Raises unitpairs.GateInputError only for malformed declared inputs (missing path, bad units file, two objects of one stem)."""
     out = []
     for stem, g, c in unitpairs.pairs(gcc_objs, cl_objs, units):
-        out += unit_rows(stem, g, c)
+        out += unit_rows(stem, g, c, kinds)
     return sorted(out)
 
 
@@ -119,17 +122,16 @@ def row_id(r):
     return '%s:%s: %s' % (stem, sym, why)
 
 
-def check(gcc, cl, units=None):
+def check(gcc, cl, kinds, units=None):
     """(universe, sorted red ids)"""
-    rs = rows(gcc, cl, units)
+    rs = rows(gcc, cl, kinds, units)
     return len(rs), sorted(row_id(r) for r in rs if r[3])
 
 
 def main(argv):
-    l2sections.set_kinds(l2sections.REPO_KINDS_INC)   # cwd = the checkout root: the table is a tracked file of it
-    a = unitpairs.parse_args(argv, 'gate_names.py', __doc__)
+    a = unitpairs.parse_args(argv, 'gate_names.py', __doc__, [('--sympair-kinds', dict(required=True, help='toolchain/names/sympair_kinds.inc'))])
     try:
-        uni, red = check(a.gcc, a.cl, a.units)
+        uni, red = check(a.gcc, a.cl, l2sections.load_kinds(a.sympair_kinds), a.units)
     except unitpairs.GateInputError as e:
         return unitpairs.fail(NAME, str(e))
     detail = ('names: %d of %d items not certified' % (len(red), uni)) if uni else 'names: no item at these inputs (nothing to certify)'

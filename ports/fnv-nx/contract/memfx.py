@@ -36,11 +36,15 @@ may be written); no code outside the images (the loader, the OS) writes L except
 import bisect
 import struct
 
-import imagerec
-from imagerec import X
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name (contract.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.contract import imagerec
+from fnvnx.contract.imagerec import X
 
-import argflow
-from argflow import rn
+from fnvnx.contract import argflow
+from fnvnx.contract.argflow import rn
 
 ANY = 'A'
 FRAME = 'F'

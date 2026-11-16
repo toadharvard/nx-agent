@@ -1,9 +1,4 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/addr/fnvnx_addr.cc ports/fnv-nx/toolchain/dispatch/fnvnx_dispatch.cc
-# reads: ports/fnv-nx/toolchain/ftoi/f2i_builtins.inc ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc ports/fnv-nx/toolchain/layout/crossing_terms.inc
-# reads: ports/fnv-nx/toolchain/layout/decltype_spell.inc ports/fnv-nx/toolchain/layout/fnvnx_layout.cc ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json
-# reads: ports/fnv-nx/toolchain/names/fnvnx_names.cc ports/fnv-nx/toolchain/order/atomic_order.inc ports/fnv-nx/toolchain/order/fnvnx_frame.h
-# reads: ports/fnv-nx/toolchain/order/fnvnx_order.cc ports/fnv-nx/toolchain/pi/fnvnx_pi.cc ports/fnv-nx/toolchain/sdd/fnvnx_sdd.cc ports/fnv-nx/verify
 """Tests for verify/gate_datamodel.py (gate "datamodel"): guest roots only; the compiler pin, -mabi=ilp32 and the plugins are read from the CC stage
 documents of the build. Real-compiler case: the pinned external of verify/guest_compiler.json (fetched by commit; red with the reason when it
 cannot be). Plain script, needs root (sandbox)."""
@@ -14,14 +9,16 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import test_plugins as tp
-import test_guest as tg
-from test_plugins import BASE, ROOT, T, REAL, VERIFY, check, REC
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify.tests import test_plugins as tp
+from fnvnx.verify.tests import test_guest as tg
+from fnvnx.verify.tests.test_plugins import BASE, ROOT, T, REAL, VERIFY, check, REC
 
 sys.path.insert(0, VERIFY)
-import gate_datamodel as gd  # noqa: E402
-import recipe  # noqa: E402
-import targets  # noqa: E402
+from fnvnx.verify import gate_datamodel as gd  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): `verify` is imported by its qualified name
+from fnvnx.verify import targets  # noqa: E402
 
 
 DM_JSON = gd.DATAMODEL
@@ -123,17 +120,6 @@ def main():
     ju = gd.judge_root(ROOT + "@nope", vg, vc)
     check("root@variant: judged by the variant record (own units, same universe as the base), green", jv[0] == jb[0] and jv[1] == jv[0] and jb[1] == jb[0], (jb, jv))
     check("root@unknown variant: red item, 'no variant' reason, no crash", ju[1] == 0 and ju[0] >= 1 and "no variant" in ju[3], ju)
-    # a structured {"kind": "test", "file", "id"} check: certified when the file defines the function, red when the file or the function is missing
-    import tempfile
-    with tempfile.TemporaryDirectory() as td:
-        os.makedirs(os.path.join(td, "ports/fnv-nx/toolchain/tests"))
-        open(os.path.join(td, "ports/fnv-nx/toolchain/tests/test_x.py"), "w").write("def model(td):\n    pass\n# def commented(\n")
-        row = lambda i, f: {"id": "S", "check": {"kind": "test", "file": f, "id": i}}
-        check("test check: the file defines the function -> certified", gd.test_check_why(td, row("model", "toolchain/tests/test_x.py")) == [])
-        check("test check: a function the file does not define is red", gd.test_check_why(td, row("other", "toolchain/tests/test_x.py")) != [])
-        check("test check: a commented-out def is not a definition", gd.test_check_why(td, row("commented", "toolchain/tests/test_x.py")) != [])
-        check("test check: a missing file is red", gd.test_check_why(td, row("model", "toolchain/tests/none.py")) != [])
-        check("test check: a string check is not a test check", gd.test_check({"check": "S01 in a/b.cpp"}) is None)
 
 
 if __name__ == "__main__":

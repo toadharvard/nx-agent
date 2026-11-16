@@ -31,18 +31,23 @@ def drivers(t):
     return "bin/%s-gcc" % tr, "bin/%s-g++" % tr
 
 
-def semantic_prefix(t, repo=None):
+def semantic_prefix(t, repo=None, datamodel=None):
     """The leading run of the guest semantic flags, from the records: ABI of the platform, architecture and tuning of the CPU, the platform's code model,
     then the flags of the data-model rows."""
     p, c = t["guest_platform"], t["console_cpu"]
-    return ["-mabi=" + p["abi"], arch_flag(c), "-mtune=" + c["core"].lower()] + list(p["code"]) + datamodel_flags(t, repo)
+    return ["-mabi=" + p["abi"], arch_flag(c), "-mtune=" + c["core"].lower()] + list(p["code"]) + datamodel_flags(t, repo, datamodel)
 
 
-def datamodel_flags(t, repo=None):
-    """The flags the exe's data model needs, from the rows of the DATAMODEL table the record references: each row's `flag`, in row order."""
+def datamodel_flags(t, repo=None, datamodel=None):
+    """The flags the exe's data model needs, from the rows of the DATAMODEL table the record references: each row's `flag`, in row order. DATAMODEL: the path of that table when the
+    caller holds it elsewhere than in the repository tree (a stage that mounts it as its own input); else it is the record's reference inside REPO (default: this checkout)."""
     repo = repo or os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
-    with open(os.path.join(repo, t["references"]["datamodel"])) as f:
+    with open(datamodel or os.path.join(repo, t["references"]["datamodel"])) as f:
         return [r["flag"] for r in json.load(f)["rows"] if r.get("flag")]
+
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.contract.target.fpcr import FPCR_FIELDS, fpcr_value, fpcr_errors  # noqa: E402,F401  (qualified: ports is on the path of every importer of verify.targets, `fnvnx` is ports/fnvnx)
 
 
 def abi_flag(t):
@@ -59,7 +64,7 @@ def check(t, ext=None, assumptions=None, repo=None):
     for rec in ("guest_platform", "console_cpu", "host_gl"):
         r = t.get(rec) or {}
         cites = r.get("cite") or {}
-        for field in sorted(set(r) - {"cite"} - ({"features"} if rec == "console_cpu" else set())):   # each feature is cited under its own name
+        for field in sorted(set(r) - {"cite"} - ({"features"} if rec == "console_cpu" else set())):   # each feature is cited under its own name; fpcr is one cited row
             if not cites.get(field):
                 bad.append("%s.%s has no citation" % (rec, field))
         for field, cs in sorted(cites.items()):
@@ -93,6 +98,7 @@ def check(t, ext=None, assumptions=None, repo=None):
     for f in t["console_cpu"]["features"]:
         if not t["console_cpu"]["cite"].get(f):
             bad.append("console_cpu feature %s has no citation" % f)
+    bad += fpcr_errors(t)
     for name, d in sorted(t.get("docs", {}).items()):
         if d["external"] not in t["externals"] or len(d["sha256"]) != 64:
             bad.append("doc %s: external or sha256" % name)

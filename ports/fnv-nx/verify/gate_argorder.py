@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Gate "argordergate" (fnvnx-gate/1, VERDICT.md class: calling convention / argument order): every native C++ unit of a guest root is compiled with
 the fnvnx_order plugin (MSVC evaluation order of arguments, objects, operators, assignments) loaded in the rule's order.
-    python3 -I gate_argorder.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/argordergate.json
+    python3 -I gate_argorder.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/argordergate.json
 Universe: the C++ units of every admitted product root with "target": "guest" and "cxx_origin": "native" (admit.json; the lifter emits the order
 itself, a lifted root has none). No such root: universe 0, green.
 Certificate of a unit, all of: (1) the recipe of its root validates (recipe.check, which holds the plugin rule); (2) the recipe's plugin list is
@@ -14,8 +14,10 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import gate_build  # noqa: E402
-import recipe  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import gate_build  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
 
 ORDER = "fnvnx_order"
 
@@ -30,7 +32,7 @@ def judge_root(root, repo, cache, plugin=ORDER):
     gate_lift.py asks for fnvnx_order (gate order) and fnvnx_addr (gate addr32), the same rule: a plugin of the rule's list, rule's arguments)."""
     roots, files = recipe.load_admit(repo), recipe.tracked(repo)
     rec = recipe.load_recipe(repo, roots, root)
-    cxx = sorted(root + "/" + u for u in recipe.units_of(rec, recipe.split_spec(root)[0], files) if u.endswith(recipe.CXX_EXT)) if isinstance(rec, dict) else []
+    cxx = sorted(root + "/" + u for u in recipe.units_of(rec, recipe.split_spec(root)[0], files, roots, repo) if u.endswith(recipe.CXX_EXT)) if isinstance(rec, dict) else []
     errs = recipe.check(rec, recipe.split_spec(root)[0], files, roots, recipe.load_pin(repo), repo)
     if errs:
         return len(cxx), 0, cxx, "invalid recipe: %s" % "; ".join(errs)[:300]
@@ -72,7 +74,7 @@ def main():
     detail = "; ".join(why) or ("%d C++ units of %d native guest roots load fnvnx_order in the rule's order" % (u, len(roots)) if roots else
                                 "no native guest root (universe 0)")
     res = {"format": "fnvnx-gate/1", "name": "argordergate", "status": "red" if why else "green", "universe": u, "certified": c,
-           "uncertified": sorted(ids)[:50], "detail": detail[:900]}
+           "uncertified": sorted(ids), "detail": detail[:900]}
     with open(os.path.join(os.environ["GATE_OUT"], "argordergate.json"), "w") as f:
         json.dump(res, f, sort_keys=True)
     print("argordergate: %s %d/%d %s" % (res["status"], c, u, detail[:200]))

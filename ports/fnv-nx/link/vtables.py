@@ -27,16 +27,19 @@ completeness of the RTTI scan is not yet a checked fact (a vftable exefacts's RT
 virtual bases: their COL offsets are not subobject offsets, so such groups are uncertified by V3 or V5 unless the structure agrees as
 written, never passed.
 """
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import argparse
 import collections
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'contract'))
-import abi_native as N
-import exefacts
-import exevft
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.link import abi_native as N
+from fnvnx.contract import exefacts
+from fnvnx.link import exevft
 
 NAME = 'vtables'
 

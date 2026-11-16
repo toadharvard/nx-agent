@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify ports/fnv-nx/farm/setup_verdict_env.sh
 """Tests for verify/envcheck.py and farm/setup_verdict_env.sh: the declared environment of the verdict. Plain script: exit 0 on
 pass, one PASS/FAIL line per case. Needs the declared environment itself (a mismatch here IS the failure the file reports)."""
 import hashlib
@@ -15,7 +14,9 @@ VERIFY = os.path.dirname(HERE)
 SETUP = os.path.join(os.path.dirname(VERIFY), "farm", "setup_verdict_env.sh")
 ENVF = os.path.join(VERIFY, "env.json")
 sys.path.insert(0, VERIFY)
-import envcheck  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import envcheck  # noqa: E402
 TD = tempfile.mkdtemp(prefix="envcheck-test-")
 FAILED = []
 
@@ -46,7 +47,7 @@ d0 = doc()
 check("env.json: format, programs owned, non-trivial package list", d0["format"] == "fnvnx-env/1" and d0["uid"] == 0
       and d0["arch"] == "x86_64" and {"strace", "busybox", "aarch64-linux-gnu-g++", "aarch64-linux-gnu-as"} <= set(d0["programs"])
       and {"busybox-static", "gcc-13-plugin-dev-aarch64-linux-gnu", "libc6-dev-arm64-cross", "strace"} <= set(d0["packages"])
-      and set(d0["python"]["modules"]) == {"capstone", "gmpy2", "keystone-engine", "numpy", "unicorn", "pyelftools", "z3-solver", "pefile"}, d0["programs"])
+      and set(d0["python"]["modules"]) == set(envcheck.PY_MODULES), d0["programs"])
 
 def mutate(f):
     d = doc()
@@ -117,7 +118,7 @@ check("snapshot needs --from-code and -o", ec("snapshot")[0] != 0)
 
 # the plugin headers of the distro compilers of admitted roots (objstub builds its terminator plugin against them)
 sys.path.insert(0, VERIFY)
-import envcheck  # noqa: E402
+from fnvnx.verify import envcheck  # noqa: E402
 # foreign files: owned only by packages outside the pins -> listed, not in the digest; unowned and pinned-owner files count
 ft = os.path.join(TD, "ftree")
 os.makedirs(ft)
@@ -135,6 +136,7 @@ check("tree digest ignores foreign files and sees counted ones",
 
 fr = os.path.join(TD, "fakerepo")
 os.makedirs(os.path.join(fr, "ports/fnv-nx/verify"))
+subprocess.run(["git", "init", "-q", fr], check=True)   # load_admit derives the imports from the tracked files
 os.makedirs(os.path.join(fr, "ports/fnv-nx/hroot"))
 json.dump({"roots": [{"path": "ports/fnv-nx/hroot", "class": "product", "target": "host", "recipe": "ports/fnv-nx/hroot/build.json"},
                      {"path": "ports/fnv-nx/gext", "class": "product", "target": "guest", "recipe": "ports/fnv-nx/gext/build.json"}]},
@@ -163,7 +165,7 @@ check("setup --print: install_mirror.py (debs and wheels from the mirror, no apt
 
 # install_mirror.py against a local mirror repo (ARTIFACTS_URL): checks tree hash and every sha256 BEFORE dpkg (--dry: dpkg never runs)
 sys.path.insert(0, VERIFY)
-import cas  # noqa: E402
+from fnvnx.verify import cas  # noqa: E402
 MR = os.path.join(TD, "mirror")
 os.makedirs(os.path.join(MR, "debs"))
 os.makedirs(os.path.join(MR, "wheels"))
@@ -186,8 +188,8 @@ def closure_doc(top_ver="1", pin_ver="1"):
 IT = os.path.join(TD, "inst-tmp")
 os.makedirs(IT)
 def inst(path):
-    p = subprocess.run([sys.executable, "-I", os.path.join(os.path.dirname(VERIFY), "farm", "install_mirror.py"), "--env", path, "--dry"],
-                       capture_output=True, text=True, env=dict(os.environ, ARTIFACTS_URL="file://" + MR, TMPDIR=IT))
+    p = subprocess.run([sys.executable, "-I", os.path.join(os.path.dirname(VERIFY), "farm", "install_mirror.py"), "--env", path, "--artifacts", "file://" + MR, "--dry"],
+                       capture_output=True, text=True, env=dict(os.environ, TMPDIR=IT))
     return p.returncode, p.stdout, p.stderr
 rc, out, err = inst(mirror_doc())
 check("install_mirror: right tree and sha256 -> 1 package from the mirror (dry)", rc == 0 and "1 packages, 1 installed from the mirror, 0 already present" in out and "1 modules, 1 installed from the mirror" in out, (rc, out, err))

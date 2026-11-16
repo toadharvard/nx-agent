@@ -17,11 +17,12 @@ tests/test_sandbox; gcc,as,ld test_sandbox,test_sdcheck; aarch64-linux-gnu-g++ t
 aarch64-linux-gnu-nm,readelf icount.py,test_unitstage; aarch64-linux-gnu-as,ld,objcopy test_icount;
 git verdict.py,l1.py,test_gates; ldd,true test_runtime; g++,llvm-config-18 build a64access.cc (objstub.py, test_a64access).
 The a64access build set is derived the same way: every header `g++ -M` reports for a64access.cc under `llvm-config-18 --cxxflags`,
-and every library file `llvm-config-18 --libfiles` names for A64ACCESS's components (plus cc1plus, libstdc++.so above). The clang set (clang-18 plugins such as vtnames; clang -m32 compiles) is derived the same way: the headers under `llvm-config-18 --includedir` that a plugin includes (CLANG_API) with the whole clang/ tree they sit in, the libraries of CLANG_LIBS under `--libdir`, and every header `clang -m32 -M` reports for a C probe including stdint.h and stdlib.h (gnu/stubs-32.h: libc6-dev-i386). Python modules (version in python.modules, installed-files sha256 in python.installed_files_sha256, see wheel_digest; wheel file sha256 in python.wheel_sha256): capstone, unicorn (icount.py, test_icount, test_runtime); pyelftools (stage tools of contract/: objfacts, perf, check_mirror); pefile (manifest/regsites.py); numpy (lift/test/instest.py packer); z3-solver, keystone-engine, gmpy2 (lift/proof, lift/bench, lift/test)."""
+and every library file `llvm-config-18 --libfiles` names for A64ACCESS's components (plus cc1plus, libstdc++.so above). The clang set (clang-18 plugins such as vtnames; clang -m32 compiles) is derived the same way: the headers under `llvm-config-18 --includedir` that a plugin includes (CLANG_API) with the whole clang/ tree they sit in, the libraries of CLANG_LIBS under `--libdir`, and every header `clang -m32 -M` reports for a C probe including stdint.h and stdlib.h (gnu/stubs-32.h: libc6-dev-i386). Python modules (version in python.modules, installed-files sha256 in python.installed_files_sha256, see wheel_digest; wheel file sha256 in python.wheel_sha256): capstone, unicorn (icount.py, test_icount, test_runtime); pyelftools (stage tools of contract/: objfacts, perf, check_mirror); pefile (manifest/regsites.py); numpy (the retired one-instruction harness packer); z3-solver, keystone-engine, gmpy2 (lift/proof, lift/bench, lift/test); pycparser (L3b ctrans: the x87 terms of lift/rt C)."""
 import argparse
 import csv
 import ctypes
 import hashlib
+import importlib.util
 import json
 import os
 import platform
@@ -47,10 +48,15 @@ CLANG_API = ["clang/AST/RecursiveASTVisitor.h", "clang/Frontend/FrontendPluginRe
 CLANG_LIBS = ["libclang-cpp.so.18.1", "libclang.so"]   # under `llvm-config-18 --libdir`: what a clang plugin links / dlopens
 M32_PROBE = "#include <stdint.h>\n#include <stdlib.h>\nint main(){return 0;}\n"   # clang -m32 -M: every header a 32-bit compile of the C library reads (gnu/stubs-32.h: libc6-dev-i386)
 PY_MODULES = {"capstone": "capstone", "gmpy2": "gmpy2", "keystone-engine": "keystone", "numpy": "numpy", "unicorn": "unicorn",
-              "pyelftools": "elftools", "z3-solver": "z3", "pefile": "pefile"}   # distribution -> import name
+              "pyelftools": "elftools", "z3-solver": "z3", "pefile": "pefile",
+              "pycparser": "pycparser"}   # distribution -> import name
 RENDER_LIBS = ["libEGL.so.1", "libEGL_mesa.so.0"]   # ldconfig names: the EGL loader the published libnxgl4.so links, and the Mesa vendor it dispatches to (NXGL4_HOST.md section 2); their loader closure (mesa-libgallium, libllvm, ...) is derived
 RUN_LAYOUT_DEB = "base-files"   # the machine's root layout (./lib -> usr/lib, ./lib64 -> usr/lib64, ./bin, ./sbin): every `run` stage of recipe.py mounts its symlink members
-RENDER_FILES = ["/usr/share/glvnd/egl_vendor.d/50_mesa.json"]   # read by libEGL.so.1 to find that vendor
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import hostprofile  # noqa: E402
+HOST = hostprofile.HOST
+RENDER_FILES = HOST["egl_vendor_files"]   # read by libEGL.so.1 to find that vendor
 def HOST_GCC_PLUGIN_DIRS(gcc):
     """Every file of the plugin directory of compiler GCC (`gcc -print-file-name=plugin`: the gcc-N-plugin-dev package of a distro compiler)."""
     d = subprocess.run([gcc, "-print-file-name=plugin"], capture_output=True, text=True).stdout.strip()
@@ -64,7 +70,7 @@ def env_id(doc):
 def file_owners():
     """{path: {dpkg package names}} from /var/lib/dpkg/info/*.list (arch qualifier dropped); a path owned by several packages has all of them."""
     own = {}
-    info = "/var/lib/dpkg/info"
+    info = HOST["dpkg_info"]
     for f in os.listdir(info):
         if f.endswith(".list"):
             pk = f[:-5].split(":")[0]
@@ -117,7 +123,7 @@ def tree_digest(d, pinned=None, owners=None):
     return h.hexdigest()
 
 def _os():
-    osr = dict(ln.rstrip("\n").split("=", 1) for ln in open("/etc/os-release") if "=" in ln)
+    osr = dict(ln.rstrip("\n").split("=", 1) for ln in open(HOST["os_release"]) if "=" in ln)
     return {"id": osr.get("ID", "").strip('"'), "version_id": osr.get("VERSION_ID", "").strip('"')}
 
 def _dpkg(pkg):
@@ -130,7 +136,7 @@ def dep_closure(names):
     that package, so the result is exactly the set of installed packages that the declared ones rely on. A name that is not installed
     is left out (check reports it as a missing package). Rule, not a list: this is what dpkg -i of the pins needs to be complete."""
     recs, prov = {}, {}
-    for blk in open("/var/lib/dpkg/status", encoding="utf-8", errors="replace").read().split("\n\n"):
+    for blk in open(HOST["dpkg_status"], encoding="utf-8", errors="replace").read().split("\n\n"):
         d, k = {}, None
         for ln in blk.split("\n"):
             m = re.match(r"^([A-Za-z0-9-]+):\s?(.*)$", ln)
@@ -165,7 +171,7 @@ def dep_closure(names):
 
 def _owners():
     """{real path: {package}} from dpkg's own file lists (merged-/usr names resolved)."""
-    out, d = {}, "/var/lib/dpkg/info"
+    out, d = {}, HOST["dpkg_info"]
     for f in os.listdir(d):
         if f.endswith(".list"):
             pkg = f[:-5].removesuffix(":amd64")
@@ -272,7 +278,7 @@ def wheel_digest(dist):
 
 def _root_compilers(repo=None):
     """Driver names of the distribution compilers (no external) of the admitted product roots of the checkout, from admit.json and the recipes."""
-    import recipe
+    from fnvnx.verify import recipe
     repo = repo or os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
     try:
         roots = recipe.load_admit(repo)
@@ -408,7 +414,9 @@ def deb_pins(doc):
     if not (isinstance(m.get("repo"), str) and hx(m.get("commit"), 40) and hx(m.get("tree_sha256"), 64)
             and hx(m.get("wheels_tree_sha256"), 64)):
         out.append("env: debs.mirror: needs repo, a 40-hex commit, a 64-hex tree_sha256 (debs/) and wheels_tree_sha256 (wheels/)")
-    want = dict(dep_closure(doc["packages"]), **doc["packages"])
+    profiles = dp.get("profiles") if isinstance(dp.get("profiles"), dict) else {}
+    tops = set(doc["packages"]) | {t for ts in profiles.values() if isinstance(ts, list) for t in ts if isinstance(t, str)}   # the roots of the set: the declared packages and the tops of every named profile
+    want = dict(dep_closure(tops), **doc["packages"])
     for p in sorted(set(want) ^ set(dp["packages"])):
         out.append("env: debs.packages: %s %s" % (p, "has no deb pin" if p in want else "is not in the packages or their dependency closure"))
     for p, e in sorted(dp["packages"].items()):
@@ -433,8 +441,8 @@ def wheel_pins(prev):
     return sha, files
 
 def snapshot(prev=None):
-    import runtime
-    import unitstage
+    from fnvnx.verify import runtime
+    from fnvnx.verify import unitstage
     own, pk = _owners(), set()
     def add(path, strict=True):
         real = os.path.realpath(path)
@@ -445,7 +453,7 @@ def snapshot(prev=None):
     def loads(roots, trees=()):
         for at in runtime.closure(sorted(roots), list(trees)):
             add(at)
-    py, mods = os.path.realpath(sys.executable), [os.path.dirname(__import__(PY_MODULES[m]).__file__) for m in sorted(PY_MODULES)]
+    py, mods = os.path.realpath(sys.executable), [os.path.dirname(importlib.util.find_spec(PY_MODULES[m]).origin) for m in sorted(PY_MODULES)]
     dyn = sysconfig.get_config_var("DESTSHARED")
     roots = [py] + [f for d in [dyn] + mods for f in runtime.elf_files(d, runtime.ident(py))]
     loads(roots, [os.path.dirname(os.__file__), os.path.dirname(os.path.dirname(py))] + mods)
@@ -465,8 +473,7 @@ def snapshot(prev=None):
     files = [os.path.join(r, f) for t in trees for r, _, fs in os.walk(t) for f in fs]
     for p in files:
         add(p)
-    loads([os.path.realpath(e) for e in exes] + [p for p in files if os.path.isfile(p) and not os.path.islink(p)
-          and runtime.ident(p) == runtime.X86_64 and open(p, "rb").read(18)[16:18] in (b"\x02\x00", b"\x03\x00")])
+    loads([os.path.realpath(e) for e in exes] + [p for p in files if os.path.isfile(p) and not os.path.islink(p) and runtime.loadable(p)])
     src, comps = A64ACCESS
     cxx = subprocess.run(["llvm-config-18", "--cxxflags"], capture_output=True, text=True, check=True).stdout.split()
     deps = subprocess.run(["g++", "-std=c++17"] + cxx + ["-M", src], capture_output=True, text=True, check=True).stdout
@@ -491,7 +498,7 @@ def snapshot(prev=None):
             add(subprocess.run([gcc, flag + n], capture_output=True, text=True).stdout.strip())
     for p in HOST_GCC_PLUGIN_DIRS(gcc):   # objstub builds its terminator plugin against the plugin headers of the root compiler (host roots: the distro gcc)
         add(p)
-    ld = subprocess.run(["/sbin/ldconfig", "-p"], capture_output=True, text=True, check=True).stdout
+    ld = subprocess.run([HOST["ldconfig"], "-p"], capture_output=True, text=True, check=True).stdout
     for n in RENDER_LIBS:   # the renderer's host libraries (verify/bootgpu.py loads libnxgl4.so; test_bootgpu, test_boot_job, boot_job.sh)
         hit = [l.split("=>")[1].strip() for l in ld.splitlines() if l.strip().startswith(n + " ") and "x86-64" in l]
         if not hit:
@@ -508,7 +515,7 @@ def snapshot(prev=None):
             "python": {"version": platform.python_version(), "modules": {m: metadata.version(m) for m in sorted(PY_MODULES)},
                        "installed_files_sha256": {m: wheel_digest(m) for m in sorted(PY_MODULES)},
                        "wheel_sha256": wheel_pins(prev)[0], "wheel_files": wheel_pins(prev)[1]},
-            "programs": sorted(PROGRAMS), "kernel": {"needs": KERNEL}, "debs": (prev or {}).get("debs")}
+            "programs": sorted(PROGRAMS), "host": hostprofile.load(), "kernel": {"needs": KERNEL}, "debs": (prev or {}).get("debs")}
 
 def main(argv):
     ap = argparse.ArgumentParser(prog="envcheck.py")

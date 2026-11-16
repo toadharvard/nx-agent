@@ -2,11 +2,14 @@
 # reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """gate_admit.judge: every tracked file under a root (the nearest one), the class of the root one of CLASSES, no row naming gates."""
 import os
+import subprocess
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-import gate_admit as ga  # noqa: E402
-import gatesdir  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import gate_admit as ga  # noqa: E402
+from fnvnx.verify import gatesdir  # noqa: E402
 
 T = "ports/fnv-nx"
 fails = 0
@@ -89,9 +92,10 @@ import atexit  # noqa: E402
 import shutil  # noqa: E402
 tempfile.tempdir = tempfile.mkdtemp(prefix="scratch-")  # every scratch dir of this test lives here and is removed at exit
 atexit.register(shutil.rmtree, tempfile.tempdir, True)
-import gate_build as gbd  # noqa: E402
+from fnvnx.verify import gate_build as gbd  # noqa: E402
 rp = tempfile.mkdtemp(prefix="admit-roots-")
 os.makedirs(rp + "/ports/fnv-nx/verify")
+subprocess.run(["git", "init", "-q", rp], check=True)   # load_admit derives the imports from the tracked files
 json.dump({"roots": [{"path": T + "/p", "class": "product"}, {"path": T + "/t", "class": "test"}, {"path": T + "/v", "class": "tool"}]},
           open(rp + "/ports/fnv-nx/verify/admit.json", "w"))
 check("the build family judges the product and the test roots; the other gates keep the product roots",

@@ -1,0 +1,52 @@
+{
+ "format": "fnvnx-recipe/1",
+ "profile": "guest",
+ "flags": {
+  "c": [
+   "-O2",
+   "-g",
+   "-ffunction-sections",
+   "-fdata-sections",
+   "-Werror=attributes"
+  ],
+  "cxx": [
+   "-O2",
+   "-g",
+   "-ffunction-sections",
+   "-fdata-sections",
+   "-std=gnu++20",
+   "-DFNVNX_SDD=1",
+   "-Werror=attributes"
+  ],
+  "asm": []
+ },
+ "include": [],
+ "units": "all",
+ "uses": [
+  {
+   "root": "ports/fnv-nx/contract/exports",
+   "output": "exports"
+  },
+  {
+   "root": "ports/fnv-nx/bridgetable",
+   "output": "BRIDGE"
+  }
+ ],
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/platform/exptable/gen_export_lookup.py",
+   "args": [
+    "--exports",
+    "/uses/ports/fnv-nx/contract/exports/exports",
+    "--bridge",
+    "/uses/ports/fnv-nx/bridgetable/BRIDGE",
+    "--out",
+    "/out/export_lookup.gen.cpp"
+   ],
+   "inputs": [],
+   "outputs": [
+    "export_lookup.gen.cpp"
+   ]
+  }
+ ]
+}

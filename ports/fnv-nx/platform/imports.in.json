@@ -1,0 +1,16 @@
+{
+ "format": "fnvnx-imports-in/1",
+ "names": {
+  "external": "manifest",
+  "path": "manifest/sys_names.tsv"
+ },
+ "specs": {
+  "external": "wine-specs",
+  "path": "specs"
+ },
+ "extra": [
+  {"root": "ports/fnv-nx/bridgefacts/com", "output": "COM_ROWS"}
+ ],
+ "extra_other": [],
+ "va": {"root": "ports/fnv-nx/bridgefacts", "path": "crt/msvcrt_va.tsv"}
+}

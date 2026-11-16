@@ -5,7 +5,7 @@ The debs here are a toy package (a static busybox) through the two seams recipe.
   - the step is green; its file and directory outputs and the scratch work are as the script wrote them; JOBS reaches the script;
   - the job count does not change the stage key; a changed input or script does;
   - a later step reads an earlier step's directory output through a stage ref (mounted at /in/N);
-  - a step past its timeout is red.
+  - a step with timeout_s is red at check time (a time limit would decide red or green).
 Run: python3 -I <this file>. Needs root, a static busybox, the declared environment (the recipe refuses to run on another machine)."""
 import json
 import os
@@ -17,7 +17,9 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
-import recipe  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import recipe  # noqa: E402
 
 fails = 0
 T = "ports/fnv-nx/"
@@ -43,6 +45,9 @@ def w(repo, rel, text):
 def toy_tree(self, tmp, name, pin):
     """_deb_tree of the toy package: /bin -> usr/bin (a top-level link, like base-files), /usr/bin/busybox and /usr/bin/sh -> busybox, /etc (a second top-level dir)."""
     d = os.path.join(tmp, "deb-" + name)
+    if name != "toybb":   # the machine's layout deb (envcheck.RUN_LAYOUT_DEB, named by every step) ships nothing here: the toy package carries the layout
+        os.makedirs(d)
+        return None
     os.makedirs(os.path.join(d, "usr/bin"))
     shutil.copy(shutil.which("busybox"), os.path.join(d, "usr/bin/busybox"))
     for a in ("sh", "cp", "mkdir", "echo", "cat", "ls", "sleep"):
@@ -53,7 +58,7 @@ def toy_tree(self, tmp, name, pin):
     return None
 
 
-recipe.deb_pins = lambda: {"toybb": {"version": "1", "sha256": "0" * 64}}
+recipe.deb_pins = lambda: {"toybb": {"version": "1", "sha256": "0" * 64}, "base-files": {"version": "1", "sha256": "1" * 64}}
 recipe.Job._deb_tree = toy_tree
 recipe.env_blocked = lambda repo: None   # this machine's pinned packages are not the point of the test
 
@@ -82,7 +87,7 @@ def make(td, name, script, timeout=None, second=True):
 
 
 def produced(repo, td, tag, jobs=2):
-    j = recipe.Job(repo, R, os.path.join(td, "store"), jobs, os.path.join(td, "store", "external"))
+    j = recipe.Job(repo, R, os.path.join(td, "store"), jobs, recipe.ext_of_store(os.path.join(td, "store")))
     ws = tempfile.mkdtemp(prefix="ts-" + tag, dir=td)
     recipe._copy(repo, [f for f in j.files if recipe.under(f, R)], R, os.path.join(ws, "root"))
     j.externals(ws)
@@ -107,7 +112,9 @@ with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as td:
         check("the job count is not in any stage key", j2.keys == j1.keys and len(j1.keys) >= 3, (len(j1.keys), len(j2.keys)))
     j3, _ = produced(make(td, "r3", S1.replace("echo hi > /scratch/x/f", "echo hi > /scratch/x/f; echo more > /scratch/x/y")), td, "3")
     check("a changed script re-keys the step and what reads it", len(j3.keys - j1.keys) >= 2, len(j3.keys - j1.keys))
-    j4, root4 = produced(make(td, "r4", "sleep 30\n", timeout=1, second=False), td, "4")
-    check("a step past its timeout is red, naming the timeout", bool(j4.red) and "timeout" in " ".join(j4.red[0]["stderr"]), j4.red)
+    r4 = make(td, "r4", "true\n", timeout=1, second=False)
+    j4 = recipe.Job(r4, R, os.path.join(td, "store"), 2, recipe.ext_of_store(os.path.join(td, "store")))
+    errs4 = recipe.check(j4.rec, R, j4.files, j4.roots, repo=r4)
+    check("a step with timeout_s is red at check time", any("timeout_s" in e for e in errs4), errs4)
 print("fails: %d" % fails)
 sys.exit(1 if fails else 0)

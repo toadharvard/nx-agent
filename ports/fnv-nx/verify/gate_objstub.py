@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Gate "objstub" (fnvnx-gate/1, classes 1 and 2 of VERDICT.md): no built function holds a trap/abort path or is vacuous (rules and proofs: objstub.py).
-    python3 -I gate_objstub.py [--jobs N]     cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/objstub.json
+    python3 -I gate_objstub.py [--jobs N]     cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/objstub.json
 Roots come from verify/admit.json, never from arguments: for every product root the gate calls gate_build.ensure(root, GATE_CACHE) (build or
 cache hits) and judges what the recipe says (RECIPE.md): the objects (os_layer ones may hold SVC), the constants table (key (unit, symbol))
 and the terminator set DERIVED from the recipe's compiler: objstub.unit_terminators runs the compiler's own plugin over the preprocessed text
@@ -9,16 +9,16 @@ its flags and every header the unit really includes (a function of the compiler 
 key). The set is cached per unit under GATE_CACHE/objstub.
 No doubles in tests (doubles.py, owner order of 2026-11-11 night): per declared test of every root (RECIPE.md "tests"), symbols its own objects define INTERSECT
 symbols the objects of ALL product roots define = EMPTY, the test link holds every product unit, no GLOBAL symbol twice among a root's product objects.
-Result fields: tests_total, tests_with_doubles, double_symbols, doubles (first 50). No product root: universe 0, green.
-Wine rows: verify/wine_fixme.tsv of the tree under test (objstub.read_wine_table; missing or malformed is a gate error, red); the result
+Result fields: tests_total, tests_with_doubles, double_symbols, doubles. No product root: universe 0, green.
+Wine rows: `<root>/wine_fixme.tsv` of every admitted root of the tree under test (objstub.read_root_tables; malformed or a duplicate id is a gate error, red; an orphan row is a finding); the result
 holds "wine_fixme": {id: call sites} so growth of the simplified bodies is visible.
-Declared-machine rows: verify/declared_machine.tsv of the tree under test (objstub.read_declared_table; missing or malformed is a gate error, red),
+Declared-machine rows: `<root>/declared_machine.tsv` of every admitted root of the tree under test (objstub.read_root_tables),
 judged by the same rule as the Wine rows through `fnvnx_declared_machine(id)`; the result holds "declared_machine": {id: call sites}. Seven fields per row (the
 7th is the last error); the `std:` citations and the lasterror values are checked against the pinned documents of verify/declared_sources.json (declared_pins).
 Reach facts: GATE_CACHE/reach/<git tree>/reach.facts.tsv (rows fact_id<TAB>sha256, written by the gate `reach`, which does not exist yet).
 While the file is absent, every call of fnvnx_reach_violation is the finding `reach-uncertified`.
 Universe: every function of every object of every product root, every uncovered gap, and a root whose recipe is invalid or whose build is
-red (one item `root`, uncertified). Certified: items with no finding. uncertified: the first 50 `unit path:symbol`, sorted. Per object results
+red (one item `root`, uncertified). Certified: items with no finding. uncertified: every `unit path:symbol`, sorted. Per object results
 are cached by (object sha256, os_layer flag, analysis version, the terminators the object mentions) under GATE_CACHE/objstub/<key>.json;
 uncached objects run in --jobs processes (default os.cpu_count()). Exit 0 iff green; unreadable input is red with the reason in detail."""
 import json
@@ -28,11 +28,13 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import doubles  # noqa: E402
-import gate_build  # noqa: E402
-import objstub  # noqa: E402
-import recipe  # noqa: E402
-import unitstage  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import doubles  # noqa: E402
+from fnvnx.verify import gate_build  # noqa: E402
+from fnvnx.verify import objstub  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
+from fnvnx.verify import unitstage  # noqa: E402
 
 
 def profile_findings(root, target, objs):
@@ -63,6 +65,8 @@ def root_check(root, repo, cache, jobs, built=None):
                                 "root %s stage %s: %s" % (root, f["stage"], " ".join(f.get("stderr") or [])[:160])[:300])], None, None, {}, {}
     if built is not None:
         built[root] = res
+    if recipe.entry_of(roots, root).get("target") != "guest":   # the analysis plugin is bound to the guest compiler (RECIPE.md "Plugins"): host roots are not product code, no stub-gate judgment
+        return {}, {}, set(), [], None, None, {}, {}
     base = root + "/"
     objs = [(base + o["unit"], o["object"]) for o in res["objects"]]
     objs += [("%s%s(%s)" % (base, m["archive"].lstrip("/"), m["member"]), m["object"]) for m in res.get("link_archives", [])]   # pulled archive members
@@ -74,10 +78,13 @@ def root_check(root, repo, cache, jobs, built=None):
     pin = recipe.load_pin(repo)   # a guest root's libc headers are the pinned compiler tree's (guest_compiler.json "external": the one tree holds the runtime); a host root's the distribution's
     rt_at = ((pin or {}).get("external") or {}).get("at")
     sjdirs = (rt_at,) if rt_at and recipe.entry_of(roots, root).get("target") == "guest" else objstub.SYSTEM_SJ
+    origin, plugs = recipe.entry_of(roots, root).get("cxx_origin"), res.get("plugins", [])
+    rootplug = ([[[p["name"], p["sha256"]] for p in plugs], recipe.origin_class(origin)], lambda d: recipe.root_plugin_flags(plugs, origin, d)) if plugs else None   # the root's own plugins, as its CC stage loads them
     for lang, ext in (("c", recipe.CC_EXT), ("c++", recipe.CXX_EXT)):
         us = [(k, unitstage.result_file(store, k, "unit.ii"), lang) for u, k in sorted(res["pp_keys"].items()) if u.endswith(ext)]
         if us:
-            ns, _, errs = objstub.unit_terminators(drv[lang], us, {"c": recipe.unit_flags(rec, roots, root, drv["c"], "c"), "c++": recipe.unit_flags(rec, roots, root, drv["c++"], "cxx")}, cache, jobs, rets, sjdirs, (res.get("analysis_plugin") or {}).get("path"))
+            ns, _, errs = objstub.unit_terminators(drv[lang], us, {"c": recipe.unit_flags(rec, roots, root, drv["c"], "c"), "c++": recipe.unit_flags(rec, roots, root, drv["c++"], "cxx")}, cache, jobs, rets, sjdirs, (res.get("analysis_plugin") or {}).get("path"),
+                                            rootplug)
             names |= set(ns)
             unit_of = {k: u for u, k in res["pp_keys"].items()}
             bad += [(base + unit_of[k], unit_of[k], "terminator-red", "root %s: %s" % (root, e)[:300]) for k, e in errs]
@@ -116,7 +123,7 @@ def declared_pins(repo, cache):
     def tree(key):
         e = pin[key]
         return recipe.fetch_externals([{"name": key, "commit": e["commit"], "tree_sha256": e["tree_sha256"], "at": key}], os.path.join(cache, "store"),
-                                      os.path.join(cache, "external"), os.path.join(cache, "ws-declared"))[key]["host"]
+                                      recipe.ext_dir(cache), os.path.join(cache, "ws-declared"))[key]["host"]
     return (lambda: objstub.std_index_load(tree("std_index"), pin["std_index"])), (lambda: objstub.winerror_load(tree("wdk"), pin["wdk"]))
 
 
@@ -130,9 +137,8 @@ def main(argv):
     fails, handlers = {}, {}   # {object id: the root's error_abi}, {object id: the root's handler records}
     gen_ids = set()
     try:
-        wine = objstub.read_wine_table(os.path.join(repo, "ports/fnv-nx/verify/wine_fixme.tsv"))   # the table of the tree under test
         std_ix, winerr = declared_pins(repo, cache)
-        declared = objstub.read_declared_table(os.path.join(repo, "ports/fnv-nx/verify/declared_machine.tsv"), std_ix, winerr)   # the table of the tree under test
+        wine, declared, row_owner = objstub.read_root_tables(repo, sorted(recipe.load_admit(repo)), std_ix, winerr)   # the rows of the admitted roots, each root's own tables
         owners = objstub.read_owner_decisions(os.path.join(repo, "CLAUDE.md"))   # the owner-decision anchors of the tree under test
         facts = objstub.read_facts(os.path.join(cache, "reach", gate_build.tree_of(repo), "reach.facts.tsv")) if roots else None
         for root in roots:
@@ -151,8 +157,9 @@ def main(argv):
         rp = os.path.join(repo, "ports/fnv-nx/verify/ASSUMPTIONS.json")   # of the tree under test; a tree without one has no OWNER id: every `assume` call is red
         registry = {e["id"]: e["status"] for e in json.load(open(rp))["entries"]} if os.path.exists(rp) else {}
         its, fs = objstub.judge(results, rows, facts, wine, declared, fails, handlers, stats, extconv, (registry, gen_ids), owners)
-        items, finds = items + its, finds + fs
-        dit, dfs, dstats = doubles.judge(built)   # no doubles in tests (doubles.py)
+        items, finds = items + its, finds + fs + (objstub.orphan_findings(results, row_owner) if roots else [])
+        adm = recipe.load_admit(repo)
+        dit, dfs, dstats = doubles.judge(built, {r for r in built if adm[recipe.split_spec(r)[0]]["class"] == "test"})   # no doubles in tests (doubles.py)
         items, finds = items + dit, finds + dfs
     except (ValueError, KeyError, OSError, recipe.BuildRed) as e:
         why = "input error: %s" % (str(e)[:300] or type(e).__name__)
@@ -174,13 +181,13 @@ def main(argv):
     else:
         status, detail = "green", "%d functions in %d objects of %d roots, no trap path, no vacuous body" % (len(items), len(results), len(roots))
     res = {"format": "fnvnx-gate/1", "name": "objstub", "status": status, "universe": len(items), "certified": cert,
-           "uncertified": bad[:50], "detail": detail, "wine_fixme": {str(k): v for k, v in objstub.wine_counts(results).items()},
+           "uncertified": bad, "detail": detail, "wine_fixme": {str(k): v for k, v in objstub.wine_counts(results).items()},
            "declared_machine": {str(k): v for k, v in objstub.declared_counts(results).items()},
            "tests_total": dstats["tests_total"], "tests_with_doubles": dstats["tests_with_doubles"], "double_symbols": dstats["double_symbols"],
            "doubles": sorted("%s: %s" % (o, d) for o, _, k, d in finds if k in ("test-double", "test-omits-unit", "test-not-linked", "product-duplicate"))[:50],
            "image": image, "trap_body": stats.get("trap_body", 0), "handler_justified": {k[8:]: v for k, v in sorted(stats.items()) if k.startswith("handler_")},
            "assume_calls": objstub.assume_counts(results, (registry, gen_ids) if not why else None)}
-    with open(os.path.join(os.environ["GATE_OUT"], "objstub.findings.tsv"), "w") as fh:   # the whole list (the result JSON holds the first 50 ids)
+    with open(os.path.join(os.environ["GATE_OUT"], "objstub.findings.tsv"), "w") as fh:   # the whole list
         fh.write("object\tfunction\tkind\tdetail\n" + "".join("%s\t%s\t%s\t%s\n" % (o, n, k, d.replace("\t", " ").replace("\n", " ")) for o, n, k, d in sorted(finds)))
     with open(os.path.join(os.environ["GATE_OUT"], "objstub.json"), "w") as fh:
         json.dump(res, fh, sort_keys=True)

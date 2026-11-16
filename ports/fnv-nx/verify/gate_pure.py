@@ -15,20 +15,24 @@ the host: clock, processes, directory listings; their correctness is the busines
 imports one is uncertified, and so is a file that imports one that imports it (those are in the universe, so each is judged itself:
 a module that imports recipe or gate_build lies in verify/ or is red). An entry point or a reached file that is not in a root
 naming gate "pure" is uncertified (nothing judged it).
-uncertified: the first 50 uncertified paths, sorted. Zero items: green, universe 0, said in "detail". Exit 0 iff the result is green."""
+uncertified: every uncertified path, sorted. Zero items: green, universe 0, said in "detail". Exit 0 iff the result is green."""
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import gate_admit  # noqa: E402
-import gatesdir  # noqa: E402
-from gate_admit import imports_errors  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import gate_admit  # noqa: E402
+from fnvnx.verify import gatesdir  # noqa: E402
+from fnvnx.verify.gate_admit import imports_errors  # noqa: E402
 
 ADMIT = "ports/fnv-nx/verify/admit.json"
+TREE = "ports/fnv-nx"
 HOST = gate_admit.HOST_READERS
 PURE_COVERS = set(json.load(open(os.path.join(HERE, "gates.d", "pure.json")))["covers"])   # the classes this gate judges: its own gates.d file, the one place that says so
 
@@ -47,13 +51,36 @@ def run_unit(td, n, unit, imports):
     argv = [sys.executable, "-I", os.path.join(HERE, "puregate.py"), "check"] + list(unit)
     for t in unit:  # a root is importable by its own directory name too (that is how a declaring root reaches it)
         argv += ["--base", os.path.dirname(t) or "."]
-    for i in imports:
-        argv += ["--lib", i, "--base", os.path.dirname(os.path.normpath(i)) or "."]
+    # a declared root (and the unit's own root) is importable under the one module path of gate_admit.import_roots: `fnvnx.<its path below the project tree>`. The run's
+    # view of that path is a copy of the root's .py files at <td>/pgN.mod/fnvnx/<rel> (a symlink is not followed by puregate), --lib so that the files are resolvable and judged in their own run
+    mod = os.path.join(td, "pg%d.mod" % n)
+    alias = {}   # alias dir -> real tree
+    for r in sorted(set(imports) | set(unit), key=lambda x: len(os.path.normpath(x))):
+        nm = gate_admit.module_name(r, TREE)
+        if nm is None or any(a == d or d.startswith(a + os.sep) for d in [os.path.join(mod, *nm.split("."))] for a in alias):
+            continue
+        d = os.path.join(mod, *nm.split("."))
+        for root, _, fs in os.walk(r):
+            for f in sorted(fs):
+                if f.endswith(".py"):
+                    dst = os.path.join(d, os.path.relpath(os.path.join(root, f), r))
+                    os.makedirs(os.path.dirname(dst), exist_ok=True)
+                    shutil.copyfile(os.path.join(root, f), dst)
+        if os.path.isdir(d):   # a root with no python module has no view and contributes no --lib path: an empty view is never passed
+            alias[d] = r
+            argv += ["--lib", d]
+    if alias:
+        argv += ["--base", mod]
     p = subprocess.run(argv + ["--json", js], capture_output=True, text=True)
     if p.returncode not in (0, 2) or not os.path.isfile(js):
         return set(), {}, "puregate failed on %s (exit %d): %s" % (" ".join(unit), p.returncode, p.stderr.strip()[-200:])
     doc = json.load(open(js))
-    nm = lambda p: os.path.relpath(os.path.abspath(p))
+    def nm(p):   # an alias path of the module view maps back to the real file
+        p = os.path.abspath(p)
+        for d, r in alias.items():
+            if p.startswith(os.path.abspath(d) + os.sep):
+                p = os.path.join(os.path.abspath(r), os.path.relpath(p, d))
+        return os.path.relpath(p)
     return ({nm(v["file"]) for v in doc["violations"]}, {nm(f): sorted(nm(x) for x in v) for f, v in doc["imports"].items()}, "")
 
 
@@ -86,6 +113,10 @@ def main(argv):
     roots = admit.get("roots", [])
     bad, graph, why, universe = set(), {}, "", []
     errs = imports_errors(roots)
+    files = sorted(os.path.join(d, f) for d, _, fs in os.walk(TREE) for f in fs if f.endswith(".py"))   # the checkout's python files: the gate reads the checkout
+    derived, derr = gate_admit.derived_imports(roots, files, ".")
+    errs += derr
+    roots = [dict(r, imports=derived.get(r.get("path"), [])) for r in roots]
     entry, eerr = entries(roots)
     errs += eerr
     if errs:
@@ -110,12 +141,14 @@ def main(argv):
         status, detail = "red", why
     elif unc:
         status, detail = "red", "%d of %d files have puregate violations, are host readers or import one" % (len(unc), len(universe))
+    elif not universe and files:
+        status, detail = "red", "universe 0 over a tree of %d python files: no stage entry point reaches any of them, so nothing is certified (vacuous)" % len(files)
     elif not universe:
-        status, detail = "green", "no stage entry points at this commit (nothing to certify)"
+        status, detail = "green", "no python files at this commit (nothing to certify)"
     else:
         status, detail = "green", "%d of %d files accepted by puregate" % (len(universe), len(universe))
     res = {"format": "fnvnx-gate/1", "name": "pure", "status": status, "universe": len(universe), "certified": len(universe) - len(unc),
-           "uncertified": unc[:50], "detail": detail}
+           "uncertified": unc, "detail": detail}
     with open(os.path.join(os.environ["GATE_OUT"], "pure.json"), "w") as fh:
         json.dump(res, fh, sort_keys=True)
     return 0 if status == "green" else 2

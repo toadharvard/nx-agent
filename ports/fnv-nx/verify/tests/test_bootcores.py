@@ -18,10 +18,12 @@ VERIFY = os.path.dirname(HERE)
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(VERIFY)))
 sys.path.insert(0, VERIFY)
 sys.path.insert(0, HERE)
-import bootlayout  # noqa: E402
-import boothost  # noqa: E402
-import bootmachine  # noqa: E402
-import test_bootlayout as tbl  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import bootlayout  # noqa: E402
+from fnvnx.verify import boothost  # noqa: E402
+from fnvnx.verify import bootmachine  # noqa: E402
+from fnvnx.verify.tests import test_bootlayout as tbl  # noqa: E402
 
 APP_CORES = bootmachine.APP_CORES
 FAILS = []

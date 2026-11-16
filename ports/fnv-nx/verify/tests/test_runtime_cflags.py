@@ -1,8 +1,4 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/contract ports/fnv-nx/farm/boot_job.sh ports/fnv-nx/farm/fontstate_job.sh ports/fnv-nx/farm/gamedata_fetch.sh
-# reads: ports/fnv-nx/farm/rcpcert.sh ports/fnv-nx/farm/runner.sh ports/fnv-nx/farm/setup_verdict_env.sh ports/fnv-nx/link
-# reads: ports/fnv-nx/toolchain/msvc/setup_msvc.sh ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/toolchain/msvcmodel/build.sh
-# reads: ports/fnv-nx/verify
 """Tests for the runtime_cflags field of verify/guest_compiler.json: read through the record (recipe.runtime_cflags, guest_flags.py --runtime), and
 no tracked build script spells a flag of it. Plain script: PASS/FAIL lines, exit 0 on pass."""
 import json
@@ -15,7 +11,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 V = os.path.dirname(HERE)
 ROOT = os.path.dirname(V)
 sys.path.insert(0, V)
-import recipe  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import recipe  # noqa: E402
 
 FAILED = []
 
@@ -46,7 +44,6 @@ for f in tracked:
         t = open(os.path.join(ROOT, f), errors="ignore").read()
     except OSError:
         continue
-    t = "\n".join(ln.split(" #")[0] for ln in t.splitlines() if not ln.lstrip().startswith("#"))   # a comment spells nothing: only the shell text does
     if any(re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(x), t) for x in flags):
         spell.append(f)
 check("no tracked build script spells a runtime_cflags flag", not spell, spell)

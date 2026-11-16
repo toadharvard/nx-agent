@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for verify/gate_oracle.py. Plain script: exit 0 on pass, one PASS/FAIL line per case."""
 import copy
 import json
@@ -10,8 +9,11 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-import gate_oracle as G  # noqa: E402
-import scratch  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import gate_oracle as G  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
+from fnvnx.verify import scratch  # noqa: E402
 
 scratch.install()
 
@@ -192,12 +194,11 @@ git(repo, "add", "-A")
 git(repo, "commit", "-qm", "ref")
 commit = git(repo, "rev-parse", "HEAD")
 git(repo, "config", "uploadpack.allowAnySHA1InWant", "true")
-os.environ["ARTIFACTS_URL"] = repo
+recipe.set_artifacts(os.path.join(ftmp, "cache"), repo)
 fetch = G.fetcher(os.path.join(ftmp, "cache"))
-os.makedirs(os.path.join(ftmp, "cache"))
 tree, files = fetch(commit)
 sys.path.insert(0, os.path.dirname(HERE))
-import cas  # noqa: E402
+from fnvnx.verify import cas  # noqa: E402
 plain = os.path.join(ftmp, "plain")
 os.makedirs(os.path.join(plain, "ref"))
 open(os.path.join(plain, "ref", "x.bin"), "w").write("dump\n")
@@ -205,7 +206,6 @@ check("fetch: tree hash of the commit and its files", tree == cas.tree_hash(plai
 check("fetch: the bare fetch is kept by commit", os.path.isdir(os.path.join(ftmp, "cache", commit)))
 t2, why = G.fetcher(os.path.join(ftmp, "cache"))("9" * 40)
 check("fetch: an unknown commit is an error, not a tree", t2 is None and isinstance(why, str) and why, (t2, why))
-del os.environ["ARTIFACTS_URL"]
 
 # repeated key in oracle.json
 tmp = tempfile.mkdtemp(prefix="oracle-test-")

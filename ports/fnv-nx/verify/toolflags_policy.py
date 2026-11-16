@@ -7,7 +7,7 @@ KINDS_TXT = "gcc/as/ld/ar/objcopy/readelf/python"
 KINDS = ("gcc", "as", "ld", "ar", "objcopy", "readelf", "python")
 GNU = ("gcc", "as", "ld", "ar", "objcopy", "readelf")
 FIXED = (("TZ", "UTC"), ("LC_ALL", "C"), ("PYTHONHASHSEED", "0"))
-FORBID_ENV = ("LANG", "LANGUAGE", "PYTHONPATH", "HOME", "USER", "LOGNAME", "HOSTNAME", "PWD", "DISPLAY", "GCC_EXEC_PREFIX",
+FORBID_ENV = ("LANG", "LANGUAGE", "HOME", "USER", "LOGNAME", "HOSTNAME", "PWD", "DISPLAY", "GCC_EXEC_PREFIX",
               "COMPILER_PATH", "LIBRARY_PATH", "CPATH", "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH", "DEPENDENCIES_OUTPUT",
               "SUNPRO_DEPENDENCIES", "MAKEFLAGS", "MFLAGS", "MAKELEVEL")
 PYENV_OK = ("PYTHONHASHSEED", "PYTHONDONTWRITEBYTECODE")
@@ -17,7 +17,7 @@ POLICY = {
     "env.fixed": ("all", "env TZ=UTC LC_ALL=C PYTHONHASHSEED=0 SOURCE_DATE_EPOCH=<integer> COLUMNS=<integer> present",
                   RB + ", Standard Environment Variables (SOURCE_DATE_EPOCH, TZ, LC_ALL); Python docs, PYTHONHASHSEED"),
     "env.forbidden": ("all", "env has no LANG LANGUAGE LC_*(except LC_ALL) PYTHON*(except PYTHONHASHSEED, "
-                      "PYTHONDONTWRITEBYTECODE) HOME USER LOGNAME HOSTNAME PWD DISPLAY CCACHE_* DISTCC_* MAKEFLAGS MFLAGS "
+                      "PYTHONDONTWRITEBYTECODE, and PYTHONPATH when every component is under a declared input) HOME USER LOGNAME HOSTNAME PWD DISPLAY CCACHE_* DISTCC_* MAKEFLAGS MFLAGS "
                       "MAKELEVEL; GCC input variables " + FORBID_ENV_GCC,
                   RB + ", Standard Environment Variables / Locales; " + GCCENV + "; Python docs, Using Python, Environment"),
     "env.path": ("all", "PATH present, every component under a declared input", RB + ", Deterministic build systems (PATH)"),
@@ -51,3 +51,8 @@ POLICY = {
                      "Python docs, Command line (-B, -E, -I, -s); PEP 552 (pyc embed source mtime)"),
     "python.script": ("python", "script path present, under a declared input", "Python docs, Command line (script)"),
 }
+
+# The import root of a generator/gate stage (recipe.py mounts the tool and its import closure at IMPORT_ROOT/IMPORT_TOP/<path relative to the project tree>; the
+# stage sets PYTHONPATH to IMPORT_ROOT).  One record: recipe.py, gate_admit.py and toolflags.py all read it.
+IMPORT_ROOT = "/imp"
+IMPORT_TOP = "fnvnx"

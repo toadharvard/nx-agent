@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for verify/producers.py (rule (f) of gate linkstrict): the objects a link takes from externals show the recipe's semantic flag set in their
 DW_AT_producer. Real objects and archives built by the pinned msvcmodel compiler (fetched by the pin of verify/guest_compiler.json; red with the reason
 when it cannot be fetched, never skipped). Plain script: PASS/FAIL lines, exit 0 on pass."""
@@ -11,10 +10,12 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
-import test_plugins as tp  # noqa: E402
-from test_plugins import BASE, check  # noqa: E402
-import producers as P  # noqa: E402
-import recipe  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify.tests import test_plugins as tp  # noqa: E402
+from fnvnx.verify.tests.test_plugins import BASE, check  # noqa: E402
+from fnvnx.verify import producers as P  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
 
 
 def cc(drv, x, src, out, flags):

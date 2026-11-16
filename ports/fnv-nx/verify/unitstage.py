@@ -48,11 +48,13 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import cas  # noqa: E402
-import sandbox  # noqa: E402
-import toolflags  # noqa: E402
-import unitview  # noqa: E402
-from unitview import UnitError, parse_deps  # noqa: E402,F401
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import cas  # noqa: E402
+from fnvnx.verify import sandbox  # noqa: E402
+from fnvnx.verify import toolflags  # noqa: E402
+from fnvnx.verify import unitview  # noqa: E402
+from fnvnx.verify.unitview import UnitError, parse_deps  # noqa: E402,F401
 
 
 def sandbox_src(rel):
@@ -116,21 +118,35 @@ def prog(p):
     resolved on the host PATH the way the compiler would exec it (a cross compiler answers its absolute path)."""
     return p if os.path.isabs(p) else (shutil.which(p) or p)
 
+def progress(stage, key, what, sec=None):
+    """One flushed line on stderr per stage start and end: `stage ID KEY start` / `stage ID KEY hit|built|failed SECONDS`. A line is in no key and changes no
+    output: a long build shows where it is."""
+    sys.stderr.write("stage %s %s %s%s\n" % (stage, key, what, "" if sec is None else " %.2fs" % sec))
+    sys.stderr.flush()
+
+
 def run_stage(store, doc, cold):
     sandbox.check_doc(doc)
     key = sandbox.key_of(doc)
     cas._put(store, "stage-docs", key + ".json", cas.canon(doc) + b"\n")
     old = sandbox._load(store, key)
+    progress(doc["stage"], key, "start")
     if old is not None and not cold:
+        progress(doc["stage"], key, "hit" if not old.get("rc") else "failed", 0.0)
         return key, old, "hit", 0.0
     t0 = time.time()
     try:
         res, tm = sandbox.execute_timed(store, doc, key)
     except OSError as e:   # EMLINK, ENOSPC, EXDEV ... of the store or the sandbox set-up: a red stage naming the stage, never a crash
+        progress(doc["stage"], key, "failed", time.time() - t0)
         x = sandbox.SbxError("stage %s: %s (errno %s)" % (doc["stage"], e.strerror or e, e.errno))
         x.stage = doc["stage"]
         raise x
+    except BaseException:
+        progress(doc["stage"], key, "failed", time.time() - t0)
+        raise
     sec = time.time() - t0
+    progress(doc["stage"], key, "built" if not res.get("rc") else "failed", sec)
     sandbox.write_time(store, key, tm)    # the timing sidecar of an execution (a miss); a hit wrote none
     if old is None:
         sandbox._store_result(store, key, res)
@@ -240,11 +256,9 @@ class Build:
                 raise UnitError("dependency %s is in no declared input" % p)
         return out
 
-    def unit(self, rel):
-        e = {"unit": rel, "status": "ok", "cc_status": "skipped", "object": None, "name_tree_id": self.name_tree_id, "pp_iterations": 0,
-             "pp_seconds": 0.0}
-        if rel.endswith(".s"):
-            return self.assemble(e, rel)
+    def pp_loop(self, rel, e):
+        """The PP stage of unit REL on its minimal view (the closure hint, then the fixpoint of the files the run read): the one loop of unit() and pp_file(). E (the unit's result
+        dict) receives pp_key, pp_status, pp_iterations. -> (the PP result, the closure files); (None, None) with E's status and error set when the unit does not preprocess."""
         files, expect, ran = None, None, False
         try:
             hint = json.load(open(hint_path(self.store, rel, self.hint_ns)))
@@ -263,7 +277,7 @@ class Build:
                 miss = {r for r in (self.real(p, False) for p in unitview.placeholder_paths(self.stderr(res))) if r}
                 if files is None or not miss or miss <= files:
                     e["status"], e["error"] = "pp-failed", self.last(res)
-                    return e
+                    return None, None
                 files = files | miss
                 continue
             d, h = self.deps(key), cas.manifest(res["outputs"]["/out"], self.store)["entries"]["unit.ii"]["h"]
@@ -273,6 +287,27 @@ class Build:
             if d == files:
                 break
             expect, files = (d, h), d
+        return res, files
+
+    def pp_file(self, rel):
+        """The preprocessed text of unit REL: the unit.ii that the CC stage compiles (the same PP stage, key and view as unit()) -> path of the file in the store.
+        A unit that does not preprocess raises UnitError with the compiler's last lines."""
+        if rel.endswith(".s"):
+            raise UnitError("%s: a .s unit has no preprocessing stage" % rel)
+        e = {"unit": rel, "status": "ok", "pp_iterations": 0, "pp_seconds": 0.0}
+        res, _ = self.pp_loop(rel, e)
+        if res is None:
+            raise UnitError("%s: %s" % (rel, e["error"]))
+        return cas._obj(self.store, cas.manifest(res["outputs"]["/out"], self.store)["entries"]["unit.ii"])
+
+    def unit(self, rel):
+        e = {"unit": rel, "status": "ok", "cc_status": "skipped", "object": None, "name_tree_id": self.name_tree_id, "pp_iterations": 0,
+             "pp_seconds": 0.0}
+        if rel.endswith(".s"):
+            return self.assemble(e, rel)
+        res, files = self.pp_loop(rel, e)
+        if res is None:
+            return e
         e["closure"], e["files"] = sorted(files), len(files)
         e["du_key"], dres = self.du(rel, files)
         if dres["rc"]:

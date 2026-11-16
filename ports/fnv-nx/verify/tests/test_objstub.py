@@ -1,10 +1,4 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/addr/fnvnx_addr.cc
-# reads: ports/fnv-nx/toolchain/dispatch/fnvnx_dispatch.cc ports/fnv-nx/toolchain/ftoi/f2i_builtins.inc ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc
-# reads: ports/fnv-nx/toolchain/layout/crossing_terms.inc ports/fnv-nx/toolchain/layout/decltype_spell.inc
-# reads: ports/fnv-nx/toolchain/layout/fnvnx_layout.cc ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/toolchain/names/fnvnx_names.cc
-# reads: ports/fnv-nx/toolchain/order/atomic_order.inc ports/fnv-nx/toolchain/order/fnvnx_frame.h ports/fnv-nx/toolchain/order/fnvnx_order.cc
-# reads: ports/fnv-nx/toolchain/pi/fnvnx_pi.cc ports/fnv-nx/toolchain/sdd/fnvnx_sdd.cc ports/fnv-nx/verify
 """Tests for verify/objstub.py (gate objstub). Plain script: one PASS/FAIL line per case, exit 0 on pass.
 Compiles with aarch64-linux-gnu-gcc in both ABIs (ilp32, lp64); scratch under tempfile.mkdtemp."""
 import json
@@ -20,15 +14,17 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
-import objstub  # noqa: E402
-import scratch  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import objstub  # noqa: E402
+from fnvnx.verify import scratch  # noqa: E402
 
 scratch.install()
 
 sys.path.insert(0, HERE)
-import test_recipe as TR  # noqa: E402
-import recipe  # noqa: E402
-import cas  # noqa: E402
+from fnvnx.verify.tests import test_recipe as TR  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
+from fnvnx.verify import cas  # noqa: E402
 
 CC = "aarch64-linux-gnu-gcc"
 ROOT = tempfile.mkdtemp(prefix="objstub-")
@@ -219,7 +215,7 @@ for abi in ("ilp32", "lp64"):
     check(T("LLVM (a64access) decodes the same words as objdump"), od == cs and len(od) > 10, (len(od), len(cs)))
 
 # --- the target profile of a root decides how its objects are judged (gate_objstub.profile_findings)
-import gate_objstub
+from fnvnx.verify import gate_objstub
 def hdr(cls, machine):
     pth = tempfile.mkstemp(dir=ROOT, suffix=".o")[1]
     open(pth, "wb").write(b"\x7fELF" + bytes([cls, 1, 1]) + bytes(9) + (1).to_bytes(2, "little") + machine.to_bytes(2, "little") + bytes(40))
@@ -615,6 +611,18 @@ check("declared table: header comment and three valid rows (win-doc and wine-9.0
 GAL = "34\tGalaxyInit\tno-galaxy\tgalaxy-sdk:IGalaxy/Init:Init\tu32\t1\t-"
 open(tf_, "w").write(HDR_REAL + "\n" + GAL + "\n")
 check("declared table: a galaxy-sdk row with fact no-galaxy is accepted", rdt(tf_).get(34, ("",))[1:3] == ("no-galaxy", "galaxy-sdk:IGalaxy/Init:Init"), "")
+HDR_STEAM = HDR_REAL.replace(" | galaxy-sdk:<page>:<function>", " | galaxy-sdk:<page>:<function> | steamworks-sdk:<header>#<function>")
+for what, row, want in (("accepted", "36\tSteamAPI_Init\tno-galaxy\tsteamworks-sdk:public/steam/steam_api.h#SteamAPI_Init\tu32\t0\t-", True),
+                        ("malformed: the function after a colon", "36\tSteamAPI_Init\tno-galaxy\tsteamworks-sdk:steam_api.h:SteamAPI_Init\tu32\t0\t-", False),
+                        ("malformed: no function", "36\tSteamAPI_Init\tno-galaxy\tsteamworks-sdk:steam_api.h#\tu32\t0\t-", False),
+                        ("malformed: no header", "36\tSteamAPI_Init\tno-galaxy\tsteamworks-sdk:#SteamAPI_Init\tu32\t0\t-", False)):
+    open(tf_, "w").write(HDR_STEAM + "\n" + row + "\n")
+    try:
+        rdt(tf_)
+        got = True
+    except ValueError:
+        got = False
+    check("declared table: a steamworks-sdk source, " + what, got, want)
 for what, row in (("an undeclared fact", "35\tx\tno-wifi\twin-doc:a/b:f\tu32\t1\t-"), ("an undeclared source prefix", "35\tx\tno-galaxy\tgog-sdk:a/b:f\tu32\t1\t-")):
     open(tf_, "w").write(HDR_REAL + "\n" + row + "\n")
     try:
@@ -736,7 +744,7 @@ wv = objstub.winerror_load(wx, wpin)
 check("winerror_load: decimals, hex with a cast, (WSABASEERR+N) and an alias of another define", wv["ERROR_INVALID_HANDLE"] == 6 and wv["HR_X"] == 0x80070005 and wv["WSAEINTR"] == 10004 and wv["EINTR_ALIAS"] == 10004 and wv["ERROR_ALIAS"] == 6, wv)
 
 # gate on the toy product root of test_recipe.py
-import verdict  # noqa: E402
+from fnvnx.verify import verdict  # noqa: E402
 
 RV = ("#include \"toy.h\"\nvoid fnvnx_reach_violation(unsigned) __attribute__((noreturn));\n"
       "int f_c(int x) { if (x > 3) fnvnx_reach_violation(42); return x + TOY; }\n")
@@ -806,7 +814,7 @@ check("a malformed facts file: red, input error", rc == 2 and g["status"] == "re
 WC = '#include "toy.h"\nvoid fnvnx_wine_fixme(unsigned);\nint f_c(int x) { (void)x; fnvnx_wine_fixme(5); return 7; }\n'
 for tag, tbl, want in (("row matches", "5\tm\twine-9.0:dlls/x/y.c:f\tu32\t7\n", "green"), ("row value differs", "5\tm\twine-9.0:dlls/x/y.c:f\tu32\t8\n", "red"),
                        ("malformed table", "5\tm\tnot-a-ref\tu32\t7\n", "input")):
-    wr = TR.make_guest_repo("os-wine-" + tag.replace(" ", "-"), rec=TR.mut(link=None), files={"toy/constants.tsv": CONST, "toy/c.c": WC, "verify/wine_fixme.tsv": tbl})
+    wr = TR.make_guest_repo("os-wine-" + tag.replace(" ", "-"), rec=TR.mut(link=None), files={"toy/constants.tsv": CONST, "toy/c.c": WC, "toy/wine_fixme.tsv": tbl})
     rc, g, _, txt, st = gate(wr, ROOT + "/gw" + tag.replace(" ", "-"), GC)
     check("gate, wine_fixme table, case %s: expected %s" % (tag, want), (rc == 0 and g["certified"] == g["universe"] and g["wine_fixme"] == {"5": 1} and st[0] == "green") if want == "green" else
           (rc == 2 and ("wine-fixme-mismatch 1" in g["detail"] if want == "red" else "input error" in g["detail"])), (g, txt))
@@ -830,6 +838,17 @@ bad_ii = tf + ".bad.ii"
 open(bad_ii, "w").write("int f(void) { return +; }\n")
 tc = objstub.unit_terminators("aarch64-linux-gnu-g++", [("pk-bad", bad_ii, "c")], {"c": []}, tempfile.mkdtemp(prefix="objstub-tc-"), 1, so=plug("aarch64-linux-gnu-g++"))
 check("a unit the terminator plugin cannot process: a failure of that unit in the result (no exception)", tc[0] == [] and len(tc[2]) == 1 and tc[2][0][0] == "pk-bad", tc)
+
+# the terminator run loads the ROOT'S OWN plugins as its compile stage does (recipe.root_plugin_flags): a unit that uses a dispatch attribute (fnvnx_host,
+# registered by the root's fnvnx_dispatch plugin) is green in the gate; the same preprocessed text without the root's plugins is an unknown attribute (-Werror=attributes)
+ATTR = '#include "toy.h"\ntypedef unsigned long long __attribute__((fnvnx_host)) hslot;\nhslot slot_a;\nint f_c(int x) { return x + TOY + (slot_a != 0); }\n'
+ra = TR.make_guest_repo("os-attr", files={"toy/constants.tsv": CONST, "toy/c.c": ATTR})
+rc, g, _, txt, st = gate(ra, ROOT + "/gattr", GC)
+check("a unit that uses a dispatch attribute: no terminator-red (the root's plugins are loaded in the terminator run)", "terminator-red" not in g.get("detail", "") and not any(":f_c" in u and "terminator" in g["detail"] for u in g["uncertified"]), (g, txt))
+ii = tf + ".attr.ii"
+open(ii, "w").write("typedef unsigned long long __attribute__((fnvnx_host)) hslot;\nhslot slot_a;\nint f(void) { return slot_a != 0; }\n")
+tcn = objstub.unit_terminators("aarch64-linux-gnu-g++", [("pk-attr", ii, "c")], {"c": ["-Werror=attributes"]}, tempfile.mkdtemp(prefix="objstub-tc-"), 1, so=plug("aarch64-linux-gnu-g++"))
+check("the same text without the root's plugins: a failure of the unit naming the unknown attribute (so the plugins must be loaded)", len(tcn[2]) == 1 and "attribute" in tcn[2][0][1], tcn)
 
 # the final image: every function body of the linked ELF is judged for the fixed-failure class (a weak `errno = ENOSYS; return -1` fallback left in it is red;
 # the same image with a strong override is green, the weak body is not in the image)

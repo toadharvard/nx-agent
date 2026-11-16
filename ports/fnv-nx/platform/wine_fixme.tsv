@@ -1,0 +1,7 @@
+# id	contract_name	wine_ref	kind	value
+# rows come from the Wine 9.0 source (renderer owner);
+# wine_ref = wine-9.0:<path>:<function>
+# kinds void|u32|u64|addr|u32nz<N>|branch (branch = a FIXME on one branch inside a real body, value `-`; see objstub.py read_wine_table)
+200	IMediaControl::AddSourceFilter	wine-9.0:dlls/quartz/filtergraph.c:MediaControl_AddSourceFilter	u32	0
+201	IMediaControl::get_FilterCollection	wine-9.0:dlls/quartz/filtergraph.c:MediaControl_get_FilterCollection	u32	0
+202	IMediaControl::get_RegFilterCollection	wine-9.0:dlls/quartz/filtergraph.c:MediaControl_get_RegFilterCollection	u32	0

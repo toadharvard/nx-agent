@@ -59,6 +59,9 @@ row or line a converter does not understand is an InputError carrying the file l
                                       `group-incomplete`): a group with fewer parts would be a weaker condition. A milestone left without
                                       rows is listed as `# dropped-milestone:`.
 """
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import argparse
 import hashlib
 import json
@@ -67,12 +70,12 @@ import re
 import struct
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "contract"))
-import boot
-import bootmiles
-import exepin
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import boot
+from fnvnx.verify import bootmiles
+from fnvnx.contract import exepin
 
-MODULE_HEADER = "# name\tsha256\tsize\tpreferred_base\tassigned_base\tsize_of_image\thas_tls\tentry_rva\tstatic\tload_index"
+MODULE_HEADER = "# name\tsha256\tsize\tpreferred_base\tassigned_base\tsize_of_image\thas_tls\tentry_rva\tstatic\tload_index\tdll"
 KEYS_STRIDE = 0x10
 CONSOLE_PREFIX = "   fnvnx-start: "
 
@@ -205,18 +208,23 @@ def pe_image(raw):
 
 
 def reserved_rows(modules_text, exe_raw):
-    rows, _ = _rows(modules_text, MODULE_HEADER, 10)
-    out = []
+    rows, _ = _rows(modules_text, MODULE_HEADER, 11)
+    out, exes = [], 0
     for no, f in rows:
-        name, sha, _size, _pref, base, soi, tls, _entry, static, _idx = f
-        if not name or len(sha) != 64 or tls not in ("0", "1") or static not in ("0", "1"):
-            raise InputError(f"line {no}: bad name/sha256/has_tls/static field")
+        name, sha, _size, _pref, base, soi, tls, _entry, static, _idx, dll = f
+        if not name or len(sha) != 64 or tls not in ("0", "1") or static not in ("0", "1") or dll not in ("0", "1"):
+            raise InputError(f"line {no}: bad name/sha256/has_tls/static/dll field")
         lo, size = _hex(base, "assigned_base", no), _hex(soi, "size_of_image", no)
         if not size:
             raise InputError(f"line {no}: size_of_image is 0")
+        if dll == "0":   # the kind of a row is its PE IMAGE_FILE_DLL bit: the exe row, which must be this exe (its sha256), named "exe" in the layout
+            exes += 1
+            if sha != hashlib.sha256(exe_raw).hexdigest():
+                raise InputError(f"line {no}: the exe row is not the sha256 of the exe")
+            name = "exe"
         out.append((name, lo, lo + size))
-    base, size = pe_image(exe_raw)
-    out.append(("exe", base, base + size))
+    if exes != 1:
+        raise InputError(f"modules.tsv has {exes} exe rows, want exactly one")
     return sorted(out, key=lambda r: r[1])
 
 

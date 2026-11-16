@@ -12,7 +12,9 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
-import cas  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import cas  # noqa: E402
 
 ROOT = tempfile.mkdtemp(dir="/root/l4/sbx-test" if os.path.isdir("/root/l4/sbx-test") else os.path.expanduser("~"),
                         prefix="sbx-")
@@ -41,13 +43,13 @@ static void cat(const char *k, const char *p) {
     printf("%s=len%d\n", k, n);
 }
 int main(int argc, char **argv) {
-    struct timespec t; struct stat st; struct utsname u; struct sysinfo si; char b[64]; unsigned char r[1];
+    struct timespec t; struct stat st; struct utsname u; struct sysinfo si; char b[64]; unsigned char r[16];
     if (argc > 1 && !strcmp(argv[1], "clock")) { clock_gettime(CLOCK_REALTIME, &t); printf("%ld.%09ld\n", t.tv_sec, t.tv_nsec); return 0; }
     clock_gettime(CLOCK_REALTIME, &t); printf("clock_ns=%ld%09ld\n", t.tv_sec, t.tv_nsec);
     printf("time_s=%ld\n", (long)time(0));
     close(open("/out/f", O_CREAT | O_WRONLY, 0644)); stat("/out/f", &st);
     printf("file_mtime=%ld\n", st.st_mtime); printf("ino_f=%lu\n", (unsigned long)st.st_ino);
-    r[0] = 0; long g = (long)getrandom(r, 1, 0); int ge = errno; printf("getrandom_rc=%ld errno=%d\n", g, ge);
+    errno = 0; long g = (long)getrandom(r, 16, 0); int ge = errno; printf("getrandom_rc=%ld errno=%d\n", g, ge); printf("getrandom_bytes="); for (int i = 0; i < 16; i++) printf("%02x", r[i]); printf("\n");
     unsigned char *ar = (unsigned char *)getauxval(AT_RANDOM); printf("at_random=");
     for (int i = 0; i < 16; i++) printf("%02x", ar[i]); printf("\n");
     cpu_set_t cs; sched_getaffinity(0, sizeof cs, &cs); printf("ncpu=%d\n", CPU_COUNT(&cs));
@@ -124,7 +126,7 @@ def main():
     if os.geteuid() != 0 or not shutil.which("busybox") or not shutil.which("gcc"):
         print("FAIL prerequisites: need root, busybox, gcc")
         return 1
-    import sandbox  # noqa: E402  (case 0: importable)
+    from fnvnx.verify import sandbox  # noqa: E402  (case 0: importable)
     check("importable", hasattr(sandbox, "main"))
     bb = fresh("bb")
     shutil.copy(shutil.which("busybox"), os.path.join(bb, "busybox"))
@@ -274,7 +276,7 @@ echo "mounts=$(wc -l < /proc/mounts)"'''
     ch = {}
     ch["wall_clock"] = (A["clock_ns"] != B["clock_ns"] or A["time_s"] != B["time_s"],
                         "clock_ns %s vs %s, file mtime %s vs %s" % (A["clock_ns"], B["clock_ns"], A["file_mtime"], B["file_mtime"]))
-    ch["entropy"] = (A["at_random"] != B["at_random"] or not A["getrandom_rc"].startswith("-1"),
+    ch["entropy"] = (A["at_random"] != B["at_random"],
                      "getrandom: %s, AT_RANDOM %s vs %s, dev_urandom %s" % (A["getrandom_rc"], A["at_random"][:8], B["at_random"][:8], A["dev_urandom"]))
     ch["cpu_count_scheduling"] = (A["ncpu"] != B["ncpu"], "ncpu %s vs %s under taskset; scheduling order not controlled" % (A["ncpu"], B["ncpu"]))
     ch["uid_gid"] = (not (A["uid"] == B["uid"] == "0 gid=0 euid=0"), "uid/gid %s / %s" % (A["uid"], B["uid"]))
@@ -291,7 +293,13 @@ echo "mounts=$(wc -l < /proc/mounts)"'''
         print("channel %s: %s (%s)" % (name, "OPEN" if is_open else "closed", ev))
         if is_open:
             opened.add(name)
-    check("9a getrandom returns ENOSYS", A["getrandom_rc"] == "-1 errno=38", A["getrandom_rc"])
+    win = sandbox.stream(r_a[1]["key"], 0, 256).hex()   # the libc of the probe may take some bytes first (malloc's random): the probe's 16 bytes are a window of the stage's stream
+    store3 = fresh("store3")
+    r_c = run(store3, mkstage(store3, "probe", {"/bin": bb, "/p": probe}, ["/out"], sh("/p > /out/o")))
+    C = probes(r_c, store3)
+    check("9a getrandom returns the stage's entropy stream (a function of its key): a window of stream(key), the same when the stage runs again, another one for another stage",
+          A["getrandom_rc"] == "16 errno=0" and A["getrandom_bytes"] in win and r_c[1]["key"] == r_a[1]["key"] and C["getrandom_bytes"] == A["getrandom_bytes"]
+          and r_b[1]["key"] != r_a[1]["key"] and B["getrandom_bytes"] != A["getrandom_bytes"], (A["getrandom_rc"], A["getrandom_bytes"], B["getrandom_bytes"], C["getrandom_bytes"]))
     check("9b no /dev/urandom, entropy files in /proc empty or absent",
           A["dev_urandom"].startswith("ERR") and A["proc_uuid"] in ("len0",) or A["proc_uuid"].startswith("ERR"), str(A))
     check("9c measured OPEN set == result.json open_channels", opened == set(r_a[1]["open_channels"]),

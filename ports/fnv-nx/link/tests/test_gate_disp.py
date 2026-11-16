@@ -2,6 +2,9 @@
 """Synthetic check of link/gate_disp.py (typed dispatch tables, rows format fnvnx-disp-rows/1): ELF32 fixtures built with struct (no toolchain, no
 private data) around a real hash-and-displace table found here by search.  Cases: rows equal (green); a slot differs; a row missing; a stray non-empty
 slot; the rows file missing; an unrelocated entry; wrong entry word; undefined/ambiguous symbol; wrong hash parameters; sizes; two tables; the universe."""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import struct
@@ -12,8 +15,8 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 GATE = os.path.join(HERE, '..', 'gate_disp.py')
 sys.path.insert(0, os.path.join(HERE, '..'))
-sys.path.append(os.path.join(HERE, '..', '..', 'verify'))
-import scratch
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import scratch
 scratch.install()
 
 fails = []
@@ -140,8 +143,7 @@ def run(elfbytes=None, rows=None, text=None, universe=None, extra=(), elf_file=T
         sys.exit('gate_disp failed: ' + r.stderr[-600:])
     with open(os.path.join(go, 'disp.json')) as fh:
         j = json.load(fh)
-    with open(os.path.join(go, 'disp.ids')) as fh:
-        j['ids'] = fh.read().split('\n')[:-1]
+    j['ids'] = list(j['uncertified'])
     os.remove(os.path.join(go, 'disp.json'))
     return r.returncode, j
 

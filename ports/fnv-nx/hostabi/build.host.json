@@ -1,0 +1,15 @@
+{
+ "format": "fnvnx-recipe/1",
+ "profile": "host",
+ "flags": {
+  "c": [
+   "-Wall",
+   "-Werror"
+  ],
+  "cxx": [
+   "-Wall",
+   "-Werror"
+  ],
+  "asm": []
+ }
+}

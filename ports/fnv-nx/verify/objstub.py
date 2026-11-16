@@ -4,7 +4,7 @@
         (the object id and the `unit` of a constants row are the path as given)
     objstub.py terminators --cc CC [--cflag F]... [--lang c|c++] --header H... -o FILE
 Inputs: ELF relocatable objects, ELF32 (ILP32; SHT_RELA with Elf32_Rela, R_AARCH64_P32_* kinds) or ELF64, AArch64, little endian. Decoder: ONE source, verify/a64access.cc (built with
-the host g++ against LLVM 18's MC layer; env var A64ACCESS names a prebuilt binary): per word the registers read and written
+the host g++ against LLVM 18's MC layer): per word the registers read and written
 (MCInstrDesc defs/uses/implicit, tied operands), the memory operand and the kind. Everything the T and V classes need beyond that
 is read from architectural encoding fields (Arm ARM A64 top-level table), never from mnemonics. Assumption: LLVM's AArch64 (ASM-043)
 instruction descriptions and disassembler are correct; the test cross-checks the decoded word set against objdump. Output: one line `obj:symbol: KIND detail`, sorted; exit 0 iff no finding.
@@ -65,7 +65,7 @@ does exactly what Wine 9.0's simplified implementation of an API does (nothing, 
 is no evidence of a call (rule (i)), and after it x0-x18, x30, v0-v7, v16-v31 are unknown (written with unknown values), so a result
 that depends on them is unknown. A function that calls it and is otherwise V is certified iff (1) w0 at every call is a constant
 (`wine-fixme-nonconstant`), (2) every path passes exactly one id (else `wine-fixme-mismatch`; wine_path_id), (3) the table
-verify/wine_fixme.tsv (`--wine-fixme`; the gate reads the tree under test) has the row of that id (`wine-fixme-unknown-id`) and (4) the
+<root>/wine_fixme.tsv (`--wine-fixme`; the gate reads the tree under test) has the row of that id (`wine-fixme-unknown-id`) and (4) the
 result equals the row's kind/value (void: any; u32/u64: x0 is that constant; addr: x0 is the address of SYMBOL (+ OFFSET): a name at that address, or a symbol whose extent holds it; a LOCAL symbol is matched through its own symbol-table entry (the assembler often relocates against the section symbol + addend, which is resolved back to `symbol+offset` that way); u32nz<N>: below; else `wine-fixme-mismatch`). For such a body
 the input rule (v) of V is replaced by the result rule: reading an input register is no evidence (a debug build spills its arguments),
 because the result must be constant by wine_sim and the effects are frame stores (V (a), (b)). u32nz<N> (a result that depends only on
@@ -87,7 +87,7 @@ Wine 9.0 tree is the oracle class, not done. A row without a call site is no fin
 `.fnvnx.cite` (type PROGBITS, no SHF_ALLOC): u32 function address (an ABS32 relocation of the object's ABI, R_AARCH64_P32_ABS32 for ILP32, against a
 function DEFINED in the same object), u32 length n of the id, the n bytes of the id, padding to 4 (read_cites; any other shape, an id that is not
 `dm:`/`wf:` plus a decimal, a relocation that does not name a function start of this object: `cite-malformed`). `dm:` is the id column of
-verify/declared_machine.tsv (`--declared-machine`; read_declared_table: rows `id<TAB>contract_name<TAB>fact<TAB>source<TAB>kind<TAB>value`; the facts and the
+<root>/declared_machine.tsv (`--declared-machine`; read_declared_table: rows `id<TAB>contract_name<TAB>fact<TAB>source<TAB>kind<TAB>value`; the facts and the
 source prefixes are read from the table's own header line; the clause of `c11:<clause>:<function>` is digits and dots, the page of `posix-2017:<page>:<function>`
 a name; kind `noreturn` (value `-`) exactly for the facts process-end and thread-end), `wf:` the id column of wine_fixme.tsv. A cited body is judged by the rules
 of (W) with no call to read: it is analysed with the input rule replaced by the result rule (wine mode); V => it is certified iff the row's kind/value match the
@@ -201,18 +201,17 @@ import struct
 import subprocess
 import sys
 import tempfile
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
 
 HERE, NOP = os.path.dirname(os.path.abspath(__file__)), 0xD503201F
 A64_BUILD = "g++ -std=c++17 -O1 $(llvm-config-18 --cxxflags) a64access.cc -o OUT $(llvm-config-18 --ldflags --libs aarch64 mc mcdisassembler support)"
 _TOOL = []
 
 def tool(cache=None):
-    """Path of the a64access binary: $A64ACCESS, else CACHE/objstub/a64access-<hash of the source, the build line and the LLVM and g++
+    """Path of the a64access binary: CACHE/objstub/a64access-<hash of the source, the build line and the LLVM and g++
     versions> (built once), else built once per process into a temporary directory (removed at exit)."""
     if not _TOOL:
-        if os.environ.get("A64ACCESS"):
-            _TOOL.append(os.environ["A64ACCESS"])
-        elif cache:
+        if cache:
             q = lambda *a: subprocess.run(list(a), capture_output=True, text=True).stdout
             h = hashlib.sha256((open(os.path.join(HERE, "a64access.cc")).read() + A64_BUILD + q("llvm-config-18", "--version") + q("g++", "--version")).encode()).hexdigest()
             p = os.path.join(cache, "objstub", "a64access-" + h)
@@ -1005,7 +1004,7 @@ def image_check(path, errno):
     skipped: a size that is not a multiple of 4 or leaves the file, a word LLVM rejects, a data island ($d mapping symbol inside the range), a load/store
     word without a memory operand. errno reached through a TLS symbol (form "tls") is kind `unjudged` for the root: its stores are not read."""
     if open(path, "rb").read(20)[18:20] == (62).to_bytes(2, "little"):   # the host profile's image: the same rule over x86-64 (objstub_x64.image_check)
-        import objstub_x64
+        from fnvnx.verify import objstub_x64
         return objstub_x64.image_check(path, errno)
     form, sym = errno
     im = Image(path, sym)
@@ -1296,7 +1295,7 @@ def check_obj(path, terms, os_layer, probe=None, machine=None):
     if machine is not None and o.machine != machine:
         raise ValueError("%s: e_machine %d, the root's profile requires %d" % (path, o.machine, machine))
     if o.machine == 62:
-        import objstub_x64
+        from fnvnx.verify import objstub_x64
         return objstub_x64.check_obj(o, path, terms, os_layer, probe, vjson, read_cites, assume_id)
     items, finds, exit_ok, extra = [], [], set(), {"reach": [], "wine": [], "wine_id": {}, "wine_nz": {}, "cite_sym": {}, "cite": {}, "terms": [], "term_def": [], "alias": {}, "tb": {}, "globals": [], "dref": [], "nr": {}, "nr_tail": {}, "flag": None, "tabs": {}, "assume": []}
     pw = {}   # the probe (recipe error_abi kind flag): name -> (words, a, b, stores, calls) of every function
@@ -2069,6 +2068,39 @@ def wine_matches(row, v, nz):
     return kind == "void" or (x0 is not None and x0[0] == "K" and x0[1] & (0xFFFFFFFF if kind == "u32" else 2 ** 64 - 1) == int(val, 0))
 
 
+def read_root_tables(repo, roots, std_index=None, winerr=None):
+    """The declared-machine and Wine rows of the admitted ROOTS (repo-relative paths): each root that has citing bodies carries `<root>/declared_machine.tsv` and
+    `<root>/wine_fixme.tsv` (a root without the file has no row of that class). The tables are the union over the roots; an id that is in two roots' tables of one class
+    is an error (ids are one space per class). -> (wine, declared, owner) with wine/declared as read_wine_table/read_declared_table and OWNER {("wf"|"dm", id): root}.
+    ValueError on a malformed table or a duplicate id."""
+    wine, declared, owner = {}, {}, {}
+    for root in sorted(roots):
+        for fname, kind, dest, load in (("wine_fixme.tsv", "wf", wine, lambda q: read_wine_table(q)),
+                                        ("declared_machine.tsv", "dm", declared, lambda q: read_declared_table(q, std_index, winerr))):
+            q = os.path.join(repo, root, fname)
+            if not os.path.exists(q):
+                continue
+            for i, row in load(q).items():
+                if i in dest:
+                    raise ValueError("%s id %d is a row of two roots: %s and %s" % (fname, i, owner[(kind, i)], root))
+                dest[i], owner[(kind, i)] = row, root
+    return wine, declared, owner
+
+
+def orphan_findings(results, owner):
+    """-> [(object "-", "<root>:<dm|wf>:<id>", "declared-machine-orphan"|"wine-fixme-orphan", detail)]: a row of an admitted root that no record of an object of
+    that root cites. An object belongs to the longest root path that is a prefix of its id."""
+    roots = sorted({r for r in owner.values()}, key=len, reverse=True)
+    cited = {}
+    for oid, r in results.items():
+        root = next((x for x in roots if oid.startswith(x + "/")), None)
+        if root:
+            cited.setdefault(root, set()).update(i for ids in r["cite"].values() for i in ids)
+            cited[root].update("wf:%d" % c for _, _, c in r["wine"] if c is not None)   # the other form of a Wine citation: the constant id a body passes to fnvnx_wine_fixme
+    return sorted(("-", "%s:%s:%d" % (root, k, i), "declared-machine-orphan" if k == "dm" else "wine-fixme-orphan",
+                   "the row %s:%d of %s is cited by no record of that root" % (k, i, root)) for (k, i), root in owner.items() if "%s:%d" % (k, i) not in cited.get(root, set()))
+
+
 def read_wine_table(path):
     """wine_fixme.tsv: `id<TAB>contract_name<TAB>wine_ref<TAB>kind<TAB>value`; lines starting with # are comments. id decimal < 2**32,
     wine_ref `wine-9.0:<path in the Wine source tree>:<function name>` (the FORM is validated; checking it against a pinned Wine 9.0 tree
@@ -2111,6 +2143,7 @@ def declared_header(lines):
                 raise ValueError("declared machine table header: a source form is not PREFIX:<..>:<function>: %r" % s.group(1)[:80])
             fn = r":[A-Za-z_][A-Za-z0-9_@]*"
             forms = {"std": r":(?:C11:[0-9]+(?:\.[0-9]+)*|POSIX\.1-2017:[A-Za-z_][A-Za-z0-9_]*)"}   # `std:<doc>:<section>`: the clause of ISO/IEC 9899:2011 (N1570) or the IEEE Std 1003.1-2017 function page; no function component
+            forms["steamworks-sdk"] = r":[A-Za-z0-9_./+-]+#[A-Za-z_][A-Za-z0-9_]*"   # `steamworks-sdk:<header>#<function>`: a function declared in a header of the Steamworks SDK (the interface galaxywrp.dll exports); the function follows `#`
             body = r":[A-Za-z0-9_./#+-]+" + fn
             return set(m.group(1).split(" | ")), "(" + "|".join(re.escape(x.group(1)) + forms.get(x.group(1), body) for x in prefixes) + ")"
     raise ValueError("declared machine table has no header line `# fact: ...; source: ...; kind ...`")
@@ -2185,7 +2218,7 @@ def read_declared_table(path, std_index=None, winerr=None):
     """declared_machine.tsv: `id<TAB>contract_name<TAB>fact<TAB>source<TAB>kind<TAB>value<TAB>lasterror`; lines starting with # are comments. fact is one of
     the facts of the table's header line. source is the documented origin of the returned value: one or several tokens joined by `|` (sorted, unique, each of the
     forms the header lists): `win-doc:<Windows documentation page or header path>:<function>`, `wine-9.0:<path in the Wine source tree>:<function name>`,
-    `galaxy-sdk:<page>:<function>`, `hostabi:<header>:<service>`, and `std:<doc>:<section>`: the standard's own clause, `std:C11:<clause number>` (ISO/IEC 9899:2011,
+    `galaxy-sdk:<page>:<function>`, `steamworks-sdk:<header>#<function>` (a body cites the documentation of the interface its dll exports: galaxywrp.dll exports the Steam API), `hostabi:<header>:<service>`, and `std:<doc>:<section>`: the standard's own clause, `std:C11:<clause number>` (ISO/IEC 9899:2011,
     draft N1570) or `std:POSIX.1-2017:<function page>` (IEEE Std 1003.1-2017 System Interfaces). The FORM is validated here; a std token is also checked against the
     pinned index (STD_INDEX: the callable that returns the directory of the std-index tree of declared_sources.json, called once, only when a std token occurs; the
     clause or page must be in the index; None with a std token is an error). Checking win-doc/wine references against a pinned tree is the oracle class, not done.
@@ -2254,7 +2287,7 @@ def plugin_hash(so):
 SYSTEM_SJ = ("/usr/include", "/usr/aarch64-linux-gnu/include")   # the pinned distribution's libc headers (env.json: libc6-dev, libc6-dev-arm64-cross)
 
 
-def unit_terminators(cc, units, flags, cache, jobs, rets=None, sjdirs=SYSTEM_SJ, so=None):
+def unit_terminators(cc, units, flags, cache, jobs, rets=None, sjdirs=SYSTEM_SJ, so=None, root_plugins=None):
     """Terminator set of a root = union over its C/C++ units of the noreturn declarations the compiler CC itself sees in the unit's
     preprocessed text (the plugin runs on unit.ii with the unit's flags: exactly the TU the compile stage compiles, headers included).
     UNITS [(pp_key, ii path, lang c|c++)]; FLAGS {lang: [..]}. Per unit cached CACHE/objstub/t-<key>.txt, key = pp_key (a hash of
@@ -2263,16 +2296,20 @@ def unit_terminators(cc, units, flags, cache, jobs, rets=None, sjdirs=SYSTEM_SJ,
     `ret` output, the compiler's own type; only typedef-named and builtin-named return types are listed).
     SJDIRS: the directories of the pinned headers (the guest runtime external's mount point for a guest root; the distribution's include dirs otherwise): a function
     is an unwinder by <setjmp.h> only when DECL_SOURCE_FILE is a file named setjmp.h INSIDE one of them (a same-named header elsewhere does not count).
+    ROOT_PLUGINS (key, flags_of) or None: the plugins of the root's own compile stage, loaded before the terminator plugin, so that the compiler sees the
+    dialect they register (the dispatch attributes fnvnx_host, fnvnx_entry, ...) as it does in the stage. KEY (JSON-able) holds their hashes and the
+    arguments; FLAGS_OF(dir) gives the flags that load them, with their -out files in the directory DIR. The caller derives both from recipe.root_plugin_flags.
     -> (sorted names, sha256, failures [(pp_key, message)]): a unit the plugin cannot process is a failure of that unit, never an exception."""
-    ph = plugin_hash(so)   # SO: the root's analysis plugin (objects.json `analysis_plugin`)
+    ph = plugin_hash(so)
+    rkey, rflags = root_plugins if root_plugins else (None, lambda d: [])   # SO: the root's analysis plugin (objects.json `analysis_plugin`)
 
     def one(u):
         pk, ii, lang = u
-        key = hashlib.sha256(json.dumps([pk, ph, lang, flags[lang], list(sjdirs)]).encode()).hexdigest()
+        key = hashlib.sha256(json.dumps([pk, ph, lang, flags[lang], list(sjdirs), rkey]).encode()).hexdigest()
         cp, rp = (os.path.join(cache, "objstub", "t-%s.%s" % (key, e)) for e in ("txt", "ret"))
         if not (os.path.exists(cp) and os.path.exists(rp)):
             with tempfile.TemporaryDirectory() as td:
-                r = subprocess.run([cc, "-S", "-o", os.devnull, "-fplugin=" + so, "-fplugin-arg-objstub_plugin-out=" + td + "/o.txt",
+                r = subprocess.run([cc, "-S", "-o", os.devnull] + rflags(td) + ["-fplugin=" + so, "-fplugin-arg-objstub_plugin-out=" + td + "/o.txt",
                                     "-fplugin-arg-objstub_plugin-ret=" + td + "/r.txt",
                                     "-fplugin-arg-objstub_plugin-setjmp-dirs=" + ":".join(sjdirs)] + flags[lang]
                                    + ["-x", lang, "-fpreprocessed", ii], capture_output=True, text=True)

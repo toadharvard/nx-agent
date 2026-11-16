@@ -1,9 +1,4 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/addr/fnvnx_addr.cc ports/fnv-nx/toolchain/dispatch/fnvnx_dispatch.cc
-# reads: ports/fnv-nx/toolchain/ftoi/f2i_builtins.inc ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc ports/fnv-nx/toolchain/layout/crossing_terms.inc
-# reads: ports/fnv-nx/toolchain/layout/decltype_spell.inc ports/fnv-nx/toolchain/layout/fnvnx_layout.cc ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json
-# reads: ports/fnv-nx/toolchain/names/fnvnx_names.cc ports/fnv-nx/toolchain/order/atomic_order.inc ports/fnv-nx/toolchain/order/fnvnx_frame.h
-# reads: ports/fnv-nx/toolchain/order/fnvnx_order.cc ports/fnv-nx/toolchain/pi/fnvnx_pi.cc ports/fnv-nx/toolchain/sdd/fnvnx_sdd.cc ports/fnv-nx/verify
 """Tests for verify/gate_argorder.py (gate "argordergate"): the universe is the C++ units of native guest roots; a unit is certified only when its
 root's recipe loads the rule's plugin list (fnvnx_order included) in the rule's order and the build holds the pi .so. Real-compiler case: the pinned external
 of verify/guest_compiler.json (fetched by commit; red with the reason when it cannot be). Plain script, needs root (sandbox)."""
@@ -14,13 +9,15 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import test_plugins as tp
-import test_guest as tg
-from test_plugins import BASE, ROOT, T, REAL, VERIFY, check, git, w, make_repo, REC
-import recipe
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify.tests import test_plugins as tp
+from fnvnx.verify.tests import test_guest as tg
+from fnvnx.verify.tests.test_plugins import BASE, ROOT, T, REAL, VERIFY, check, git, w, make_repo, REC
+from fnvnx.verify import recipe
 
 sys.path.insert(0, VERIFY)
-import gate_argorder as ga  # noqa: E402
+from fnvnx.verify import gate_argorder as ga  # noqa: E402
 
 
 def gate(repo, cache):

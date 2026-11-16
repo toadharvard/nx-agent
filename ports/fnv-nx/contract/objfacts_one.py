@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """objfacts_one - the facts of ONE native object (per-object stage of objfacts; L1 CONTRACT, L4 stage sandbox).
 
-    objfacts_one.py --object <one .o> --vft vft.json --addrmap <addrmap.tsv> --out <X.obj.json>
+    objfacts_one.py --object <one .o> --vft vft.json --addrmap <addrmap.tsv> --sympair-kinds <sympair_kinds.inc> --out <X.obj.json>
 
 Exactly the per-function tuples and the `(object, 'ztv' | 'sympair' | 'vtpair' | 'n3')` entries that objfacts.py computes for this object (same
 code: objfacts.scan_object), keyed by (object basename, address) as there.  Output: store kind `objone`
@@ -11,8 +11,9 @@ objfacts_merge.py unions the per-object files into obj.json.
 """
 import argparse, os, sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import objfacts, store
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name (contract.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.contract import l2sections, objfacts, store
 
 
 def main():
@@ -20,13 +21,14 @@ def main():
     ap.add_argument('--object', required=True)
     ap.add_argument('--vft', required=True)
     ap.add_argument('--addrmap', required=True)
+    ap.add_argument('--sympair-kinds', required=True)
     ap.add_argument('--out', required=True)
     a = ap.parse_args()
     import json
     vft = set(json.load(open(a.vft)))
     objfacts.init_disasm()
     ob = os.path.basename(a.object)
-    out = objfacts.scan_object(a.object, objfacts.load_addrmap_tsv(a.addrmap, ob), vft)
+    out = objfacts.scan_object(a.object, objfacts.load_addrmap_tsv(a.addrmap, ob), vft, l2sections.load_kinds(a.sympair_kinds))
     store.save(a.out, 'objone', out)
 
 

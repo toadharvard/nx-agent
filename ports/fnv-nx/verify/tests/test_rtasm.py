@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Test of verify/gate_rtasm.py (the memory-ordering class check of the runtime's assembly, CLAUDE.md "memory ordering of runtime calls"): one fixture per
 class and violating fixtures, assembled by the one build (realobj: the guest compiler pin and the full plugin set) as .S units of a toy guest root,
 beside a compiled C++ unit (it carries the plugin record `.fnvnx.ordt`, so it is not assembly and not judged; a `.ident` in an assembly source adds `.comment` and changes nothing).  Classes: D1 (frame, jmp_buf), BT (before threads, the
@@ -10,8 +9,10 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [os.path.join(HERE, '..'), os.path.join(HERE, '..', '..', 'link', 'tests'), os.path.join(HERE, '..', '..', 'link'), os.path.join(HERE, '..', '..', 'contract')]
-import realobj  # noqa: E402
-import gate_rtasm as rtasm  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.link.tests import realobj  # noqa: E402
+from fnvnx.verify import gate_rtasm as rtasm  # noqa: E402
 
 SRC = {
     'd1.S': '''

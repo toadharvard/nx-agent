@@ -8,12 +8,13 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, ".."))
-sys.path.append(os.path.join(HERE, "..", "..", "verify"))
-import scratch  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): contract.X by its qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import scratch  # noqa: E402
 
 scratch.install()
-import exepin  # noqa: E402
-import modules  # noqa: E402
+from fnvnx.contract import exepin  # noqa: E402
+from fnvnx.contract import modules  # noqa: E402
 
 FAILED = []
 BASE = 0x10000000
@@ -100,6 +101,25 @@ check("rows: exe, b.dll, c.dll (a.dll has no directory); load_index of the exe i
       [(n, i) for n, i, _ in rows] == [(exepin.NAME, ""), ("b.dll", 0), ("c.dll", 2)], [(n, i) for n, i, _ in rows])
 check("the DLL rows equal the count of has_tls = 1 over the images of modules.tsv",
       len(rows) - 1 == sum(1 for m in order if m.pe.dirs[9][1]) == 2)
+# modules.tsv: one row for the exe and one per image, the kind of a row is the PE characteristics bit IMAGE_FILE_DLL (never the name)
+class MM(M):
+    def __init__(self, name, data, base, static, sha):
+        M.__init__(self, name, data)
+        self.sha256, self.size, self.base, self.static = sha, len(data), base, static
+
+
+_exe_raw = pe(good(), flags=0x0102)   # an exe: IMAGE_FILE_DLL clear
+_dll_raw = pe(None)                   # a DLL: flags 0x2102
+_xe = modules.PE(_exe_raw, "toy.exe")
+_txt = modules.modules_text("toy.exe", _exe_raw, _xe, [MM("a.dll", _dll_raw, 0x10000000, True, "b" * 64)], {"a.dll": 0})
+_rows = [l.split("\t") for l in _txt.splitlines() if not l.startswith("#")]
+check("a toy exe and one dll give 2 rows with 11 columns", len(_rows) == 2 and all(len(r) == 11 for r in _rows), _rows)
+check("the exe row: its sha256, size, ImageBase as preferred and assigned base, static, no load index, dll 0",
+      _rows[1][:2] == ["toy.exe", hashlib.sha256(_exe_raw).hexdigest()] and _rows[1][3] == _rows[1][4] == "%08x" % BASE and _rows[1][8:] == ["1", "", "0"], _rows)
+check("the dll row: dll 1, its own load index", _rows[0][0] == "a.dll" and _rows[0][8:] == ["1", "0", "1"], _rows)
+_swapped = modules.modules_text("a.dll", _dll_raw, modules.PE(_dll_raw, "a.dll"), [MM("toy.exe", _exe_raw, BASE, True, "c" * 64)], {})
+check("the kind follows the bit, not the name: the same names with the images swapped swap dll",
+      [r[10] for r in (l.split("\t") for l in _swapped.splitlines() if not l.startswith("#"))] == ["1", "0"])
 out = tempfile.mkdtemp(prefix="tls-")
 modules.write_tls(out, rows)
 lines = [l for l in open(os.path.join(out, "tls.tsv")).read().splitlines() if not l.startswith("#")]
@@ -143,13 +163,20 @@ with tempfile.TemporaryDirectory() as tmp:
     open(bridge, "w").write("kernel32.dll\tExitProcess\t\tstdcall\tv\ti\tfnvnx_win_ExitProcess\tbind\n")
     declared = os.path.join(tmp, "declared.tsv")
     open(declared, "w").write("# name\tsha\nkernel32.dll\t00\n")
+    dmods = os.path.join(tmp, "declared_modules.tsv")
+    open(dmods, "w").write("# dll\tkind\tcite\n")
+    cmd = os.path.join(tmp, "CLAUDE.md")
+    open(cmd, "w").write("## Owner order: GOG Galaxy is not lifted (binding)\n\ntext\n")
     os.makedirs(os.path.join(tmp, "dir"))
     pin = dict(exepin.pe_fields(data), size=len(data), sha256=hashlib.sha256(data).hexdigest())
     old = exepin.load_exe.__defaults__
     exepin.load_exe.__defaults__ = (pin,)
     try:
         mc, kc = os.path.join(tmp, "modules.c"), os.path.join(tmp, "import_keys.c")
-        modules.run(exe, bridge, [os.path.join(tmp, "dir")], None, declared, mc, kc, os.path.join(tmp, "keys.tsv"), os.path.join(tmp, "iat_data.tsv"))
+        dirs = [os.path.join(tmp, "dir")]
+        inames = os.path.join(tmp, "import_names.tsv")
+        modules.run(exe, dirs, None, declared, dmods, cmd, mc, import_names_out=inames)
+        modules.run_iat(exe, bridge, dirs, None, declared, dmods, cmd, kc, os.path.join(tmp, "keys.tsv"), os.path.join(tmp, "iat_data.tsv"))
     finally:
         exepin.load_exe.__defaults__ = old
     mt, kt = open(mc).read(), open(kc).read()
@@ -159,5 +186,74 @@ with tempfile.TemporaryDirectory() as tmp:
     check("out None: the table tree is not written (a stage has no scratch directory)", not os.path.exists(os.path.join(tmp, "o")) and "tempfile" not in open(modules.__file__).read(), None)
     kv, dv = open(os.path.join(tmp, "keys.tsv")).read(), open(os.path.join(tmp, "iat_data.tsv")).read()
     check("keys_tsv_out: keys.tsv has the row of the exe's import and data_out: iat_data.tsv has the table_id line", "ExitProcess" in kv and dv.startswith("# table_id "), (kv, dv))
+    check("import_names_out: the exe's import directory as (image, dll, name, slot RVA), from the files alone (no bridge table)",
+          "\tkernel32.dll\tExitProcess\t00001180\n" in open(inames).read(), open(inames).read())
+    check("the first entry takes no bridge table: modules.run has no bridge parameter", "bridge" not in modules.run.__code__.co_varnames)
+    other = os.path.join(tmp, "declared_other.tsv")
+    open(other, "w").write("# name\tsha\nother.dll\t00\n")
+    exepin.load_exe.__defaults__ = (pin,)
+    try:
+        try:
+            modules.plan(exe, other, dirs, dmods, cmd)
+            check("a dll the closure reaches that is neither a file nor in the declared set is red, listed", False)
+        except modules.StageError as e:
+            check("a dll the closure reaches that is neither a file nor in the declared set is red, listed", "kernel32.dll" in str(e), str(e))
+        check("a declared dll without a file is served; with a file it is not", modules.platform_served({"kernel32.dll", "other.dll"}, dirs) == {"kernel32.dll", "other.dll"}, None)
+    finally:
+        exepin.load_exe.__defaults__ = old
+
+# ---- declared_modules.tsv: the declared absent services (served even with a file)
+from fnvnx.contract import declaredmods, dllkind  # noqa: E402
+CM = "## Owner order of 2026-11-11, 23:00: GOG Galaxy is not lifted (binding)\n"
+DECL = {"galaxy.dll", "galaxywrp.dll", "kernel32.dll"}
+
+
+def dm(text):
+    try:
+        return declaredmods.read(text, CM)
+    except declaredmods.DeclaredModsError as e:
+        return str(e)
+
+
+GOOD = "galaxy.dll\tserved-absent-service\tGOG Galaxy is not lifted\n"
+check("declared_modules: a good row gives the served name", dm(GOOD) == {"galaxy.dll"}, dm(GOOD))
+with tempfile.TemporaryDirectory() as t3:
+    dd, mm, cc = (os.path.join(t3, n) for n in ("d.tsv", "m.tsv", "c.md"))
+    open(dd, "w").write("# n\nkernel32.dll\t0\n")
+    open(mm, "w").write("kernel32.dll\tserved-absent-service\tGOG Galaxy is not lifted\n")
+    open(cc, "w").write(CM)
+    try:
+        modules.read_served(dd, mm, cc, [t3])
+        check("declared_modules: a row for a dll that is declared with no file is red (redundant)", False)
+    except modules.StageError as e:
+        check("declared_modules: a row for a dll that is declared with no file is red (redundant)", "redundant" in str(e), str(e))
+check("declared_modules: a row with no cite is red", "no cite" in dm("galaxy.dll\tserved-absent-service\t \n") or "want dll" in dm("galaxy.dll\tserved-absent-service\t \n"), dm("galaxy.dll\tserved-absent-service\t \n"))
+check("declared_modules: a cite that is no heading of CLAUDE.md is red", "not a heading" in dm("galaxy.dll\tserved-absent-service\tNo such section\n"), None)
+check("declared_modules: a duplicate row is red", "duplicate" in dm(GOOD + GOOD), None)
+check("declared_modules: an unknown kind is red", "kind" in dm("galaxy.dll\tstub\tGOG Galaxy is not lifted\n"), None)
+check("declared_modules: a malformed row is red", "want dll" in dm("galaxy.dll\tserved-absent-service\n"), None)
+with tempfile.TemporaryDirectory() as t2:
+    open(os.path.join(t2, "galaxy.dll"), "wb").write(b"x")
+    check("platform_served: an absent service is served although a file exists; another declared name with a file is not",
+          modules.platform_served({"galaxy.dll", "galaxywrp.dll"}, [t2], {"galaxy.dll"}) == {"galaxy.dll", "galaxywrp.dll"}
+          and modules.platform_served({"galaxy.dll"}, [t2]) == frozenset(), None)
+    k = dllkind.classify(([("galaxy.dll",)][0], []), lambda p: ([], []), lambda n: os.path.join(t2, n) if n == "galaxy.dll" else None, frozenset({"galaxy.dll"}))[1]
+    check("classify: a served name with a file is served, never read from its file", k["galaxy.dll"] == "served", k)
+with tempfile.TemporaryDirectory() as t4:
+    dd, mm, cc = (os.path.join(t4, n) for n in ("d.tsv", "m.tsv", "c.md"))
+    open(dd, "w").write("# n\nkernel32.dll\t0\n")
+    open(cc, "w").write(CM)
+
+    def served(row):
+        open(mm, "w").write(row)
+        try:
+            return modules.read_served(dd, mm, cc, [t4])
+        except modules.StageError as e:
+            return str(e)
+    check("declared_modules: a row for a name with no file in the declared file set is red", "no file in the declared file set" in served("galaxy.dll\tserved-absent-service\tGOG Galaxy is not lifted\n"), True)
+    open(os.path.join(t4, "galaxy.dll"), "wb").write(b"x")
+    check("declared_modules: a row for a module of the declared install is accepted", served("galaxy.dll\tserved-absent-service\tGOG Galaxy is not lifted\n") == {"kernel32.dll", "galaxy.dll"}, None)
+    check("declared_modules: orphan rows (no import edge) are listed", modules.orphan_rows({"galaxy.dll", "galaxywrp.dll"}, {"galaxy.dll"}) == ["galaxywrp.dll"], None)
+    check("declared_modules: no orphan when every row is imported", modules.orphan_rows({"galaxy.dll"}, {"galaxy.dll", "x.dll"}) == [], None)
 print("FAILED: %d" % len(FAILED) if FAILED else "all passed")
 sys.exit(1 if FAILED else 0)

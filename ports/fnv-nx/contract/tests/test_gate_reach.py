@@ -9,10 +9,12 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..'))
-import argflow
-import imagerec
-import gate_reach
-import gpa_names
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): contract.X by its qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.contract import argflow
+from fnvnx.contract import imagerec
+from fnvnx.contract import gate_reach
+from fnvnx.contract import gpa_names
 
 BASE, TEXT, RD, DATA = 0x400000, 0x1000, 0x2000, 0x3000
 IMPORTS = ['LoadLibraryA', 'GetProcAddress', 'CreateFileMappingA', 'CreateFileA']
@@ -447,7 +449,7 @@ for bad in (('X', 'k.dll', 'f', '0', 'closure_key', 'dispatcher=a', ''), ('X', '
 # through the function the full mode uses (write_facts_h); gate_reach re-exports the emitter, so there is one
 tdir = tempfile.mkdtemp(prefix='reach-h-')
 RR = os.path.join(HERE, '..', 'reachreq.py')
-import reachreq
+from fnvnx.contract import reachreq
 check('gate_reach uses the one emitter and parser of reachreq', (gate_reach.header is reachreq.header, gate_reach.parse_requests is reachreq.parse_requests,
       gate_reach.write_facts_h is reachreq.write_facts_h), (True, True, True))
 for nm, rows_ in (('one', (CK,)), ('two', (CK, CK2)), ('cfm', (R_H, R_P, R_W))):

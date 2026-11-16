@@ -61,7 +61,7 @@ Where Wine 9.0 implements an API in a simplified way (it does nothing, or return
 Wine 9.0 does, with one log line at the call. The source of the behaviour is Wine 9.0's code for that function. The rule for the gates:
 
 - The log function is `fnvnx_wine_fixme(id)` (C linkage, defined by the runtime's owner; it writes one line and returns).
-- `objstub` accepts such a body only if `verify/wine_fixme.tsv` has the row of the `id` it passes, the function passes exactly one
+- `objstub` accepts such a body only if the table `<root>/wine_fixme.tsv` of an admitted root has the row of the `id` it passes, the function passes exactly one
   `id` on every path, the `id` is a constant at the call, the body is otherwise vacuous (class 2), and its result equals the row's kind
   and value. Each row names the contract method and its Wine 9.0 reference `wine-9.0:<path>:<function>`: data, not a list of places in
   code. A body that also does real work is `wine-fixme-in-real-body`; a wrong or unknown `id`, a non-constant `id` and a taken address
@@ -84,7 +84,7 @@ An environment query answered from the declared machine is a complete implementa
 the documented error for that state), a fixed time zone, registry values from static reads (an undeclared key is absent). The rule is the
 Wine rule with a second citation function, one rule for every function, no list of functions:
 
-- A body calls `fnvnx_declared_machine(id)` (C linkage, writes nothing, returns) with a constant `id`; `verify/declared_machine.tsv` has the row
+- A body calls `fnvnx_declared_machine(id)` (C linkage, writes nothing, returns) with a constant `id`; `<root>/declared_machine.tsv` of an admitted root has the row
   `id<TAB>contract_name<TAB>fact<TAB>source<TAB>kind<TAB>value`. `fact` is `no-network`, `time-zone` or `registry`; `source` is the documented
   origin of the value, `win-doc:<documentation page or header path>:<function>` or `wine-9.0:<path>:<function>`; `kind`/`value` as for Wine rows.
 - `objstub` accepts the body iff it is otherwise vacuous, passes exactly one id of one citation function on every path, and its result equals the
@@ -92,6 +92,12 @@ Wine rule with a second citation function, one rule for every function, no list 
 - Limit (stated): the gate cannot tell which return value of a function is success, so it cannot reject a row that says success for a network
   call; it rejects a body whose result differs from its row. Row against documentation or Wine source is the oracle class (10), not done.
   A body that calls something or stores (SetLastError, a filled TIME_ZONE_INFORMATION) is not V and needs no citation.
+
+**Rows are owned by the root that cites them.** Each root that has citing bodies carries `<root>/declared_machine.tsv` and `<root>/wine_fixme.tsv`, in the columns above; a root
+without the file has no row of that class. `objstub` reads the union over the admitted roots (`objstub.read_root_tables`); there is no table in `verify/`. An id in two roots'
+tables of one class is red (an error of the gate: ids are one space per class). `<dm|wf>-orphan`: a row of an admitted root that no record of an object of that root
+cites (a `FNVNX_CITE` record, or for Wine rows a constant id passed to `fnvnx_wine_fixme`; `objstub.orphan_findings`). `-unknown-id`: an id that a record cites and that is in
+no admitted root's table. A table in a root that is not admitted is outside the universe. Tests: `tests/test_roottables.py`.
 
 ## Proven-unreachable branches (owner decision of 2026-11-11, option iii)
 
@@ -119,6 +125,8 @@ Run now (the files of `gates.d`, run in the order of their names; no gate reads 
 every merge pays today; with such a root and universe 0 it is red (`covers`, no vacuous green, `gatesdir.py`); with a product root each judges it (tested on a toy root, `tests/test_recipe.py` fixtures). Roots always come from
 `admit.json`, never from gate arguments. Shared state goes through `GATE_CACHE` (`gate_build.ensure`: stage store, `objects/<tree>/<root>`).
 
+- `abspath` (`gate_abspath.py`, owner order of 2026-11-15 21:00Z; covers `tool`): red on any absolute host path, `~` path or environment default (`os.environ.get(k, default)`, `getenv`, `setdefault`, a try-fallback read) in the Python files a stage or gate can run: the `generated[].tool` of every admitted recipe, recipe.py's stage launchers, the scripts of `gates.d`, and their import closure (ast; an unresolved dynamic import is red). A path under `recipe.MOUNT_PREFIXES` (the one constant) is the stage's own mount namespace and is green. Prints the findings per file with the commit; exit 1 on any finding. Tests: `tests/test_gate_abspath.py`.
+- `liftfacts` (`gate_liftfacts.py`, class 5; covers `lifted`): reads the cached GATES output of the lift/facts root and never runs the producer. Universe: every image row of its summary.tsv (checked equal to the module table's images, exe row plus DLL rows, when the table is given: `judge(gates, modules_text)`; main always passes the loader root's published MODULES_TSV, found through the root's recipe `outputs`; absent is red). Red for an image whose gate_codemap.json or gate_pcsrc.json is missing or malformed, whose status is not green, or whose uncertified bytes, entries_on_data (key must be present) or s4 rows are above 0; red when the output is not in the cache. Tests: `tests/test_gate_liftfacts.py`. Layout from w7's sample (lift/facts commit 3159647ea): GATES/summary.tsv and GATES/<image>/gate_codemap.json, gate_pcsrc.json.
 - `build` (all roots build in the sandbox), `determinism` (two cold builds and the warm one equal bit for bit): class 9 and the precondition
   of the others.
 - `objstub` (classes 1, 2 and the reach rule of 16): `gate_objstub.py`, rules in `objstub.py`.
@@ -180,10 +188,10 @@ Rule: a text of the tree that mentions an assumption (the words `assum...` and `
 Used by `gpa`, `reach`, `reachlink` (not an input of `contract_inputs.json`) and, through the same function, by `contract/modules.py` (the module table of the loader). The rule is `contract/dllkind.py`, one pure function with no named list. A dll name is resolved case-insensitively against the files of the externals `exe` and `redist` and against the rows of `bridge.tsv`:
 - **bridge**: the dll has bridge rows. The platform implements its entries. It is never a guest image, even when a file is found, and the walk does not continue through it.
 - **image** (lifted): found, no bridge row, and its whole normal import closure resolves to images or bridge dlls (the greatest such set; a delay-load import is bound at run time and does not decide it).
-- **declared**: found, no bridge row, not an image: the declared machine cannot load it, because its closure needs a dll that is neither found nor bridged. Its entries must be served by bridge rows, and a reached export without a bridge row is red, owner L5. The walk does not continue through it.
-- **platform**: neither found nor bridged; a platform import of gate `imports`, owner L5.
-The image set is the exe plus the images reached from its normal and delay-load import directories through images only. `modules.py` writes the images to `modules.tsv` (they alone get an address range) and the bridge and declared dlls to `modules_declared.tsv` (name, kind `bridge` or `unloadable`, sha256, size, missing imports). Facts of dynamic LoadLibrary names belong to the `gpa` gate, not to this rule.
-`modules_declared.tsv` records for every missing import of an unloadable dll its provider: `wine` when the dll is in `verify/declared_dlls.tsv`, `absent` otherwise. That list is the declared machine's dll set, derived by `contract/declareddlls.py` from the Wine 9.0 `dlls/*/*.spec` files (fnv-nx-build mirror `tools/wine-specs`, pinned in `contract_inputs.json` as external `wine`); a dll is on the machine iff its `.spec` exists, never by name. A `wine` gap is L5's (bridge rows); an `absent` one is not on the declared machine.
+- **load-fails**: found, no bridge row, not an image: its closure needs a dll that is neither a file nor served. `LoadLibrary` on it returns NULL with ERROR_MOD_NOT_FOUND (126), as Windows and Wine 9.0 do. Every load-fails dll is listed with its unresolved imports in `modules_declared.tsv`.
+- **served** (platform-served): a name of the declared dll set (`verify/declared_dlls.tsv`, derived from the Wine 9.0 specs) that has no file in the declared file set, or a name with a row `served-absent-service` in `platform/declared_modules.tsv` (dll, kind, cite; owner L5; contract/declaredmods.py): a service the declared machine lacks (the network, GOG Galaxy: CLAUDE.md "GOG Galaxy is not lifted"), served even when a file exists, and never read from that file. The platform serves its entries. Any other name with a file is an image or load-fails by its closure. A row names a module of the declared install. Red (all listed): a name with no file in the declared file set (or declared with no file: redundant), an orphan row (no import directory of the exe or of a file of the declared set names it), a row with no cite, a cite that is no heading of CLAUDE.md, a duplicate, an unknown kind; a served export that is reached without a bridge row is the `iat`/bridge gates' red. `modules.py` takes `--declared-modules` and `--claude-md`.
+- **absent**: neither a file nor in the declared set. A reached import of such a name makes the stage red, and the error lists all of them.
+The image set is the exe plus the images reached from its normal and delay-load import directories through images only. `modules.py` (first entry) writes the images to `modules.tsv` (they alone get an address range), the load-fails dlls to `modules_declared.tsv` (columns name, kind `load-fails`, sha256, size, unresolved imports) and `import_names.tsv` (image, dll, name, slot RVA: the PE import directory only, with no bridge table, so `reached` reads it without a cycle). `modules.py iat` is the second entry, over `bridge.tsv`: it writes the iat/key tables. Facts of dynamic LoadLibrary names belong to the `gpa` gate, not to this rule.
 
 Bases are a pure function of the image set in name order: the images are sorted by lowercase name and packed from the end of the exe image, each aligned up to 64 KiB (`modules.assign_bases`), so an image moves only when an image with a smaller name is added or removed. `ssce5432.dll` sorts after `libvorbis.dll` and `libvorbisfile.dll`, so if L5 bridges `comdlg32.dll` and `ssce5432` becomes an image, no existing base moves (`test_images.py` checks this property).
 

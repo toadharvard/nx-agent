@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Gate "build" (fnvnx-gate/1): every product root's recipe (build.json, see RECIPE.md) builds, all in the sandbox.
-    python3 -I gate_build.py        cwd = checkout root (a git worktree), env GATE_OUT, optional GATE_CACHE, optional GATE_COMMIT
+    python3 -I gate_build.py        cwd = checkout root (a git worktree), env GATE_OUT, optional GATE_CACHE
 Universe: every unit of every product root of verify/admit.json (tracked sources + generated sources, recipe.units_of) and the ELF
 of a root with a link. Certified: units whose object was built (+ the ELF). uncertified: repo-relative unit paths (<= 50, sorted).
 No product root: universe 0, green. A recipe that fails validation certifies nothing (units = tracked source files).
@@ -20,8 +20,10 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import cas  # noqa: E402
-import recipe  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import cas  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
 
 
 def product_roots(repo="."):
@@ -59,12 +61,15 @@ def quantify(repo, judge_root):
             why.append("%s: %s" % (root, rd))
     if not roots:
         return 0, 0, [], NO_ROOT
-    return u, c, sorted(ids)[:50], ("; ".join(why) or "%d roots" % len(roots))[:900]
+    return u, c, sorted(ids), ("; ".join(why) or "%d roots" % len(roots))[:900]
 
 
 def tree_of(repo="."):
-    return subprocess.run(["git", "-C", repo, "rev-parse", os.environ.get("GATE_COMMIT", "HEAD") + "^{tree}"], capture_output=True,
-                          text=True, check=True).stdout.strip()
+    """The tree of the commit under test: a gate runs in the clean worktree of that commit (verdict.py), so it is the checkout's own HEAD. No environment input."""
+    r = subprocess.run(["git", "-C", repo, "rev-parse", "HEAD^{tree}"], capture_output=True, text=True)
+    if r.returncode:
+        raise ValueError("%s is not a checkout of a commit (git rev-parse HEAD^{tree}: %s)" % (repo, r.stderr.strip()[-200:]))   # a named input error, never a crash
+    return r.stdout.strip()
 
 
 _PRIVATE = []   # out dirs of a red build: private to this process (never published), removed at exit
@@ -94,7 +99,7 @@ def ensure(root, cache, repo="."):
     os.makedirs(os.path.dirname(final), exist_ok=True)
     tmp = "%s.tmp-%d-%s" % (final, os.getpid(), os.urandom(4).hex())
     try:
-        res = recipe.build(repo, root, os.path.join(cache, "store"), tmp, ext=os.path.join(cache, "external"))
+        res = recipe.build(repo, root, os.path.join(cache, "store"), tmp, ext=recipe.ext_dir(cache))
     except BaseException:
         shutil.rmtree(tmp, ignore_errors=True)
         raise
@@ -190,7 +195,7 @@ def main():
             try:
                 res, out = ensure(root, cache, repo)
             except recipe.RecipeError as e:
-                items += [root + "/" + u for u in recipe.units_of(rec, recipe.split_spec(root)[0], files) if isinstance(rec, dict)]
+                items += [root + "/" + u for u in recipe.units_of(rec, recipe.split_spec(root)[0], files, roots, repo) if isinstance(rec, dict)]
                 why.append("%s: invalid recipe: %s" % (root, "; ".join(e.errors)[:300]))
                 continue
             items += ids(root, res, rec)
@@ -212,7 +217,7 @@ def main():
     detail = "; ".join(why) or ("%d units/ELF built from %d product and test roots" % (len(items), len(buildable_roots(repo))) if items else
                                 NO_ROOT)
     res = {"format": "fnvnx-gate/1", "name": "build", "status": "red" if why else "green", "universe": len(items),
-           "certified": len(set(done) & set(items)), "uncertified": bad[:50], "detail": detail[:900]}
+           "certified": len(set(done) & set(items)), "uncertified": bad, "detail": detail[:900]}
     with open(os.path.join(os.environ["GATE_OUT"], "build.json"), "w") as f:
         json.dump(res, f, sort_keys=True)
     print("build: %s %d/%d %s" % (res["status"], res["certified"], res["universe"], detail[:200]))

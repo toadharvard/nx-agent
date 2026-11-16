@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Gate "guestlink" (fnvnx-gate/1, class A of VERDICT.md): the guest link's libraries are what the pinned guest runtime's own driver derives, and nothing
-is stored: link/guest.json holds the script only (a stored copy of the derivation is a second declaration), and the link derives the libraries itself
+is stored: link/guest.json holds the scripts only (a stored copy of the derivation is a second declaration), and the link derives the libraries itself
 (recipe.Job.guest_libs, keyed stages). This gate recomputes the same derivation and reds when it does not hold.
-    python3 -I gate_guestlink.py    cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/guestlink.json
+    python3 -I gate_guestlink.py    cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/guestlink.json
 Derivation (RECIPE.md, Link): the C++ driver of the pinned runtime external (the cxx driver of the triplet of verify/targets.json, in the compiler tree of verify/guest_compiler.json) is run, as the hermetic recipe
 stage `drv:<root>`, with the guest semantic flags (flags.semantics.common, filtered for C++ by the pinned compiler) and `-pie -###` on a one-line C++
 file; its last line is the link command: recipe.parse_driver_link reads startfiles, dirs, names and endfiles. An object of startfiles/endfiles is
 excluded by the one-definition rule (recipe.onedef over the symbols of the green guest roots) or the entry rule (recipe.entry_object), nothing else.
-Rule (red otherwise): link/guest.json is {script}; every derived start/end file lies under the pinned runtime external (recipe.outside_files) and in the
+Rule (red otherwise): link/guest.json is {script, image_script}; every derived start/end file lies under the pinned runtime external (recipe.outside_files) and in the
 multilib directory the semantic flags select (`-print-multi-directory`, recipe.in_multilib). Items: every derived entry of dirs, names, startfiles and
 endfiles; certified = all of them when the rule holds. A red guest root build or a failing driver run is red with the reason."""
 import json
@@ -18,8 +18,10 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import gate_build  # noqa: E402
-import recipe  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import gate_build  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
 
 KEYS = ("dirs", "names", "startfiles", "endfiles")
 
@@ -40,7 +42,7 @@ def derive(repo, cache):
         if res["status"] == "red":
             raise ValueError("%s: build red at stage %s" % (r, res["failure"]["stage"]))
         rootdef |= {d["symbol"] for d in res["defined"]}
-    j = recipe.Job(repo, guests[0], os.path.join(cache, "store"), 1, os.path.join(cache, "external"))
+    j = recipe.Job(repo, guests[0], os.path.join(cache, "store"), 1, recipe.ext_dir(cache))
     prof = recipe.load_guest_link(repo)
     with tempfile.TemporaryDirectory(prefix="guestlink-") as ws:
         derived, gone = j.guest_libs(ws, rootdef, open(os.path.join(repo, recipe.TREE, prof["script"])).read())

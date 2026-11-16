@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Check of link/abi.py: the contract model on pairs of MSVC names (equal, equivalent, and every differing component), the gate over sympair
 rows (universe, canonical definition, unnamed rows, kind mismatch, undecodable names) and the CLI."""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import os, subprocess, sys, tempfile
 import atexit  # noqa: E402
 import shutil  # noqa: E402
@@ -9,10 +12,11 @@ tempfile.tempdir = tempfile.mkdtemp(prefix="scratch-")  # every scratch dir of t
 atexit.register(shutil.rmtree, tempfile.tempdir, True)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path[:0] = [HERE, os.path.join(HERE, '..'), os.path.join(HERE, '..', '..', 'contract')]
-import abi
-import abi_gaterun
-import store
+sys.path[:0] = [HERE, os.path.join(HERE, '..')]
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.link import abi
+from fnvnx.link.tests import abi_gaterun
+from fnvnx.contract import store
 
 fails = []
 

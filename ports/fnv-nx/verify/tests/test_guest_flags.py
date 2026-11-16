@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for verify/guest_flags.py: its --lang output equals the set the recipe passes to a C, a C++ and an asm unit (recipe.semantics_for on the
 pinned driver). Plain script: PASS/FAIL lines, exit 0 on pass."""
 import json
@@ -10,9 +9,11 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
-import test_plugins as tp  # noqa: E402
-from test_plugins import BASE, check  # noqa: E402
-import recipe  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify.tests import test_plugins as tp  # noqa: E402
+from fnvnx.verify.tests.test_plugins import BASE, check  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
 
 TOOL = os.path.join(os.path.dirname(HERE), "guest_flags.py")
 

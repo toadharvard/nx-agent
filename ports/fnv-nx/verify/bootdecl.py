@@ -12,7 +12,7 @@ are exactly that set (an extra or a missing file is an error); each file's sha25
 the commit outside `path`, e.g. its documentation inputs) are not mounted and not read. Mount: copy to <root>/<mount>, files 0444,
 directories 0555 (the boot's path model refuses writes under it, bootpath.BootPath.read_only). Any failure is an InputError: the boot
 does not start. Source: `--src NAME=DIR` (a checkout holding `path` and `sums`), else `git fetch --depth 1 <URL> <commit>` of the
-exact commit (URL: --artifacts, $ARTIFACTS_URL, else https://github.com/toadharvard/fnv-nx-build). The record
+exact commit (URL: --artifacts, else https://github.com/toadharvard/fnv-nx-build). The record
 {name, commit, sums_sha256, files} of each input is what OUT.json "inputs" gets.
 """
 import hashlib
@@ -100,9 +100,9 @@ def verify(pin, src):
             have.add(pin["path"] + "/" + os.path.relpath(full, base).replace(os.sep, "/"))
         dn[:] = [d for d in dn if not os.path.islink(os.path.join(dp, d))]
     if have - set(want):
-        raise InputError("%s: files not in %s: %s" % (pin["name"], pin["sums"], ", ".join(sorted(have - set(want))[:5])))
+        raise InputError("%s: files not in %s: %s" % (pin["name"], pin["sums"], ", ".join(sorted(have - set(want)))))
     if set(want) - have:
-        raise InputError("%s: files of %s missing: %s" % (pin["name"], pin["sums"], ", ".join(sorted(set(want) - have)[:5])))
+        raise InputError("%s: files of %s missing: %s" % (pin["name"], pin["sums"], ", ".join(sorted(set(want) - have))))
     for n in sorted(want):
         if _sha(os.path.join(src, n)) != want[n]:
             raise InputError("%s: %s: sha256 differs from %s" % (pin["name"], n, pin["sums"]))
@@ -154,7 +154,7 @@ def mount_all(pins_path, root, srcs=None, url=None):
     tmp = tempfile.mkdtemp(prefix="bootdecl-")
     try:
         for p in pins:
-            src = srcs.get(p["name"]) or fetch(p, url or os.environ.get("ARTIFACTS_URL") or DEFAULT_URL, tmp)
+            src = srcs.get(p["name"]) or fetch(p, url or DEFAULT_URL, tmp)
             recs.append(mount(p, src, root))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

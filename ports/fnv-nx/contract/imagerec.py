@@ -24,7 +24,9 @@ import sys
 import capstone
 from capstone import x86_const as X  # noqa: F401  (the operand and register constants of the decoded instructions)
 
-import modules
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name (contract.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.contract import modules
 
 M32 = 0xffffffff
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -72,12 +74,33 @@ def _runs_of(text, name='ranges'):
     return runs, base
 
 
-FLAGS = ('proven', 'candidate')
+def vocabulary(man, where='manifest.json'):
+    """(statuses, attrs) of the facts' own `universe_flags` field {"status": [names], "attr": [names]}: an attr name that ends in `=` takes a decimal value (`reloc-misfit=`).
+    imagerec keeps no list of its own; a missing or malformed field is an ImageError."""
+    v = man.get('universe_flags')
+    if not (isinstance(v, dict) and set(v) == {'status', 'attr'} and all(isinstance(v[k], list) and all(isinstance(t, str) and t for t in v[k]) for k in v)):
+        raise ImageError('%s: no `universe_flags` {status: [...], attr: [...]} (the vocabulary of the universe flags is the facts\' own)' % where)
+    st, at = v['status'], v['attr']
+    if not st or len(set(st)) != len(st) or len(set(at)) != len(at) or set(st) & set(at):
+        raise ImageError('%s: universe_flags has no status, or a duplicate or shared name' % where)
+    return tuple(st), tuple(at)
 
 
-def _universe_of(text, name='universe'):
-    """universe.tsv text -> ({entry: flag}, base from the `# base=` header or None). Row: `entry<TAB>kind<TAB>extent<TAB>flags`; flags is
-    `proven` or `candidate`, anything else is an ImageError."""
+def _flag_errors(tok, st, at):
+    """None when TOK is a token of the vocabulary: a status, an attr, or `attr=<decimal>` for an attr declared `attr=`."""
+    if tok in st or tok in at:
+        return None
+    name, eq, val = tok.partition('=')
+    if eq and name + '=' in at and val.isdigit():
+        return None
+    return 'token %r is not in the vocabulary' % tok
+
+
+def _universe_of(text, vocab, name='universe'):
+    """universe.tsv text -> ({entry: status}, base from the `# base=` header or None). Row: `entry<TAB>kind<TAB>extent<TAB>flags`; flags is a comma-separated set of tokens of
+    VOCAB (vocabulary()): exactly one status (zero or two statuses, a token outside the vocabulary and a duplicate token are ImageErrors),
+    any number of attributes."""
+    st, at = vocab
     out, base = {}, None
     for ln in text.splitlines():
         if ln.startswith('# base='):
@@ -90,9 +113,18 @@ def _universe_of(text, name='universe'):
             e = int(f[0], 16)
         except ValueError:
             raise ImageError('%s: malformed line %r' % (name, ln[:60]))
-        if len(f) < 4 or f[3] not in FLAGS:
-            raise ImageError('%s: entry %x has flags %r, not one of %s' % (name, e, f[3] if len(f) > 3 else None, '/'.join(FLAGS)))
-        out[e] = f[3]
+        if len(f) < 4:
+            raise ImageError('%s: entry %x has no flags column' % (name, e))
+        toks = f[3].split(',')
+        if len(set(toks)) != len(toks):
+            raise ImageError('%s: entry %x: duplicate token in %r' % (name, e, f[3]))
+        bad = [m for m in (_flag_errors(t, st, at) for t in toks) if m]
+        if bad:
+            raise ImageError('%s: entry %x: %s' % (name, e, '; '.join(bad)))
+        got = [t for t in toks if t in st]
+        if len(got) != 1:
+            raise ImageError('%s: entry %x has %d statuses (%s) in %r, need exactly one' % (name, e, len(got), '/'.join(st), f[3]))
+        out[e] = got[0]
     return out, base
 
 
@@ -241,7 +273,7 @@ class ImageRec:
 
 
 def _tree_hash(path):
-    import treehash
+    from fnvnx.contract import treehash
     return treehash.tree_hash(path)
 
 
@@ -249,24 +281,27 @@ _trees = {}
 
 
 def facts_manifest(facts_dir, pin):
-    """The manifest {image name lower: entry} of the facts directory; the directory is the pinned tree (pin['tree_sha256'])."""
+    """(the manifest {image name lower: entry}, the universe flag vocabulary) of the facts directory; the directory is the pinned tree (pin['tree_sha256'])."""
     key = (os.path.realpath(facts_dir), pin['tree_sha256'])
     if key not in _trees:
         h = _tree_hash(facts_dir)
         if h != pin['tree_sha256']:
             raise ImageError('facts %s is tree %s, the pin is %s' % (facts_dir, h, pin['tree_sha256']))
-        with open(os.path.join(facts_dir, 'manifest.json')) as fh:
-            m = json.load(fh)
+        try:
+            with open(os.path.join(facts_dir, 'manifest.json')) as fh:
+                m = json.load(fh)
+        except (OSError, ValueError) as e:
+            raise ImageError('%s/manifest.json: %s' % (facts_dir, e))
         if m.get('format') != FORMAT:
             raise ImageError('%s/manifest.json: format %r, expected %s' % (facts_dir, m.get('format'), FORMAT))
-        _trees[key] = {i['image'].lower(): i for i in m['images']}
+        _trees[key] = ({i['image'].lower(): i for i in m['images']}, vocabulary(m, os.path.join(facts_dir, 'manifest.json')))
     return _trees[key]
 
 
 def load(image_path, facts_dir, pin):
     """The record of the image at image_path with the function facts of the pinned facts directory. An image the manifest does not list is a
     record with no runs and facts = 'no function facts'; an image whose sha256 differs from the manifest's is an ImageError."""
-    man = facts_manifest(facts_dir, pin)
+    man, vocab = facts_manifest(facts_dir, pin)
     with open(image_path, 'rb') as fh:
         data = fh.read()
     name = os.path.basename(image_path).lower()
@@ -288,7 +323,7 @@ def load(image_path, facts_dir, pin):
     if not up.startswith(os.path.realpath(facts_dir) + os.sep):
         raise ImageError('%s: universe path leaves the facts directory' % ent['universe'])
     with open(up) as fh:
-        flags, ub = _universe_of(fh.read(), ent['universe'])
+        flags, ub = _universe_of(fh.read(), vocab, ent['universe'])
     if ub != fb:
         raise ImageError('%s: `# base=` %s differs from the ranges base %s' % (ent['universe'], ub, fb))
     missing = sorted(e for e in runs if e not in flags)

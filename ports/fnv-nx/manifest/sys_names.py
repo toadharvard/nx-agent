@@ -16,8 +16,8 @@ Usage: sys_names.py <manifest-dir> [--root ports/fnv-nx] [--probe path] [--out f
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import check_dynsites as cd  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.manifest import check_dynsites as cd  # noqa: E402
 
 
 def derive(imports, dynsites, translated, absent_mods, reg, probe):

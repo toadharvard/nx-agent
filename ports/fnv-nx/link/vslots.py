@@ -26,15 +26,18 @@ toolchain/sdd/fnvnx_sdd.cc puts `??_E`, the vector deleting destructor, in the o
 pairing by "signature" with overloads in reverse declaration order, the position rule for the rest, the decomp-unit joins
 (`units.json`), the pristine-object slot ranking, and the stubs that call through the image slot (all heuristics or repairs).
 """
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import argparse
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'contract'))
-import abi_native as N
-import exefacts
-import exevft
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.link import abi_native as N
+from fnvnx.contract import exefacts
+from fnvnx.link import exevft
 
 NAME = 'vslots'
 

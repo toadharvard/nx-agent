@@ -36,12 +36,18 @@ import argparse
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # the gate runs it with -I: the script's directory is not on the path
-import argflow
-import imagerec
-import gatefile
-import iat
-import memfx
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name (contract.X)   # the gate runs it with -I: the script's directory is not on the path
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.contract import argflow
+from fnvnx.contract import imagerec
+from fnvnx.contract import gatefile
+from fnvnx.contract import iat
+from fnvnx.contract import memfx
+
+
+def module_dlls(text):
+    """The names of the DLL rows of modules.tsv: the kind of a row is its last column, the PE IMAGE_FILE_DLL bit (the exe row has 0)."""
+    return [f[0] for f in (l.split('\t') for l in text.splitlines() if l and l[0] != '#') if f[-1] == '1']
 
 
 def pair_key(dll):
@@ -207,6 +213,24 @@ def gate(results):
     return gatefile.write('gpa', len(dyn), len(dyn) - len(unc), unc, 'GetProcAddress dynamic sites with a derived name set')
 
 
+def analyse(image_specs, facts, facts_tree, rows, bridge_text, mayload_names, escape_texts=(), writes_text='', use_memfx=True):
+    """-> (images, results): the derivation of every GetProcAddress row of ROWS over the images IMAGE_SPECS (`NAME=path`, facts pinned by FACTS_TREE).
+    BRIDGE_TEXT: rows (dll, name, ordinal, conv, ret, args, ...) that give the stack bytes and the argument letters of an import (bridge.tsv, or the
+    signature table of reached.py, which is derived from the reference specs alone); MAYLOAD_NAMES: the dll names of the declared machine besides the images."""
+    stacks = import_stacks(bridge_text)
+    images = {nm: argflow.Image(rec) for nm, rec in imagerec.load_images(image_specs, facts, facts_tree).items()}
+    for im in images.values():
+        im.import_stack = stacks
+    mayload = {pair_key(n) for n in images} | {pair_key(n) for n in mayload_names}
+    for im in images.values():
+        im.mayload = sorted(mayload)
+    if use_memfx:
+        info = memfx.ImportInfo(bridge_text, list(escape_texts), writes_text)
+        for im in images.values():
+            memfx.Memfx(im, info)
+    return images, run(rows, images)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument('--sites', required=True)
@@ -222,30 +246,20 @@ def main(argv=None):
     ap.add_argument('--mayload', action='append', default=[], help='tsv/list of dll names of the declared machine (first column); repeat')
     ap.add_argument('--out', required=True)
     a = ap.parse_args(argv)
-    stacks = {}
-    if a.bridge:
-        with open(a.bridge) as fh:
-            stacks = import_stacks(fh.read())
-    images = {nm: argflow.Image(rec) for nm, rec in imagerec.load_images(a.image, a.facts, a.facts_tree).items()}
-    for im in images.values():
-        im.import_stack = stacks
-    mayload = {pair_key(n) for n in images}
-    for p in a.mayload + ([a.modules] if a.modules else []):
+    bridge_text = open(a.bridge).read() if a.bridge else ''
+    mayload = set()
+    for p in a.mayload:
         with open(p) as fh:
             mayload |= {pair_key(l.split('\t')[0]) for l in fh.read().splitlines() if l and l[0] not in '#' and l.split('\t')[0] != 'module'}
+    if a.modules:
+        with open(a.modules) as fh:
+            mayload |= {pair_key(n) for n in module_dlls(fh.read())}
     if a.bridge:
-        with open(a.bridge) as fh:
-            mayload |= {pair_key(l.split('\t')[0]) for l in fh.read().splitlines()[1:] if l.strip()}
-    for im in images.values():
-        im.mayload = sorted(mayload)
-    if not a.no_memfx:
-        bt = open(a.bridge).read() if a.bridge else ''
-        info = memfx.ImportInfo(bt, [open(p).read() for p in a.escape], open(a.writes).read() if a.writes else '')
-        for im in images.values():
-            memfx.Memfx(im, info)
+        mayload |= {pair_key(l.split('\t')[0]) for l in bridge_text.splitlines()[1:] if l.strip()}
     with open(a.sites) as fh:
         rows = read_sites(fh.read())
-    results = run(rows, images)
+    images, results = analyse(a.image, a.facts, a.facts_tree, rows, bridge_text, mayload, [open(p).read() for p in a.escape],
+                              open(a.writes).read() if a.writes else '', not a.no_memfx)
     os.makedirs(a.out, exist_ok=True)
     with open(os.path.join(a.out, 'gpa_names.tsv'), 'w', newline='\n') as fh:
         fh.write(tsv(results))
@@ -256,11 +270,11 @@ def main(argv=None):
         mods = []
         if a.modules:
             with open(a.modules) as fh:
-                mods = [l.split('\t')[0] for l in fh.read().splitlines() if l and l[0] != '#']
+                mods = module_dlls(fh.read())
         with open(a.bridge) as fh:
             have, names, mset = platform_pairs(fh.read(), mods)
         miss = check_platform(results, have, names, mset)
-        print('not provided by the platform: %d %s' % (len(miss), miss[:20]))
+        print('not provided by the platform: %d %s' % (len(miss), miss))
     for h in a.handle:
         nm, va = h.split(':')
         r = handle_report(images[nm.lower()], int(va, 16))
