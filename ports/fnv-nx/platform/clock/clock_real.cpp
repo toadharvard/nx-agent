@@ -6,6 +6,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if !FNVNX_VCLOCK   /* the real build; the virtual build has clock_virtual.cpp instead (fnvnx_vtime.h) */
+
 /* GetTickCount starts at an arbitrary value on Windows too; keep it small. clock() counts from the process start. */
 static uint64_t g_start_ns, g_boot_ns;
 __attribute__((constructor(FNVNX_INIT_CLOCK))) static void clock_init(void)
@@ -33,7 +35,7 @@ uint32_t clk_peek_tick_ms(void) { return clk_read_tick_ms(); }
 uint64_t clk_peek_ns(void) { return os_monotonic_ns(); }
 int64_t clk_peek_filetime(void) { return clk_read_filetime(); }
 
-int32_t clk_tz_offset_minutes(void) { return os_tz_offset_minutes(); }
+int32_t clk_zone_offset_minutes(void) { return os_zone_offset_minutes(); }
 int clk_tz_rule(clk_tzrule_t *r)
 {
     os_tzrule_t o;
@@ -50,21 +52,9 @@ void clk_sleep_ns(uint64_t ns)
     else
         os_sleep_ns(ns);
 }
-void clk_wait_timeout(uint64_t ns) { (void)ns; }
-uint64_t clk_stamp(void) { return 0; }
-void clk_merge(uint64_t other) { (void)other; }
-void clk_thread_start(uint64_t parent) { (void)parent; }
-uint64_t clk_msg_post(void) { return 0; }
-uint32_t clk_msg_retrieve(uint64_t stamp, uint32_t time) { (void)stamp; return time; }
-int clk_wait_idle(const void *const *handles, unsigned n, uint64_t timeout_ns) { (void)handles; (void)n; (void)timeout_ns; return 0; }
-
-/* the host file system keeps the times */
-void clk_file_stamp(const char *host, int what) { (void)host; (void)what; }
-void clk_file_moved(const char *from, const char *to) { (void)from; (void)to; }
-void clk_file_removed(const char *host) { (void)host; }
-int clk_file_times(const char *host, int64_t ft[3]) { (void)host; (void)ft; return 0; }
 
 /* ---- pumps: a thread paced by the monotonic clock, one render per period */
+namespace {   // TU-local type: internal linkage (the other clock backend defines its own clk_pump)
 struct clk_pump {
     os_thread *thread;
     volatile int run;
@@ -73,6 +63,7 @@ struct clk_pump {
     uint64_t period_ns;
     uint32_t period;
 };
+}   // namespace
 
 static void pump_main(void *p)
 {
@@ -121,7 +112,7 @@ void clk_pump_stop(void *pump)
     free(k);
 }
 
-void clk_device_watch(const void *handle, int on) { (void)handle; (void)on; }
-void clk_reset(void) {}
 
 }
+
+#endif   /* FNVNX_VCLOCK */

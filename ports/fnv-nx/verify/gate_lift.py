@@ -6,8 +6,8 @@ The driver is impure (it builds roots through recipe.py, reads the cache, runs t
 ports/fnv-nx/lift/gates (gate_order.py, gate_eh.py), which the driver runs as processes on the cached build results.
 Roots come from admit.json, never from arguments. A root is judged by its admit.json declaration `cxx_origin`, never by a name:
   lifted  {"lifted_by", "pack"}   order: gate_order's `order` and `align` rows, addr32: its `addrwrap` rows, over the objects of the image
-          in every image that names the root in link.roots (a lifted root that no image names has universe 0 until the ELF root exists); the
-          objects are those of the lifted root and of the runtime root, the root among the image's link.roots that holds the unique object
+          in every image whose derived link members (the definer closure) include the root (a lifted root that no image names has universe 0 until the ELF root exists); the
+          objects are those of the lifted root and of the runtime root, the root among the image's link members that holds the unique object
           defining the 4-byte symbol fnvnx_lift_cpu_bytes (sizeof(struct cpu); none or several is red).
           eh: gate_eh over the pack (the external of the recipe that `pack` names) and the EH facts (the external that the key `ehfacts` of
           contract_inputs.json names; layout ehtables.json and <module>/ehtables.json, as the facts of the other contract gates).
@@ -99,8 +99,14 @@ def fold(root, rows):
     return u, c, ids, "; ".join(r["detail"] for r in (red or rows))[:600]
 
 
-def images_naming(root, repo):
-    """The link roots whose recipe lists ROOT in link.roots (the image that links it): [path]. A recipe that does not load names nothing."""
+def link_members(image, cache, repo):
+    """The members the build derived for IMAGE (res["link_roots"], the definer closure): [spec]. A red build before the link has none."""
+    res, _ = gate_build.ensure(image, cache, repo)
+    return [x["root"] for x in res.get("link_roots", [])]
+
+
+def images_naming(root, repo, cache):
+    """The images that link ROOT (a member of the derived definer closure of the image): [path]. A recipe that does not load names nothing."""
     admit = recipe.load_admit(repo)
     out = []
     for p in gate_build.product_roots(repo):
@@ -108,22 +114,21 @@ def images_naming(root, repo):
             rl = recipe.load_recipe(repo, admit, p).get("link")
         except (OSError, ValueError, AttributeError):
             continue
-        rs = rl.get("roots") if isinstance(rl, dict) else None
-        if isinstance(rs, list) and root in rs:
+        if isinstance(rl, dict) and root in link_members(p, cache, repo):
             out.append(p)
     return out
 
 
 def judge_image(gate, root, image, repo, cache):
-    """The objects judged are those of the image: the lifted ROOT and the runtime root, the root among link.roots of IMAGE that defines
-    the 4-byte symbol fnvnx_lift_cpu_bytes (its object is the unique definer over all link.roots; none or several is red)."""
+    """The objects judged are those of the image: the lifted ROOT and the runtime root, the root among the link members of IMAGE that defines
+    the 4-byte symbol fnvnx_lift_cpu_bytes (its object is the unique definer over all link members; none or several is red)."""
     admit = recipe.load_admit(repo)
-    members = recipe.load_recipe(repo, admit, image)["link"]["roots"]
+    members = link_members(image, cache, repo)
     built, holders = {}, []
     for m in sorted(set(members) | {root}):
         res, _ = gate_build.ensure(m, cache, repo)
         if res["status"] == "red":
-            return 1, 0, [m + ":build"], "build red at stage %s" % res["failure"]["stage"]
+            return 1, 0, [m + ":build"], "build red at stage %s: %s" % (res["failure"]["stage"], " | ".join(res["failure"].get("stderr", [])[-3:])[:300])
         built[m] = res
         holders += [(m, d["object"]) for d in res["defined"] if d["symbol"] == CPU_SYMBOL]
     if len(holders) != 1:
@@ -153,15 +158,31 @@ def judge_image(gate, root, image, repo, cache):
 
 
 def judge_lifted_order(gate, root, repo, cache):
-    """A lifted root is judged in every image that names it in link.roots; no image names it: universe 0 until the ELF root exists."""
+    """A lifted root is judged in every image that links it (derived link members); no image names it: universe 0 until the ELF root exists."""
     u = c = 0
     ids, why = [], []
-    for image in images_naming(root, repo):
+    for image in images_naming(root, repo, cache):
         iu, ic, iids, idetail = judge_image(gate, root, image, repo, cache)
         u, c, ids = u + iu, c + ic, ids + iids
         if ic != iu:
             why.append("%s: %s" % (image, idetail))
-    return u, c, ids, "; ".join(why) or "%d items in %d images" % (u, len(images_naming(root, repo)))
+    return u, c, ids, "; ".join(why) or "%d items in %d images" % (u, len(images_naming(root, repo, cache)))
+
+
+def pack_of(repo, cache, root, rec, ws):
+    """-> {"host": dir of the pack, "tree": its hash} of the pack that ROOT's cxx_origin names: an external of the recipe (fetched), or an admitted root in
+    its `uses` (its declared PACK output, as published in GATE_CACHE: gate_build.published_output; absent is red, the gate never builds or guesses it)."""
+    pack = recipe.load_admit(repo)[root]["cxx_origin"]["pack"]
+    pe = [e for e in rec.get("external", []) if isinstance(e, dict) and e.get("name") == pack]
+    if len(pe) == 1:
+        return recipe.fetch_externals(pe, os.path.join(cache, "store"), os.path.join(cache, "external"), os.path.join(ws, "pack"))[pack]
+    if pe or not any(isinstance(u, dict) and u.get("root") == pack and u.get("output") == "PACK" for u in rec.get("uses", [])):
+        raise gate_contract.Red("input missing: cxx_origin.pack %r of %s is neither one external of its recipe nor a root in its `uses` with output PACK" % (pack, root))
+    try:
+        path, sha = gate_build.published_output(cache, pack, "PACK", repo)
+    except LookupError as e:
+        raise gate_contract.Red("input missing: %s" % e)
+    return {"host": path, "tree": sha}
 
 
 def eh_inputs(repo, cache, root, rec, ws):
@@ -171,12 +192,8 @@ def eh_inputs(repo, cache, root, rec, ws):
     if not ef:
         raise gate_contract.Red("input missing: %s declares no ehfacts (the external that holds ehtables.json of the exe and every module; owner L3a)"
                                 % gate_contract.INPUTS)
-    pack = recipe.load_admit(repo)[root]["cxx_origin"]["pack"]
-    pe = [e for e in rec.get("external", []) if isinstance(e, dict) and e.get("name") == pack]
-    if len(pe) != 1:
-        raise gate_contract.Red("input missing: the recipe of %s has no external %r (cxx_origin.pack)" % (root, pack))
     store, extc = os.path.join(cache, "store"), os.path.join(cache, "external")
-    pk = recipe.fetch_externals(pe, store, extc, os.path.join(ws, "pack"))[pack]
+    pk = pack_of(repo, cache, root, rec, ws)
     ex = recipe.fetch_externals(doc["external"], store, extc, os.path.join(ws, "facts"))
     name, _, sub = ef.partition("/")
     return pk["host"], os.path.join(ex[name]["host"], sub), pk["tree"], ex[name]["tree"]
@@ -225,14 +242,11 @@ def judge_lifted_flags(root, repo, cache):
     may-undefined origin reaches."""
     rec = recipe.load_recipe(repo, recipe.load_admit(repo), root)
     doc = gate_contract.load_inputs(os.path.join(repo, gate_contract.INPUTS))
-    pack = recipe.load_admit(repo)[root]["cxx_origin"]["pack"]
-    pe = [e for e in rec.get("external", []) if isinstance(e, dict) and e.get("name") == pack]
-    if len(pe) != 1:
-        raise gate_contract.Red("input missing: the recipe of %s has no external %r (cxx_origin.pack)" % (root, pack))
     ws = tempfile.mkdtemp(prefix="gate-lift-ext-")
     try:
         store, extc = os.path.join(cache, "store"), os.path.join(cache, "external")
-        pk = recipe.fetch_externals(pe, store, extc, os.path.join(ws, "pack"))[pack]
+        pack = recipe.load_admit(repo)[root]["cxx_origin"]["pack"]
+        pk = pack_of(repo, cache, root, rec, ws)
         ext = recipe.fetch_externals(doc["external"], store, extc, os.path.join(ws, "facts"))
         ef = os.path.join(pk["host"], "entries.tsv")
         if not os.path.isfile(ef):
@@ -249,7 +263,7 @@ def judge_lifted_flags(root, repo, cache):
             covered |= mine
             if not mine:
                 continue
-            r = run_tool(repo, cache, "gate_flags.py", [pepath, os.path.dirname(rg)], ("flags",), [name, trees], {"JOBS": os.environ.get("JOBS", "4")})["flags"]
+            r = run_tool(repo, cache, "gate_flags.py", [pepath, os.path.dirname(rg)], ("flags",), [name, trees], {"JOBS": "4"})["flags"]
             nf = r.get("no_form_rows", 0)
             reads, bad = r.get("flag_reads", 0), r.get("undecodable_ranges", 0)
             red = r.get("red_flag_reads", 0)
@@ -298,7 +312,7 @@ def main(argv):
     cache = os.environ.get("GATE_CACHE") or tmp
     try:
         admit = recipe.load_admit(repo)
-        roots = [(r, kind_of(admit[r])) for r in gate_build.product_roots(repo)]
+        roots = [(r, kind_of(recipe.entry_of(admit, r))) for r in gate_build.product_roots(repo)]
         roots = [(r, k) for r, k in roots if k]
         u = c = 0
         ids, why = [], []

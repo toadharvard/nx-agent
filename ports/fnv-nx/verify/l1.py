@@ -43,7 +43,8 @@ def _opts(a, extra=(), optional=()):
     return verdict._opts(a, dict({"--repo": 0, "--verdicts": 0, "--budget-s": 1}, **{k: 0 for k in extra}, **{k: 1 for k in optional}))
 
 def _line(v):
-    return "L1 %s %s %ss gates:%d over_budget:%s" % (v["verdict"], v["tree"], v["seconds"], len(v["gates"]), v["over_budget"])
+    return "L1 %s %s %ss gates:%d over_budget:%s vacuous:%d" % (v["verdict"], v["tree"], v["seconds"], len(v["gates"]), v["over_budget"],
+                                                               sum(1 for g in v["gates"] if g.get("status") == "green" and str(g.get("reason", "")).startswith("vacuous:")))
 
 def _gates_file(repo, rev, td):
     """The gates document of REV's verify/gates.d (one file per gate, gatesdir.py), written canonically into TD: a value of this run, never a tracked file."""
@@ -81,7 +82,8 @@ def _check(repo, commit, vdir, budget, gates, td, env_id):
     return json.load(open(outp))
 
 def cmd_verdict(a):
-    o = _opts(a, ("--commit",))
+    o = _opts(a, ("--commit", "--artifacts"))
+    os.environ["ARTIFACTS_URL"] = o["--artifacts"]   # the artifacts repository: a required argument, read by the gates through the environment of the run
     env_id, bad = _env(o["--repo"], o["--commit"])
     if bad:
         return _blocked_env(bad)
@@ -91,7 +93,8 @@ def cmd_verdict(a):
     return 0 if v["verdict"] == "green" else 2
 
 def cmd_merge(a):
-    o = _opts(a, ("--into", "--from"), ("--remote",))
+    o = _opts(a, ("--into", "--from", "--artifacts"), ("--remote",))
+    os.environ["ARTIFACTS_URL"] = o["--artifacts"]
     o.setdefault("--remote", None)
     repo, vdir, remote, bname = o["--repo"], o["--verdicts"], o["--remote"], o["--into"]
     if remote:

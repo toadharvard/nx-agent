@@ -7,7 +7,7 @@ below); the VEX second model was cancelled and `model_vex.py` was never finished
   defined for every count, sign extension is written with xor/sub on unsigned values, no signed type appears).
 * `forms.py`: the slice (add adc sub sbb cmp and or xor test inc dec neg not shl shr sar rol ror imul mul movzx movsx setcc
   cmovcc lea bswap cdq xchg push pop, plus mov and one memory form each way) built from a capstone decode; form keys are the
-  ones of `test/instest.py` (`form_key` copied; prove.py does not import instest, which needs numpy/elftools/unicorn).
+  ones of the retired one-instruction harness (`form_key` copied; prove.py does not import the retired one-instruction harness, which needs numpy/elftools/unicorn).
 * `prove.py`: the obligations of one shape against the reference model (library; `shapeprove.py` is the one prover and calls `prove_one`; plug-in interface in the docstring of prove.py).
   Its former table mode and `--backends` (encoding tables, emitted-C++ comparison) were deleted: one prover path.
 
@@ -66,12 +66,12 @@ Cause of 3acf7d99 (README) vs 66cf6d73 (farm): the old script passed the splice 
 ### Sail model patches (W9b)
 `proof/sail_patches/rotate_count.sail` (rotate_left_bits/rotate_right_bits reduce the count mod width) and `ror_cf.sail` (ROR CF = msb of the result for masked
 count >= 2) are spliced in by `sail_build.sh` (default; `x86_proof.ir` sha256 55f87ab6... since the path-independent build, was 3acf7d99... / 66cf6d73... with absolute paths); `sail_build.sh --stock` builds the unpatched `x86_proof_stock.ir`
-(sha256 1de1cdc6...). `test/rothost.py` compares the patched model with the native host exhaustively (8/16-bit rol ror rcl rcr shl shr sar, all values x counts 0..255 x
+(sha256 1de1cdc6...). the retired host comparison (test/rothost.py, deleted: a second path outside the recipe) compared the patched model with the native host exhaustively (8/16-bit rol ror rcl rcr shl shr sar, all values x counts 0..255 x
 CF-in, cl and imm8 forms, second pre-flag pattern too): 488,112,128 cases, diff 0 on every SDM-defined output; `mfree` = model leaves a defined output
 undefined (shl/shr/sar CF beyond the width), `undef-info` = host value of an SDM-undefined output differing from the model's.
 Third patch (L3b, `sail_patches/bt_bitnumber.sail`): `x86_bt_0f_a3` (BT r/m, r with a memory operand) took `bitnumber = mod(abs(signed(offset)), 8)` while the byte
 address is `floor(offset / 8)`: for a negative offset it selected the mirror bit (offset -1: bit 1 of byte -1; SDM and hardware: bit 7). The patch uses
-`offset - 8 * floor2(offset, 8)`. The SDM says the addressed unit is `EA + size/8 * (BitOffset DIV size)` and the bit `BitOffset MOD size` (floor); `test/bthost.py` runs the real
+`offset - 8 * floor2(offset, 8)`. The SDM says the addressed unit is `EA + size/8 * (BitOffset DIV size)` and the bit `BitOffset MOD size` (floor); the retired host run (test/bthost.py, deleted: a second path outside the recipe) ran the real
 instruction on the host (bt/bts/btr/btc, m16 and m32, register offset, memory window compared byte by byte, two memory patterns) against the DSL: m16 all 2^16 offsets,
 m32 a class cover (all 32 residues x q in -4096..4095 and every power-of-two boundary up to 2^26 and both extremes), 2,642,944 cases, 0 disagreements; the stock formula
 disagrees with the host in 123,756 of the bt cases. The DSL (and the hand emitter `fnvlift/f_int.py bitstr`, which uses the same word-wise rule) is right. The model implements only 0F A3 and 0F BA /4 of the bit group;
@@ -102,7 +102,7 @@ Gate with the patched IR (forms.py md5 5ba2bb32...): proved 358, FAILED 33 (rol/
 ## Gates `forms` and `fpexact` (fnvnx-gate/1, verify/VERDICT.md classes 6 and C)
 Both read their private inputs the way verify/gate_contract.py does: declared as content-pinned externals of fnv-nx-build, loaded by `recipe.fetch_externals`
 from `ports/fnv-nx/verify` (sibling of lift/; a lift-only branch has no verify/, so the gates are red with that reason and the tests overlay it through
-`FNVNX_TEST_VERIFY`). No path arguments, no environment variables other than the verdict's `GATE_OUT` / `GATE_CACHE`. A missing or invalid input is RED with the reason.
+`FNVNX_TEST_VERIFY`). No path arguments, no environment variables other than the verdict's `GATE_OUT` / `GATE_CACHE`, which the gate reads once in `main` and passes on explicitly. The generated headers of lift/rt (`rcpref.h`) are read through `genout.gen_dir(cache)`, which takes the store as an argument (no environment read) and resolves the root's published GEN output with `gate_build.published_output`. A missing or invalid input is RED with the reason.
 * `formgate.py` (gate `forms`): universe = the shapes of `shapes.tsv` in the external `liftpack` (`shape_key<TAB>family<TAB>count`, sorted); certificates = `certs.tsv`
   of the external `certs` (fnv-nx-build `l3b-lift/certs`). Inputs: `formgate_inputs.json` (`fnvnx-forms-inputs/1`; `model_sha256` must equal the `x86_proof.ir` pin of
   `sail_pins.txt`). A shape is certified iff a `proved` row of the pinned model carries the dsl_sha the current code gives. Today the file declares no `liftpack`:

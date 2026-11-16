@@ -1,4 +1,4 @@
-# fnvnx-sdm-cpuid-feature-rows/1 sdm_sha256=a4a62e6a7ba11a76c7753a195b825087306812aac39b930973f9168ee599f321 cpumodel_sha256=ef17a000eb5b8854a15efb373970508b61db35d3365fe93f33e8b9f796132f06 forms=665 shapes=24179 sites=5704065
+# fnvnx-sdm-cpuid-feature-rows/1 sdm_sha256=a4a62e6a7ba11a76c7753a195b825087306812aac39b930973f9168ee599f321 cpumodel_sha256=e7822212bb4dede2d84b8debb1a0fbfd816732a9b4880f0b5187f1f9788b0eb4 forms=665 shapes=24179 sites=5704065
 # source: Intel 64 and IA-32 Architectures SDM combined volumes (pdftotext -layout), opcode tables of Vol. 2A-2D; flag names and bits: Vol. 1 ch. 21 CPUID leaf tables; declared CPU: lift/rt/cpumodel.c
 # form	family	status	needs	value	exec_as	sdm_opcode	sdm_instr	citation	shapes	nsites
 -|00|-	int	found	-	none	-	00 /r	ADD r/m8	SDM ADD Vol. 2A 3-14 opcode table row "00 /r" (no flag column; flags from the #UD CPUID lines of the section)	n=847	125652
@@ -664,5 +664,5 @@ undefined|-|F6 48 00	int	undefined	-	none	-	-	-	no row in the SDM opcode tables 
 undefined|-|F6 49 00	int	undefined	-	none	-	-	-	no row in the SDM opcode tables for this opcode form (undefined opcode: #UD, SDM Vol. 2 ch. 3 "Interrupt 6 - Invalid Opcode")	n=1	2
 undefined|-|F6 4C 4E	int	undefined	-	none	-	-	-	no row in the SDM opcode tables for this opcode form (undefined opcode: #UD, SDM Vol. 2 ch. 3 "Interrupt 6 - Invalid Opcode")	n=1	2
 undefined|-|F6 CE 00	int	undefined	-	none	-	-	-	no row in the SDM opcode tables for this opcode form (undefined opcode: #UD, SDM Vol. 2 ch. 3 "Interrupt 6 - Invalid Opcode")	n=1	1
-vendor|-|0F 0E	simd	defined-by-vendor-map	3DNow!	absent	-	-	-	APM Vol. 3 Appendix A two-byte opcode map (PDF page index 374): 0F 0E cell = "FEMMS" (feature from Table D-1)	n=1	258
-vendor|-|0F 0F	simd	defined-by-vendor-map	3DNow!	absent	-	-	-	APM Vol. 3 Appendix A two-byte opcode map (PDF page index 374): 0F 0F cell = "3DNow!"	n=329	4890
+vendor|-|0F 0E	simd	defined-by-vendor-map	3DNow	absent	-	-	-	APM Vol. 5 instruction reference (PDF page index 47): `FEMMS                            0F 0E            Clears MMX` is a 3DNow instruction (Support ... is indicated by CPUID ...[3DNow])	n=1	258
+vendor|-|0F 0F	simd	defined-by-vendor-map	3DNow	absent	-	-	-	APM Vol. 3 Appendix A two-byte opcode map (PDF page index 569): 0F 0F cell = "3DNow!" (feature from Table D-1)	n=329	4890

@@ -3,13 +3,17 @@ import json
 import os
 import shutil
 import sys
+import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..'))
-from proof import certbasis, certs_build, prove, shape, symform
+from proof import certbasis, certs_build, model_sail, prove, shape, symform, x86sys
 
-WORK = os.environ.get('FNVNX_TEST_WORK') or __import__('tempfile').mkdtemp(prefix='fnvnx-proof-test-')
+model_sail.configure(os.environ['FNVNX_SAIL_WORK'], os.environ['FNVNX_SAIL_IR'], os.environ['FNVNX_ISLA'])   # the declared inputs of this test (the same three as test_model_patches); no default
+sys.path.insert(0, HERE); import declared_x86sys; XPATH = declared_x86sys.PATH; XSHA = declared_x86sys.configure()    # the declared machine of this tree, passed explicitly (--x86sys)
+
+WORK = tempfile.mkdtemp()    # this test's own scratch directory
 MD = shape.decoder()
 
 
@@ -23,7 +27,7 @@ MODEL = certs_build.pinned_model()
 
 
 def rec(key, result='proved', model=MODEL, dsl=None):
-    return {'shape': key, 'result': result, 'model_sha': model, 'dsl_sha': dsl or symform.shape_sha(key), 'obligations': list(certbasis.OBLIGATIONS), 'prover_sha': certbasis.prover_sha()}
+    return {'shape': key, 'result': result, 'model_sha': model, 'dsl_sha': dsl or symform.shape_sha(key), 'obligations': list(certbasis.OBLIGATIONS), 'prover_sha': certbasis.prover_sha(), 'x86sys_sha256': XSHA}
 
 
 class Aggregate(unittest.TestCase):
@@ -42,7 +46,7 @@ class Aggregate(unittest.TestCase):
         return p
 
     def run_main(self, paths, out):
-        return certs_build.main(['--shards'] + paths + ['--out', out])
+        return certs_build.main(['--x86sys', XPATH, '--shards'] + paths + ['--out', out])
 
     def test_rows_sorted_and_independent_of_shard_order(self):
         a = self.write('shapeprove_1_of_2.jsonl', [rec(KEYS[2]), rec(KEYS[0])])
@@ -65,10 +69,17 @@ class Aggregate(unittest.TestCase):
 
     def test_stale_records_are_ignored_not_refused(self):
         o = os.path.join(self.d, 'o')
-        for bad in (rec(KEYS[0], model='0' * 64), rec(KEYS[0], dsl='1' * 64)):
+        for bad in (rec(KEYS[0], model='0' * 64), rec(KEYS[0], dsl='1' * 64), dict(rec(KEYS[0]), x86sys_sha256='2' * 64), {k: v for k, v in rec(KEYS[0]).items() if k != 'x86sys_sha256'}):      # the last two: made under another declared machine / before the rule
             a = self.write('shapeprove_1_of_1.jsonl', [bad, rec(KEYS[1])])
             self.assertEqual(self.run_main([a], o), 0)
             self.assertEqual([ln.split('\t')[0] for ln in open(o).read().splitlines()[1:]], [KEYS[1]])
+
+    def test_withheld_form_defect_is_its_own_class_never_proved(self):
+        o = os.path.join(self.d, 'o'); w = self.write('w.tsv', []); open(w, 'w').write('# header\n%s\t1\tdiffers at 3\n' % KEYS[0])
+        a = self.write('shapeprove_1_of_1.jsonl', [rec(KEYS[0]), rec(KEYS[1])])
+        self.assertEqual(certs_build.main(['--x86sys', XPATH, '--withheld', w, '--shards', a, '--out', o]), 0)
+        self.assertEqual([ln.split('\t')[0] for ln in open(o).read().splitlines()[1:]], [KEYS[1]])
+        self.assertEqual(certs_build.scan([a])[1].get('withheld-form-defect'), 1)
 
     def test_def0_columns_and_stale_defprior(self):
         o = os.path.join(self.d, 'o')
@@ -123,7 +134,7 @@ class Aggregate(unittest.TestCase):
 
     def queue(self, paths, keys=KEYS):
         o = os.path.join(self.d, 'q')
-        self.assertEqual(certs_build.main(['--queue', self.shapes_file(keys), '--shards'] + paths + ['--out', o]), 0)
+        self.assertEqual(certs_build.main(['--x86sys', XPATH, '--queue', self.shapes_file(keys), '--shards'] + paths + ['--out', o]), 0)
         return open(o).read().split()
 
     def test_dsl_edit_requeues_exactly_the_changed_forms(self):
@@ -164,13 +175,13 @@ class Aggregate(unittest.TestCase):
     def test_coverage_is_global_and_independent_of_the_split(self):      # two farms with different queues (so different K-of-N splits) may overlap or leave a gap: the fold sees it
         o = os.path.join(self.d, 'miss'); sf = self.shapes_file(KEYS)
         a = self.write('shapeprove_1_of_2.jsonl', [rec(KEYS[0]), rec(KEYS[1], 'model-gap')])
-        self.assertEqual(certs_build.main(['--coverage', sf, '--shards', a, '--out', o]), 1)           # KEYS[2] has no record: MISSING
+        self.assertEqual(certs_build.main(['--x86sys', XPATH, '--coverage', sf, '--shards', a, '--out', o]), 1)           # KEYS[2] has no record: MISSING
         self.assertEqual(open(o).read().split(), [KEYS[2]])
         b = self.write('shapeprove_2_of_3.jsonl', [rec(KEYS[1], 'model-gap'), rec(KEYS[2])])             # overlaps KEYS[1] (another split)
-        self.assertEqual(certs_build.main(['--coverage', sf, '--shards', a, b, '--out', o]), 0)
+        self.assertEqual(certs_build.main(['--x86sys', XPATH, '--coverage', sf, '--shards', a, b, '--out', o]), 0)
         self.assertEqual(open(o).read(), '')
         c = self.write('shapeprove_3_of_3.jsonl', [rec(KEYS[2], 'FAILED(dsl)')])                          # the same key proved and FAILED: refused
-        self.assertEqual(certs_build.main(['--coverage', sf, '--shards', a, b, c, '--out', o]), 2)
+        self.assertEqual(certs_build.main(['--x86sys', XPATH, '--coverage', sf, '--shards', a, b, c, '--out', o]), 2)
 
 
 if __name__ == '__main__':

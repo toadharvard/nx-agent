@@ -72,7 +72,7 @@ import boot
 import bootmiles
 import exepin
 
-MODULE_HEADER = "# name\tsha256\tsize\tpreferred_base\tassigned_base\tsize_of_image\thas_tls\tentry_rva\tstatic\tload_index"
+MODULE_HEADER = "# name\tsha256\tsize\tpreferred_base\tassigned_base\tsize_of_image\thas_tls\tentry_rva\tstatic\tload_index\tdll"
 KEYS_STRIDE = 0x10
 CONSOLE_PREFIX = "   fnvnx-start: "
 
@@ -205,18 +205,23 @@ def pe_image(raw):
 
 
 def reserved_rows(modules_text, exe_raw):
-    rows, _ = _rows(modules_text, MODULE_HEADER, 10)
-    out = []
+    rows, _ = _rows(modules_text, MODULE_HEADER, 11)
+    out, exes = [], 0
     for no, f in rows:
-        name, sha, _size, _pref, base, soi, tls, _entry, static, _idx = f
-        if not name or len(sha) != 64 or tls not in ("0", "1") or static not in ("0", "1"):
-            raise InputError(f"line {no}: bad name/sha256/has_tls/static field")
+        name, sha, _size, _pref, base, soi, tls, _entry, static, _idx, dll = f
+        if not name or len(sha) != 64 or tls not in ("0", "1") or static not in ("0", "1") or dll not in ("0", "1"):
+            raise InputError(f"line {no}: bad name/sha256/has_tls/static/dll field")
         lo, size = _hex(base, "assigned_base", no), _hex(soi, "size_of_image", no)
         if not size:
             raise InputError(f"line {no}: size_of_image is 0")
+        if dll == "0":   # the kind of a row is its PE IMAGE_FILE_DLL bit: the exe row, which must be this exe (its sha256), named "exe" in the layout
+            exes += 1
+            if sha != hashlib.sha256(exe_raw).hexdigest():
+                raise InputError(f"line {no}: the exe row is not the sha256 of the exe")
+            name = "exe"
         out.append((name, lo, lo + size))
-    base, size = pe_image(exe_raw)
-    out.append(("exe", base, base + size))
+    if exes != 1:
+        raise InputError(f"modules.tsv has {exes} exe rows, want exactly one")
     return sorted(out, key=lambda r: r[1])
 
 
@@ -349,10 +354,11 @@ def milestone_table(milestones_text, run_text, entries_id=None, stage_text=None,
             out += ["first-present any call 0x%x" % key for key in present]
         else:
             out.append("%s any call 0x%x" % item)
+    out.append("first-frame any host present")   # the GL backend's first present (boot.py header): always generated, a stage `first-frame` is an error
     if stage_text is not None:
         if man is None:
             raise InputError("a stage table needs entries.tsv (--entries)")
-        taken = {item[0] for item in body if item} | {"first-present"} | {"start-%02d" % i for i in range(1, len(lines) + 1)}
+        taken = {item[0] for item in body if item} | {"first-present", "first-frame"} | {"start-%02d" % i for i in range(1, len(lines) + 1)}
         out += stage_check(stage_text, man, taken)
     return "\n".join(out) + "\n"
 

@@ -4,13 +4,30 @@
 events, x87 stack-depth dataflow. No clocks, no entropy; every iteration order is sorted."""
 import os, struct, bisect, itertools
 from collections import defaultdict
+import sys
 import capstone
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+from fnvlift.image import Image as _FImage
 from capstone import x86 as X
 
-FACTS = os.environ.get('FNVNX_FACTS', '/home/user/l3facts')       # facts root: every input / output path below derives from it
-UNI = FACTS + '/universe.tsv'
-EHJ = FACTS + '/ehtables.json'
 M32 = 0xffffffff
+FACTS = UNI = EHJ = None      # set by configure(): the facts root of the image under analysis, passed explicitly by the program (no environment variable, no default)
+
+
+def image_base(path, table, name):
+    """the load base of an image, from its declared source: `exe` = the PE's own ImageBase (the exe is mapped at it, never relocated), else the assigned base of the row `name` (with or without .dll) of the loader's module table."""
+    if name == 'exe':
+        d = open(path, 'rb').read(); return struct.unpack_from('<I', d, struct.unpack_from('<I', d, 0x3c)[0] + 52)[0]
+    import pemod
+    r = pemod.modules(table); n = name.lower(); n = n if n in r else n + '.dll'
+    if n not in r: sys.exit('x86flow.image_base: %s is not a row of %s' % (name, table))
+    return r[n].base
+
+
+def configure(facts):
+    """facts: the directory that holds universe.tsv and ehtables.json of the image"""
+    global FACTS, UNI, EHJ
+    FACTS = os.path.abspath(facts); UNI = FACTS + '/universe.tsv'; EHJ = FACTS + '/ehtables.json'
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
 md.detail = True
 R32 = ['eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi']
@@ -30,50 +47,11 @@ RETN, ALLOCA = {}, []          # entry -> callee-popped bytes (None = several di
 IATADDR = {}                   # IAT slot address -> import name
 
 
-class Image:
-    def __init__(s, path):
-        d = s.d = open(path, 'rb').read()
-        pe = struct.unpack_from('<I', d, 0x3c)[0]
-        n = struct.unpack_from('<H', d, pe + 6)[0]
-        opt = struct.unpack_from('<H', d, pe + 20)[0]
-        s.base = struct.unpack_from('<I', d, pe + 52)[0]
-        s.secs, s.pe = [], pe
-        o = pe + 24 + opt
-        for i in range(n):
-            name = d[o:o + 8].rstrip(b'\0').decode()
-            vs, va, rs, ro = struct.unpack_from('<IIII', d, o + 8)
-            s.secs.append((name, s.base + va, vs, ro, rs, struct.unpack_from('<I', d, o + 36)[0]))
-            o += 40
-        rr, rsz = struct.unpack_from('<II', d, pe + 24 + 96 + 40)
-        rel = []
-        p = s.off(s.base + rr)
-        end = p + rsz
-        while p < end:
-            page, bs = struct.unpack_from('<II', d, p)
-            if not bs:
-                break
-            for i in range((bs - 8) // 2):
-                e = struct.unpack_from('<H', d, p + 8 + 2 * i)[0]
-                if e >> 12 == 3:
-                    rel.append(s.base + page + (e & 0xfff))
-            p += bs
-        rel.sort()
-        s.rset = frozenset(rel)
-        s.taken = sorted(s.u32(r) for r in rel)
-
-    def off(s, a):
-        for n, va, vs, ro, rs, ch in s.secs:
-            if va <= a < va + vs and a - va < rs:
-                return ro + a - va
-        return None
-
-    def u32(s, a):
-        o = s.off(a)
-        return struct.unpack_from('<I', s.d, o)[0] if o is not None else 0
-
-    def bytes(s, a, n):
-        o = s.off(a)
-        return s.d[o:o + n]
+class Image(_FImage):
+    """The one image loader is fnvlift.image.Image(path, base): the image as the Windows loader maps it at the module table's assigned base (every image has a base from its module-table row; there is no default)."""
+    def __init__(s, path, base):
+        super().__init__(path, base)
+        s.pe = struct.unpack_from('<I', s.d, 0x3c)[0]
 
 
 def explore(img, lo, hi, code):
@@ -131,11 +109,13 @@ def memslot(i, o, sz):
     return ('s', m.disp, sz) if b == 'esp' else ('b', m.disp, sz) if b == 'ebp' else ('g', m.disp & M32) if b is None else None
 
 
-def load_universe(exe):
+def load_universe(exe, base):
     global IMG
-    IMG = Image(exe)
+    IMG = Image(exe, base)
     raw = open(UNI, 'rb').read()
     rows = []
+    hd = raw.split(b'\n', 1)[0].decode()
+    if hd.startswith('# base=0x') and int(hd[9:hd.index(':')], 16) != base: sys.exit('x86flow: universe.tsv is stated at base %s, the image was given base %08x' % (hd[7:hd.index(':')], base))      # the facts and the image speak one base
     for ln in raw.decode().splitlines():
         f = ln.split('\t')
         if len(f) >= 3 and f[2].isdigit() and int(f[2]) > 0:
@@ -510,7 +490,6 @@ def depth(F, tabl):
 
 # ---- whole-program prerequisites: imports, callee pops (ret N, jmp-thunk chains), alloca helpers ----
 THUNK = {}                     # entry -> IAT slot of a `jmp [iat]` stub
-CACHE = FACTS + '/flow/retn.tsv'
 
 
 def parse_imports():
@@ -543,33 +522,54 @@ def phase0(args):
     return a, (rets[0] if len(rets) == 1 else None) if rets else (('t', tl[0]) if len(tl) == 1 else 0), th, al
 
 
-def prepare(pool, rows, key):
-    """fills RETN / THUNK / ALLOCA / IATADDR; cached in CACHE (header = key = exe+universe digest)."""
+def compute(pool, rows):
+    """retn / thunk / alloca of every entry of the universe: -> (RETN {entry: popped bytes | None}, THUNK {entry: IAT slot}, ALLOCA [entries]); a pure function of the image and the universe rows"""
     parse_imports()
-    res = None
-    if os.path.exists(CACHE):
-        L = open(CACHE).read().splitlines()
-        if L and L[0] == key:
-            res = [(int(f[0], 16), None if f[1] == '-' else 'x' if f[1] == 'x' else int(f[1]), None if f[2] == '-' else int(f[2], 16), int(f[3]))
-                   for f in (ln.split('\t') for ln in L[1:])]
-    if res is None:
-        res = [(a, r, th, al) for a, r, th, al in pmap(pool, phase0, [(a, e, k) for a, e, k in rows], 300)]
-        res = [(a, ('t', r[1]) if isinstance(r, tuple) else r, th, al) for a, r, th, al in res]
-        pend = dict((a, r) for a, r, th, al in res)
-        for a in sorted(pend):
-            r = pend[a]
-            for _ in range(6):
-                if isinstance(r, tuple):
-                    r = pend.get(r[1], 0)
-            pend[a] = 0 if isinstance(r, tuple) else r
-        res = [(a, pend[a], th, al) for a, r, th, al in res]
-        os.makedirs(os.path.dirname(CACHE), exist_ok=True)
-        with open(CACHE, 'w') as f:
-            f.write(key + '\n' + ''.join('%08x\t%s\t%s\t%d\n' % (a, '-' if r is None else r, '-' if th is None else '%x' % th, al) for a, r, th, al in res))
+    res = [(a, r, th, al) for a, r, th, al in pmap(pool, phase0, [(a, e, k) for a, e, k in rows], 300)]
+    res = [(a, ('t', r[1]) if isinstance(r, tuple) else r, th, al) for a, r, th, al in res]
+    pend = dict((a, r) for a, r, th, al in res)
+    for a in sorted(pend):
+        r = pend[a]
+        for _ in range(6):
+            if isinstance(r, tuple):
+                r = pend.get(r[1], 0)
+        pend[a] = 0 if isinstance(r, tuple) else r
+    ret, thunk, alloca = {}, {}, []
     for a, r, th, al in res:
-        if r != 'x':
-            RETN[a] = r
+        if pend[a] != 'x':      # an entry whose decode failed ('x'), or a tail chain that ends in one, has no row
+            ret[a] = pend[a]
         if th is not None:
-            THUNK[a] = th
+            thunk[a] = th
         if al:
-            ALLOCA.append(a)
+            alloca.append(a)
+    return ret, thunk, sorted(alloca)
+
+
+RETN_FORMAT = 'fnvnx-retn/1'
+
+
+def retn_text(ret, thunk, alloca):
+    """the canonical text of the three tables (tools/retnfacts.py writes it, load_retn reads it): sorted rows `R addr N|none`, `T addr slot`, `A addr`"""
+    o = ['# %s' % RETN_FORMAT]
+    o += ['R\t%x\t%s' % (a, 'none' if ret[a] is None else ret[a]) for a in sorted(ret)]
+    o += ['T\t%x\t%x' % (a, thunk[a]) for a in sorted(thunk)]
+    o += ['A\t%x' % a for a in sorted(alloca)]
+    return '\n'.join(o) + '\n'
+
+
+def load_retn(path):
+    """fills RETN / THUNK / ALLOCA from the facts-stage output (tools/retnfacts.py) and IATADDR from the image: the one path, nothing is recomputed"""
+    parse_imports()
+    lines = open(path).read().splitlines()
+    if not lines or lines[0] != '# ' + RETN_FORMAT:
+        raise SystemExit('%s: not a %s table' % (path, RETN_FORMAT))
+    for ln in lines[1:]:
+        f = ln.split('\t')
+        if f[0] == 'R':
+            RETN[int(f[1], 16)] = None if f[2] == 'none' else int(f[2])
+        elif f[0] == 'T':
+            THUNK[int(f[1], 16)] = int(f[2], 16)
+        elif f[0] == 'A':
+            ALLOCA.append(int(f[1], 16))
+        else:
+            raise SystemExit('%s: unknown row %r' % (path, ln))

@@ -39,7 +39,7 @@ def main():
         m = re.match(r"(\w+)=(.*)$", line)
         if not m:
             raise SystemExit("unparsed line: " + line)
-        k, v = m.group(1), m.group(2).strip()
+        k, v = m[1], m[2].strip()
         if k == "SeverityNames" or k == "FacilityNames":
             for nm, val in re.findall(r"(\w+)=(0x[0-9a-fA-F]+|\d+)", v):
                 (sev_names if k == "SeverityNames" else fac_names)[nm] = int(val, 0)
@@ -75,7 +75,6 @@ def main():
     o += ["};", "static const char g_sysmsg_text[%d] = {" % len(blob)]
     o += [",".join(str(b) for b in blob[j:j + 24]) + "," for j in range(0, len(blob), 24)]
     o += ["};", ""]
-    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     open(out, "w").write("\n".join(o))
 
 

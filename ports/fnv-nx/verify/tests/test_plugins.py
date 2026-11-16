@@ -29,13 +29,12 @@ BASE = tempfile.mkdtemp(prefix="plugin-test-")
 FAILED = []
 T = "ports/fnv-nx/"
 ROOT = T + "toy"
-PLUGS = [dict({"name": n, "source": recipe.PLUGIN_SOURCES[n], "args": dict(recipe.PLUGIN_ARGS[n])},
-              **({"inputs": recipe.PLUGIN_INPUTS[n]} if n in recipe.PLUGIN_INPUTS else {})) for n in recipe.PLUGIN_SOURCES]
+PLUGS = [{"name": n} for n in recipe.PLUGIN_SOURCES]   # a root names only the plugin: source, inputs and arguments are fixed by recipe.py
 P = {p["name"]: p for p in PLUGS}
-SRC = "volatile int g;\nint rd() { return g; }\nvoid wr(int v) { g = v; }\nint f2i(float f) { return (int)f; }\nint ic(int (*f)(int)) { return f(1); }\nstruct S { int a; char b; };\nS gs;\nregister int hr asm(\"x27\");\nregister unsigned eax asm(\"x19\");\nint hrw(int v) { hr = v; eax = v + 1; return hr + eax; }\n"
-REC = {"format": "fnvnx-recipe/1", "compiler": {"cc": "aarch64-linux-gnu-gcc-13", "cxx": "aarch64-linux-gnu-g++-13"},
-       "flags": {"c": [], "cxx": ["-O2", "-mabi=ilp32"] + list(recipe.SDD_FLAGS), "asm": []}, "include": [], "units": "all",
-       "plugins": PLUGS}
+SRC = "volatile int g;\nint rd() { return g; }\nvoid wr(int v) { g = v; }\nint f2i(float f) { return (int)f; }\nint ic(int (*f)(int)) { return f(1); }\nstruct S { int a; char b; };\nS gs;\nregister int hr asm(\"x27\");\nregister unsigned eax asm(\"x19\");\nint hrw(int v) { hr = v; eax = v + 1; return hr + eax; }\nstatic int arr[7];\nint ua(int i) { return arr[i]; }\nint lf() { static char ls[3]; return ls[0]; }\nextern int ex;\nint uex() { return ex; }\nextern int dg[];\nint udg() { return dg[0]; }\n"
+PROF = {"format": "fnvnx-recipe/1", "profile": "guest",   # the game's compiler, the plugin set and the runtime come from the profile (verify/guest_compiler.json)
+        "flags": {"c": [recipe.WERROR_ATTR], "cxx": ["-O2", recipe.SDD_DEFINE, recipe.WERROR_ATTR], "asm": []}, "include": [], "units": "all"}
+REC = recipe.expand_profile(PROF, recipe.load_pin(REAL))[0]   # the same root written out: what a recipe holds
 
 
 def check(name, ok, detail=""):
@@ -55,24 +54,25 @@ def w(repo, rel, text):
     open(p, "w").write(text)
 
 
-def make_repo(name, rec, origin, files=None, extra_roots=()):
+def make_repo(name, rec, origin, files=None, extra_roots=(), target="host"):
     repo = os.path.join(BASE, name)
     os.makedirs(repo)
     git(repo, "init", "-q")
-    for n in list(recipe.PLUGIN_SOURCES.values()) + [i for v in recipe.PLUGIN_INPUTS.values() for i in v]:   # the real plugin sources
+    for n in recipe.plugin_files(REAL) + [recipe.ANALYSIS_PLUGIN[1]]:   # the real plugin sources and the analysis plugin the build stores
         os.makedirs(os.path.dirname(os.path.join(repo, n)), exist_ok=True)
         shutil.copyfile(os.path.join(REAL, n), os.path.join(repo, n))
     for k, v in dict({ROOT + "/a.cc": SRC}, **(files or {})).items():
         if v is not None:
             w(repo, k, v)
     w(repo, ROOT + "/build.json", json.dumps(rec, indent=1))
+    w(repo, recipe.GUEST_PIN, open(os.path.join(REAL, recipe.GUEST_PIN)).read())   # the game's compiler pin: a guest root reads it
     w(repo, recipe.ENV_JSON, open(os.path.join(REAL, recipe.ENV_JSON)).read())   # the declared environment: a build runs only on the machine it describes
-    root = {"path": ROOT, "class": "product", "target": "host", "gates": [], "recipe": ROOT + "/build.json"}
+    root = {"path": ROOT, "class": "product", "target": target, "recipe": ROOT + "/build.json"}
     if origin is not None:
         root["cxx_origin"] = origin
     w(repo, T + "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [
-        root, {"path": T + "toolchain", "class": "tool", "gates": []}, {"path": T + "verify", "class": "tool", "gates": []},
-        {"path": T + "gen", "class": "tool", "gates": []}] + list(extra_roots)}))
+        root, {"path": T + "toolchain", "class": "tool"}, {"path": T + "verify", "class": "tool"},
+        {"path": T + "gen", "class": "tool"}] + list(extra_roots)}))
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "toy")
     return repo
@@ -102,20 +102,58 @@ def mut(**kw):
 
 def main():
     # --- gate rule, validation level (no build)
-    repo = make_repo("native", REC, "native")
-    check("native root with both plugins is valid", errs(repo, REC) == [], errs(repo, REC))
+    repo = make_repo("native", REC, "native", target="guest")
+    pl = lambda e: [x for x in e if "plugin" in x or "FNVNX_SDD" in x]  # noqa: E731  the rule under test: the plugin set of the TARGET PROFILE
+    check("native guest root with the full plugin set has no plugin error", pl(errs(repo, REC)) == [], pl(errs(repo, REC)))
+    hrepo = make_repo("native-host", REC, "native", target="host")
+    check("target profile: a host root with no plugin has no plugin error", pl(errs(hrepo, mut(plugins=[]))) == [], pl(errs(hrepo, mut(plugins=[]))))
     for gone in recipe.PLUGIN_SOURCES:
         r = mut(plugins=[p for p in PLUGS if p["name"] != gone])
         e = errs(repo, r)
         check("native root without %s is red" % gone, any("does not load plugin " + gone in x for x in e), e)
     check("native root without plugins is red", len([x for x in errs(repo, mut(plugins=[])) if "does not load" in x]) == len(recipe.PLUGIN_SOURCES))
-    r = mut(plugins=[dict(p, args=dict(p["args"], args="ltr")) if p["name"] == "fnvnx_order" else p for p in PLUGS])
-    check("A/B-only argument value is red", any("arguments must be" in x for x in errs(repo, r)), errs(repo, r))
-    check("plugin source outside the pinned file is red", any("source must be" in x or "not a tracked" in x for x in errs(
-        repo, mut(plugins=[dict(p, source=recipe.PLUGIN_SOURCES["fnvnx_ftoi"]) if p["name"] == "fnvnx_order" else p for p in PLUGS]))))
+    # recipe.py is the only declaration of source, inputs and arguments: an entry that carries one is red, whatever its value (never compared)
+    for key, val, pin in (("args", {"args": "ltr"}, "PLUGIN_ARGS"), ("args", dict(recipe.PLUGIN_ARGS["fnvnx_order"]), "PLUGIN_ARGS"),
+                          ("source", recipe.PLUGIN_SOURCES["fnvnx_order"], "PLUGIN_SOURCES"), ("inputs", [], "plugin_inputs, derived from the source"),
+                          ("inputs", list(recipe.plugin_inputs(recipe.PLUGIN_SOURCES["fnvnx_ftoi"], recipe.tracked(REAL), recipe.load_admit(REAL), REAL)), "plugin_inputs, derived from the source")):
+        nm = "fnvnx_ftoi" if key == "inputs" else "fnvnx_order"
+        e = errs(repo, mut(plugins=[dict(p, **{key: val}) if p["name"] == nm else p for p in PLUGS]))
+        check("a root entry with %s=%r is red: fixed by recipe.py (%s)" % (key, val, pin), any(("plugin %s: %s %s fixed by recipe.py (%s)" % (nm, key, "are" if key == "inputs" else "is", pin)) in x for x in e), e)
+    check("a plugin outside recipe.PLUGIN_SOURCES is red", any("is not a plugin of recipe.py" in x for x in errs(repo, mut(plugins=PLUGS + [{"name": "fnvnx_other"}]))))
+    # the stage construction takes source, inputs and arguments from recipe.py alone
+    dec = {d["name"]: d for d in recipe.plugin_decls(PLUGS, "native", recipe.tracked(REAL), recipe.load_admit(REAL), REAL)}
+    check("plugin_decls: source, inputs and arguments are recipe.py's", all(dec[n]["source"] == recipe.PLUGIN_SOURCES[n] and dec[n]["inputs"] == recipe.plugin_inputs(recipe.PLUGIN_SOURCES[n], recipe.tracked(REAL), recipe.load_admit(REAL), REAL)
+          and dec[n]["args"] == recipe.plugin_args("native")[n] for n in recipe.PLUGIN_SOURCES))
+    check("plugin_decls: fnvnx_ftoi has f2i_builtins.inc as input, so changing it changes the key of every root that loads the plugin",
+          any(i.endswith("f2i_builtins.inc") for i in dec["fnvnx_ftoi"]["inputs"]), dec["fnvnx_ftoi"]["inputs"])
+    # plugin_inputs: the include closure of a plugin source, from its #include lines (no list)
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        def put(rel, text):
+            os.makedirs(os.path.dirname(os.path.join(td, rel)), exist_ok=True)
+            open(os.path.join(td, rel), "w").write(text)
+        put("T/names/n.cc", '#include <gcc-plugin.h>\n#include "../layout/c.inc"\nint x;\n')
+        put("T/layout/c.inc", '#include "d.inc"\n')
+        put("T/layout/d.inc", "int y;\n")
+        put("T/names/bad.cc", '#include "../../O/o.h"\n')
+        put("O/o.h", "int z;\n")
+        put("T/names/gone.cc", '#include "nope.h"\n')
+        fl, rt = ["T/names/n.cc", "T/layout/c.inc", "T/layout/d.inc", "T/names/bad.cc", "O/o.h", "T/names/gone.cc"], {"T": {}, "O": {}}
+        check("plugin_inputs: a quoted include of a file of the same root builds (transitively); angle includes are not inputs",
+              recipe.plugin_inputs("T/names/n.cc", fl, rt, td) == ["T/layout/c.inc", "T/layout/d.inc"], recipe.plugin_inputs("T/names/n.cc", fl, rt, td))
+        put("T/layout/d.inc", "int y2;\n")
+        check("plugin_inputs: a change of an included file leaves the set but the stage mounts its content (key changes)",
+              recipe.plugin_inputs("T/names/n.cc", fl, rt, td) == ["T/layout/c.inc", "T/layout/d.inc"])
+        check("plugin_inputs: a quoted include that names no tracked file is the compiler's (no input)", recipe.plugin_inputs("T/names/gone.cc", fl, rt, td) == [])
+        for src, want in (("T/names/bad.cc", "lies outside the root"),):
+            try:
+                recipe.plugin_inputs(src, fl, rt, td)
+                check("plugin_inputs: %s is a check error" % src, False)
+            except ValueError as e:
+                check("plugin_inputs: %s is a check error (%s)" % (src, want), want in str(e), str(e))
     check("plugins out of load order are red", any("order" in x for x in errs(repo, mut(plugins=PLUGS[::-1]))))
-    check("native root without a semantics flag is red", any("lacks -fno-devirtualize" in x for x in errs(repo, mut(
-        flags={"c": [], "cxx": [f for f in REC["flags"]["cxx"] if f != "-fno-devirtualize"], "asm": []}))))
+    check("native root without the fnvnx_sdd define is red", any("lacks " + recipe.SDD_DEFINE in x for x in errs(repo, mut(
+        flags={"c": [], "cxx": [f for f in REC["flags"]["cxx"] if f != recipe.SDD_DEFINE], "asm": []}))))
     check("-fplugin in flags is red", any("plugin" in x for x in errs(repo, mut(flags={"c": [], "cxx": ["-fplugin=/x.so"], "asm": []}))))
     check("a hand-typed plugin_cxx in a build.json is red (the plugin compiler is recipe.PLUGIN_CXX, derived from env.json)",
           any("plugin_cxx" in x for x in errs(repo, mut(plugin_cxx="x86_64-linux-gnu-g++-13"))) and recipe.PLUGIN_CXX == "x86_64-linux-gnu-g++-13")
@@ -138,11 +176,19 @@ def main():
     o = next(x["object"] for x in ra["objects"] if x["unit"] == "a.cc")
     secs = subprocess.run(["aarch64-linux-gnu-readelf", "-SW", o], capture_output=True, text=True).stdout
     have = set(x for x in secs.split() if ".fnvnx" in x)
-    check("pi, names and layout plugins wrote their sections", {".fnvnx.n3", ".fnvnx.sympair", ".fnvnx.layout"} <= have, sorted(have))
+    check("pi, names and layout plugins wrote their sections", {".fnvnx.n3", ".fnvnx.sympair", ".fnvnx.layout", ".fnvnx.objects"} <= have, sorted(have))
     check("addr plugin wrote .fnvnx.addr (symbol, seen, routed; seen == routed), no .cold section", ".fnvnx.addr" in have and not any(".cold" in x for x in secs.split()), sorted(have))
     rows = subprocess.run(["aarch64-linux-gnu-objcopy", "-O", "binary", "--set-section-flags=.fnvnx.addr=alloc,load", "--only-section=.fnvnx.addr", o, "/dev/stdout"], capture_output=True, text=True).stdout.splitlines()
     ok = bool(rows) and all(len(r.split("\t")) == 3 and r.split("\t")[1] == r.split("\t")[2] and r.split("\t")[1].isdigit() for r in rows) and "_Z2rdv" in [r.split("\t")[0] for r in rows]
     check(".fnvnx.addr lines are <symbol>\\t<seen>\\t<routed> and name the unit's functions", ok, rows[:4])
+    ob = os.path.join(BASE, "objects.bin")
+    subprocess.run(["aarch64-linux-gnu-objcopy", "--dump-section", ".fnvnx.objects=" + ob, o, os.path.join(BASE, "objects.o")], capture_output=True, text=True)
+    objs = open(ob).read() if os.path.exists(ob) else ""
+    rows = {r.split("\t")[0]: r.split("\t")[1:] for r in objs.splitlines() if r}
+    check("OBJECTS: a global struct, a static array and a local static have a row; extern declarations have none",
+          rows.get("gs") == ["8", "4", "US@@", "1S", ""] and rows.get("_ZL3arr") == ["28", "4", "-", "A7_i", "internal"] and
+          any(v[0] == "3" and v[-1] == "internal,local" for k, v in rows.items() if k.startswith("_ZZ2lfv")) and
+          "ex" not in rows and "dg" not in rows and not any(k.startswith("*") for k in rows), (rows, objs[:400], have))
     und = subprocess.run(["aarch64-linux-gnu-nm", "-u", o], capture_output=True, text=True).stdout
     check("dispatch plugin routes an indirect call through fnvnx_dispatch", "fnvnx_dispatch" in und, und)
     rd, wr_, f2i = disasm(ra, "_Z2rdv"), disasm(ra, "_Z2wri"), disasm(ra, "_Z3f2if")
@@ -157,18 +203,16 @@ def main():
     check("double -> __int128 fails the build with an FTOI error naming both types", rwd["status"] == "red" and any(
         "FTOI" in x and "double" in x and "__int128" in x for x in rwd["failure"]["stderr"]), rwd.get("failure"))
     check("the ordinary conversions of the same root still compile", "#0x80000000" in f2i)
-    # --- ORDER-CONT: a block-ending statement without a fall-through edge needs no fence; every resumption point begins with dmb ishld
+    # --- ONE FORM: no fence anywhere; an exception landing pad and the setjmp() library call need none (ldar orders by itself)
     cont_src = (
         "#include <setjmp.h>\n"
-        "struct NF { void *jb[5]; };\nstruct C { NF *nf; int v; };\n"
-        "void lj(C *c) { if (c->nf) __builtin_longjmp((void **)c->nf->jb, 1); }\n"
-        "void thrower();\nint sj(void **b, int *p) { if (__builtin_setjmp(b)) return *p; thrower(); return 0; }\n"
+        "void thrower();\n"
         "int tc(int *p) { try { thrower(); } catch (...) { return *p; } return 0; }\n"
-        "struct cpu { int r[4]; };\nregister cpu *cc asm(\"x26\");\nint hl(int v) { register unsigned loc asm(\"x25\") = v; cc->r[1] = loc; return cc->r[1]; }\n"
-        "int sj2(jmp_buf b, int *p) { if (setjmp(b)) return *p; return 0; }\n")
+        "struct cpu { int r[4]; };\nregister cpu *cc asm(\"x26\");\nint hl(int v) { register unsigned loc asm(\"x25\") = v; cc->r[1] = loc; return cc->r[2]; }\n"
+        "int sj2(jmp_buf b, int *p) { if (setjmp(b)) return *p; thrower(); return 0; }\n")
     crepo = make_repo("cont", REC, "native", {ROOT + "/b.cc": cont_src})
     rc_, _ = build(crepo, "C")
-    check("ORDER-CONT: longjmp / setjmp / try-catch fixtures compile with no error", rc_["status"] == "green", rc_.get("failure"))
+    check("ONE FORM: setjmp / try-catch / hard-register fixtures compile with no error", rc_["status"] == "green", rc_.get("failure"))
     if rc_["status"] == "green":
         ob = next(x["object"] for x in rc_["objects"] if x["unit"] == "b.cc")
         syms = {n.split()[-1] for n in subprocess.run(["aarch64-linux-gnu-nm", ob], capture_output=True, text=True).stdout.splitlines()}
@@ -176,20 +220,12 @@ def main():
         def lines(sym):
             sym = next((n for n in syms if sym in n and n.startswith("_Z")), sym)
             return [x.split("\t", 2)[-1].strip() for x in disasm(rc_, sym, "b.cc").split("\n") if "\t" in x]
-        before_ldar = lambda ls: any("dmb\tishld" in x for x in ls) and next(i for i, x in enumerate(ls) if "dmb\tishld" in x) < max(i for i, x in enumerate(ls) if x.startswith("ldar"))  # noqa: E731
-        lj = lines("2ljP1C")
         hl = lines("2hli")
-        check("HARDREG: local register variable plain; the load/store through a register-held pointer stays ordered", not any("dmb" in x and "ishld" in x and False for x in hl) and any("stlr" in x for x in hl) and any("ldar" in x for x in hl), hl)
-        print("DISASM lj:", lj)
-        check("(i) noreturn __builtin_longjmp: no fence needed after it", any(x.startswith("br") or x.startswith("b ") or x.startswith("bl") or x.startswith("ldr") for x in lj) and lj, lj)
-        s2 = lines("2sjPPvPi")
-        check("(ii) __builtin_setjmp: dmb ishld at the receiver, before the load", before_ldar(s2), s2)
+        check("HARDREG: local register variable plain; the load/store through a register-held pointer stays ordered", any("stlr" in x for x in hl) and any("ldar" in x for x in hl), hl)
         tc = lines("2tcPi")
-        check("(iii) catch landing pad: dmb ishld before the load in the catch", before_ldar(tc), tc)
+        check("catch landing pad: ldar and no dmb", any(x.startswith("ldar") for x in tc) and not any(x.startswith("dmb") for x in tc), tc)
         s3 = lines("3sj2P")
-        i3 = [i for i, x in enumerate(s3) if "_setjmp" in x or "setjmp" in x]
-        print("DISASM sj2:", s3, "\nDISASM sj:", s2, "\nDISASM tc:", tc)
-        check("(iv) setjmp(): dmb ishld right after the call", bool(i3) and any("dmb" in x and "ishld" in x for x in s3[i3[0] + 1:i3[0] + 3]), s3)
+        check("setjmp(): a plain call, no dmb", not any(x.startswith("dmb") for x in s3), s3)
     # the plugin is a declared input of the CC stage and its flags are in the stage document
     docs = [json.load(open(p)) for p in glob.glob(os.path.join(BASE, "A", "stage-docs", "*", "*.json"))]
     cc = [d for d in docs if d["stage"] == "cc:a.cc"]
@@ -203,7 +239,7 @@ def main():
           not any(a.startswith("-fplugin") for d in pp for a in d["argv"]), [d["argv"] for d in pp])
 
     # --- (d) gate: a native root without a plugin is a red build gate; a lifted root builds without plugins
-    bad = make_repo("nogate", mut(plugins=[p for p in PLUGS if p["name"] != "fnvnx_ftoi"]), "native")
+    bad = make_repo("nogate", mut(plugins=[p for p in PLUGS if p["name"] != "fnvnx_ftoi"]), "native", target="guest")
     os.makedirs(os.path.join(BASE, "gate-out"))
     p = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "gate_build.py")], cwd=bad, env=dict(
         os.environ, GATE_OUT=os.path.join(BASE, "gate-out"), GATE_CACHE=os.path.join(BASE, "gate-cache")), capture_output=True, text=True)
@@ -221,16 +257,18 @@ def main():
     subprocess.run(["git", "-C", ext, "checkout-index", "-a", "-f", "--prefix=" + chk + "/"], check=True)
     tree = cas.ingest(chk, os.path.join(BASE, "ingest-store"))
     lrec = {"format": "fnvnx-recipe/1", "compiler": REC["compiler"], "flags": REC["flags"], "include": [], "units": "all",
-            "plugins": [dict(P["fnvnx_ftoi"], args=dict(recipe.plugin_args("lifted")["fnvnx_ftoi"]))],
+            "plugins": [dict(P["fnvnx_ftoi"])],
             "generated": [{"tool": T + "gen/lift.py", "args": [], "inputs": [], "outputs": ["gen/a.cc"]}],
-            "external": [{"name": "pack", "repo": "fnv-nx-build", "ref": "t", "commit": commit, "tree_sha256": tree, "at": "/ext/pack"}]}
+            "external": list(REC["external"]) + [{"name": "pack", "repo": "fnv-nx-build", "ref": "t", "commit": commit, "tree_sha256": tree, "at": "/ext/pack"}]}
     LSRC = SRC.replace("int f2i(float f)", "__attribute__((fnvnx_f2i)) int f2i(float f)")   # lifted C++ converts inside a helper only
-    lift = ('import os\nos.makedirs("/out/gen")\nopen("/out/gen/a.cc", "w").write(%r)\n' % LSRC)
+    lift = ('import os\nopen("/out/gen/a.cc", "w").write(%r)\n' % LSRC)
     lrepo = make_repo("lifted", lrec, {"lifted_by": T + "gen/lift.py", "pack": "pack"}, {T + "gen/lift.py": lift, ROOT + "/a.cc": None})
     check("lifted root with fnvnx_ftoi in mode lifted is valid", errs(lrepo, lrec) == [], errs(lrepo, lrec))
     check("lifted root without fnvnx_ftoi is red", any("does not load plugin fnvnx_ftoi" in x for x in errs(lrepo, dict(lrec, plugins=[]))))
-    check("lifted root with fnvnx_ftoi in mode native is red", any("arguments of a lifted root" in x for x in errs(lrepo, dict(
-        lrec, plugins=[dict(P["fnvnx_ftoi"], args=dict(recipe.PLUGIN_ARGS["fnvnx_ftoi"]))]))))
+    check("a lifted root's ftoi mode is the origin's: plugin_decls gives mode lifted", recipe.plugin_decls([P["fnvnx_ftoi"]], {"lifted_by": "x.py", "pack": "p"})[0]["args"]["mode"] == "lifted")
+    # the game's compiler is in the external cache before ARTIFACTS_URL names the fixture's pack repo (which holds no compiler): mounted by the selftest gate (FNVNX_EXTCACHE), else fetched here
+    os.environ.setdefault("FNVNX_EXTCACHE", os.path.join(BASE, "extcache"))
+    recipe.fetch_externals(list(REC["external"]), os.path.join(BASE, "ingest-store"), os.environ["FNVNX_EXTCACHE"], BASE)
     os.environ["ARTIFACTS_URL"] = ext
     rl, _ = build(lrepo, "L")
     check("lifted root builds green with only fnvnx_ftoi (lifted)", rl["status"] == "green" and [p["name"] for p in rl["plugins"]] == ["fnvnx_ftoi"], rl.get("failure"))
@@ -247,7 +285,7 @@ def main():
         return c, cas.ingest(d, os.path.join(BASE, "ingest-store"))
 
     def xrec(c, t):
-        r = mut(external=[{"name": "pack", "repo": "fnv-nx-build", "ref": "t", "commit": c, "tree_sha256": t, "at": "/ext/pack"}])
+        r = mut(external=list(REC["external"]) + [{"name": "pack", "repo": "fnv-nx-build", "ref": "t", "commit": c, "tree_sha256": t, "at": "/ext/pack"}])
         return r
 
     def kinds():
@@ -275,6 +313,60 @@ def main():
     check("lifted root with a tracked C++ unit is red", any("is not an output" in x for x in errs(tracked, lrec)), errs(tracked, lrec))
     nopack = make_repo("nopack", lrec, {"lifted_by": T + "gen/lift.py", "pack": "nope"}, {T + "gen/lift.py": lift, ROOT + "/a.cc": None})
     check("lifted root naming no external is red", any("names no external" in x for x in errs(nopack, lrec)), errs(nopack, lrec))
+    # --- the pack is a root in `uses` (its declared PACK output) instead of an external: the units are still checked against the generated steps of lifted_by
+    PR = T + "src"
+    prod = {"path": PR, "class": "tool", "target": "host", "recipe": PR + "/build.json"}
+    pfiles = {T + "gen/lift.py": lift, ROOT + "/a.cc": None, PR + "/build.json": json.dumps({"format": "fnvnx-recipe/1", "outputs": {"PACK": "pack"}}), PR + "/pack/x.txt": "x\n"}
+    urec = dict(lrec, external=list(REC["external"]), uses=[{"root": PR, "output": "PACK"}])
+    def uerrs(repo, rec):   # the `uses` recipes are read from the toy checkout
+        return recipe.check(rec, ROOT, recipe.tracked(repo), recipe.load_admit(repo), recipe.load_pin(repo), repo=repo)
+    ug = make_repo("usesgood", urec, {"lifted_by": T + "gen/lift.py", "pack": PR}, pfiles, [prod])
+    check("pack = a root in `uses`: a lifted root made by generated steps of lifted_by is valid", uerrs(ug, urec) == [], uerrs(ug, urec))
+    un = make_repo("usesnot", dict(urec, uses=[]), {"lifted_by": T + "gen/lift.py", "pack": PR}, pfiles, [prod])
+    check("pack = a root that is not in `uses`: red", any("neither an external" in x for x in uerrs(un, dict(urec, uses=[]))), uerrs(un, dict(urec, uses=[])))
+    ub = make_repo("usesbad", urec, {"lifted_by": T + "gen/lift.py", "pack": PR}, dict(pfiles, **{ROOT + "/b.cc": "int b;\n"}), [prod])
+    check("pack = a root in `uses`: a unit that no step of lifted_by made is red", any("is not an output" in x for x in uerrs(ub, urec)), uerrs(ub, urec))
+    # --- the stage form: the lifted C++ is made by a generated step of the root itself (no pack); exactly one of pack and stage
+    st = "gen:%s:0" % ROOT
+    srec = dict(lrec, external=list(REC["external"]))   # no pack: the compiler's and runtime's externals only
+    sfiles = {T + "gen/lift.py": lift, ROOT + "/a.cc": None}
+    sg = make_repo("stagegood", srec, {"lifted_by": T + "gen/lift.py", "stage": st}, sfiles)
+    check("stage form: a lifted root made by one of its own generated steps is valid", errs(sg, srec) == [], errs(sg, srec))
+    lbad = dict(srec, plugins=[dict(P["fnvnx_ftoi"], args=dict(recipe.PLUGIN_ARGS["fnvnx_ftoi"]))])
+    check("stage form and pack form give the same verdict: an entry with args is red in both",
+          any("args is fixed by recipe.py" in x for x in errs(sg, lbad)) and any("args is fixed by recipe.py" in x for x in errs(lrepo, dict(lrec, plugins=lbad["plugins"]))),
+          (errs(sg, lbad), errs(lrepo, dict(lrec, plugins=lbad["plugins"]))))
+    check("stage form: the plugin set rule is the pack form's (no ftoi: red)", any("does not load plugin fnvnx_ftoi" in x for x in errs(sg, dict(srec, plugins=[], plugin_cxx=None))))
+    both = make_repo("stageboth", lrec, {"lifted_by": T + "gen/lift.py", "pack": "pack", "stage": st}, sfiles)
+    check("both pack and stage: red", any("exactly one of pack and stage" in x for x in errs(both, lrec)), errs(both, lrec))
+    neither = make_repo("stageneither", srec, {"lifted_by": T + "gen/lift.py"}, sfiles)
+    check("neither pack nor stage: red", any("exactly one of pack and stage" in x for x in errs(neither, srec)), errs(neither, srec))
+    # --- tool-file membership is over the trees of an admitted root (admit.json trees), not the root path only
+    tt = T + "gen2tree/lift.py"
+    trec = dict(srec, generated=[dict(srec["generated"][0], tool=tt)])
+    tr = make_repo("treetool", trec, {"lifted_by": tt, "stage": st}, {tt: lift, T + "gen2/x.py": "", ROOT + "/a.cc": None},
+                   extra_roots=[{"path": T + "gen2", "class": "tool", "trees": [T + "gen2", T + "gen2tree"]}])
+    check("a tool file in a tree of an admitted tool root (not under the root path) is a valid lifted_by and generator tool", errs(tr, trec) == [], errs(tr, trec))
+    tr2 = make_repo("treeplain", trec, {"lifted_by": tt, "stage": st}, {tt: lift, ROOT + "/a.cc": None})
+    check("the same file under no root or tree is red", any("not a tracked .py of an admitted tool" in x for x in errs(tr2, trec)), errs(tr2, trec))
+    # --- header home across roots: a lifted root includes the platform's header (L5 fnvl_host.h): green iff platform is a product root of its target
+    hh = T + "platform/include/fnvl_host.h"
+    hrec = dict(srec, include=[T + "platform/include"])
+    hfiles = dict(sfiles, **{hh: "#define FNVL_HOST 1\n"})
+    for tg, want in (("guest", False), ("host", True)):
+        hr = make_repo("hh_" + tg, hrec, {"lifted_by": T + "gen/lift.py", "stage": st}, hfiles,
+                       extra_roots=[{"path": T + "platform", "class": "product", "target": "guest"}], target=tg)
+        he = [x for x in errs(hr, hrec) if "include" in x]
+        check("lifted root of target %s including platform/include (a guest product root): %s" % (tg, "red, the other target is no home" if want else "no include error"),
+              bool(he) == want and (not want or any("lies in no admitted header root and no product root of target" in x for x in he)), he)
+    for what, name in (("an index past the steps", "gen:%s:1" % ROOT), ("another root's step", "gen:%s:0" % (ROOT + "x")), ("a free name", "lift")):
+        bs = make_repo("stagebad_" + what.replace(" ", "_").replace("'", ""), srec, {"lifted_by": T + "gen/lift.py", "stage": name}, sfiles)
+        check("stage naming %s is red" % what, any("is not a generated step" in x for x in errs(bs, srec)), errs(bs, srec))
+    other = dict(srec, generated=[{"tool": T + "gen/other.py", "args": [], "inputs": [], "outputs": ["gen/a.cc"]}])
+    bo = make_repo("stageother", other, {"lifted_by": T + "gen/lift.py", "stage": st}, dict(sfiles, **{T + "gen/other.py": lift}))
+    check("stage whose step runs another tool than lifted_by is red", any("is not a generated step" in x for x in errs(bo, other)), errs(bo, other))
+    bt = make_repo("stagetool", srec, {"lifted_by": ROOT + "/lift.py", "stage": st}, {T + "gen/lift.py": lift, ROOT + "/lift.py": lift, ROOT + "/a.cc": None})
+    check("stage form: lifted_by in a non-tool root is red", any("is not a tracked .py of an admitted tool root" in x for x in errs(bt, srec)), errs(bt, srec))
     for what, tool in (("an untracked file", T + "gen/none.py"), ("a file that is not a .py", T + "gen/lift.txt"),
                        ("a file of the product root", ROOT + "/lift.py")):
         bad = make_repo("liftby_" + what.replace(" ", "_"), lrec, {"lifted_by": tool, "pack": "pack"}, {T + "gen/lift.py": lift, T + "gen/lift.txt": lift, ROOT + "/lift.py": lift, ROOT + "/a.cc": None})

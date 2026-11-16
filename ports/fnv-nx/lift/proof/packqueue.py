@@ -19,12 +19,15 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-from proof import certs_build, symform  # noqa: E402
+from proof import certs_build, model_sail, symform, x86sys  # noqa: E402
 
 
 def main(argv):
     ap = argparse.ArgumentParser(); ap.add_argument('universe'); ap.add_argument('shards', nargs='*'); ap.add_argument('--pack-commit', required=True)
-    ap.add_argument('--prover-commit', required=True); ap.add_argument('--out', required=True); ap.add_argument('--noform'); a = ap.parse_args(argv)
+    ap.add_argument('--prover-commit', required=True); ap.add_argument('--out', required=True); ap.add_argument('--noform')
+    ap.add_argument('--sail-work', required=True); ap.add_argument('--sail-ir', required=True); ap.add_argument('--isla', required=True); x86sys.add_arg(ap); a = ap.parse_args(argv)
+    xsha = x86sys.configure(a.x86sys)
+    model_sail.configure(a.sail_work, a.sail_ir, a.isla)
     pin = certs_build.pinned_model()
     fam, hdr, first = {}, [], {}
     with open(a.universe) as fh:
@@ -44,7 +47,7 @@ def main(argv):
     for f, c in fam.values(): sites[f] += c
     noform = sorted(k for k, (f, _) in fam.items() if f in ('int', 'sys') and k not in forms)
     lines = ['# fnvnx-shapequeue/1 queue_id=%s' % qid,
-             '# pack_commit=%s' % a.pack_commit, '# prover_commit=%s' % a.prover_commit, '# ir_sha256=%s' % pin,
+             '# pack_commit=%s' % a.pack_commit, '# prover_commit=%s' % a.prover_commit, '# ir_sha256=%s' % pin, '# x86sys_sha256=%s' % xsha,
              '# universe: %s' % ' '.join(h[2:] for h in hdr[:1]),
              '# universe shapes: ' + ' '.join('%s=%d' % x for x in sorted(cu.items())) + ' total=%d' % sum(cu.values()),
              '# universe instruction addresses: ' + ' '.join('%s=%d' % x for x in sorted(sites.items())) + ' total=%d' % sum(sites.values()),

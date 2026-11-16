@@ -1,7 +1,6 @@
 """Arithmetic / logic / shift / bit / multiply / divide families (see forms.py)."""
 from fnvlift.dsl import C, V, ashr, bit, concat, eq, extract, ite, lshr, msb, sext, shl, trunc, udiv, ult, urem, zext
 from proof.forms import Op, addoff, af, ea, handler, mload, pzs, rd, store_op, undef, wr
-from fnvlift import faults
 
 UNDEF_LOGIC = 'AND/OR/XOR/TEST: "The state of the AF flag is undefined."'
 UNDEF_MUL = 'MUL/IMUL: "The SF, ZF, AF, and PF flags are undefined."'
@@ -100,13 +99,11 @@ def bt(c):
         if addr is None: wr(F, d, nv)
         else: store_op(F, d, addr, nv)
 
-# tzcnt / lzcnt (F3 0F BC / BD): the declared CPU (lift/rt/cpumodel.c) has BMI1 (CPUID.07H.0:EBX[3]) and LZCNT (CPUID.80000001H:ECX[5]) clear, so by the Intel SDM TZCNT / LZCNT pages
-# ("executed as BSF / BSR") the F3 forms are BSF / BSR; sail_patches/bump/bsf_bsr_dispatch.py reads the same two bits and dispatches the model the same way.
 @handler('bsf', 'bsr', 'tzcnt', 'lzcnt')
 def bs(c):
-    m = {'tzcnt': 'bsf', 'lzcnt': 'bsr'}.get(c.m, c.m)
-    F, d, s = c.F, c.ops[0], c.ops[1]; w = d.w; a = rd(s); r = C(0, w)
-    for i in (range(w - 1, -1, -1) if m == 'bsf' else range(w)): r = ite(bit(a, i), C(i, w), r)
+    # F3 0F BC / BD on a CPU without BMI1 / ABM execute as BSF / BSR (SDM Vol 2 TZCNT, LZCNT; CPUREF clears both bits)
+    F, d, s = c.F, c.ops[0], c.ops[1]; w = d.w; a = rd(s); r = C(0, w); fwd = c.m in ('bsf', 'tzcnt')
+    for i in (range(w - 1, -1, -1) if fwd else range(w)): r = ite(bit(a, i), C(i, w), r)
     # a zero source (the pinned model defines it, L3b IR 7c097d301 / ca469d14, ACL2 bit.lisp 3ccb342c): the destination is unchanged (DEFPRIOR: the write has when = ~z), ZF = 1, and
     # CF/OF/SF/AF/PF are undefined (DEF0: 0) for EVERY source (SDM "Flags Affected" of BSF/BSR; ACL2 bit.lisp 3ccb342c 818-822 / 939-943 set them undefined unconditionally). Every width (16/32); tzcnt/lzcnt alias while CPUREF's BMI1/ABM bits are clear.
     z = eq(a, 0); F.flag('zf', z)
@@ -160,7 +157,7 @@ def div(c):
         qu, ru = udiv(an, ad), urem(an, ad); q = ite(sn ^ sd, -qu, qu); r = ite(sn, -ru, ru)
         ovf = ~eq(q, sext(trunc(q, w), W))
     else: q, r = udiv(N, D), urem(N, D); ovf = ~eq(extract(q, W - 1, w), 0)
-    F.fault(faults.BYNAME['DE']['code'], eq(D, 0) | ovf)                                  # SDM: #DE when the divisor is 0 or the quotient overflows
+    F.fault(1, eq(D, 0) | ovf)                                  # SDM: #DE when the divisor is 0 or the quotient overflows
     qd, rm = trunc(q, w), trunc(r, w)
     if w == 8: F.reg('eax', concat(extract(F.cur('eax'), 31, 16), concat(rm, qd)))
     elif w == 16: F.reg('eax', concat(extract(F.cur('eax'), 31, 16), qd)); F.reg('edx', concat(extract(F.cur('edx'), 31, 16), rm))

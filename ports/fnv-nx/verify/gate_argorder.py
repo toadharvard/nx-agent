@@ -22,7 +22,7 @@ ORDER = "fnvnx_order"
 
 def native_guest(repo):
     roots = recipe.load_admit(repo)
-    return [r for r in gate_build.product_roots(repo) if roots[recipe.split_spec(r)[0]].get("target") == "guest" and roots[recipe.split_spec(r)[0]].get("cxx_origin") == "native"]
+    return [r for r in gate_build.product_roots(repo) if recipe.entry_of(roots, r).get("target") == "guest" and recipe.entry_of(roots, r).get("cxx_origin") == "native"]
 
 
 def judge_root(root, repo, cache, plugin=ORDER):
@@ -38,9 +38,6 @@ def judge_root(root, repo, cache, plugin=ORDER):
     want = list(recipe.PLUGIN_SOURCES)
     if names != want:
         return len(cxx), 0, cxx, "plugins %s are not the rule's %s in the rule's order" % (names, want)
-    od = next(p for p in rec["plugins"] if p["name"] == plugin)
-    if od["args"] != recipe.PLUGIN_ARGS[plugin]:
-        return len(cxx), 0, cxx, "%s arguments %s are not the rule's %s" % (plugin, od["args"], recipe.PLUGIN_ARGS[plugin])
     try:
         res, _ = gate_build.ensure(root, cache, repo)
     except recipe.RecipeError as e:

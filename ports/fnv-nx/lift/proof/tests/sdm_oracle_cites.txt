@@ -1,0 +1,49 @@
+## test_stringspec
+SDM 2B:P1853 | Vol. 2B 4-564 | pdf 1853 | CountReg := (CountReg - 1);
+SDM 2B:P1853 | Vol. 2B 4-564 | pdf 1853 | Use ECX for CountReg;
+SDM 2B:P1853 | Vol. 2B 4-564 | pdf 1853 | the EIP register points to the string instruction
+SDM 2B:P1855 | Vol. 2B 4-566 | pdf 1855 | IF ZF = 0 THEN exit WHILE loop;
+SDM 2B:P1857 | Vol. 2B 4-568 | pdf 1857 | IF CountReg = 0 THEN exit WHILE loop; FI; IF ZF = 1 THEN exit WHILE loop; FI;
+SDM 2B:P1402 | Vol. 2B 4-113 | pdf 1402 | If the DF flag is 0, the (E)SI and (E)DI register are
+SDM 2B:P1403 | Vol. 2B 4-114 | pdf 1403 | if the DF flag is 1, the (E)SI and (E)DI registers are decremented.) The registers are incremented or decremented by 1 for byte operations, by 2 for word operations, or by 4 for doubleword operations.
+SDM 2B:P1967 | Vol. 2B 4-678 | pdf 1967 | DEST := AX; THEN IF DF = 0 THEN (E)DI := (E)DI + 2; ELSE (E)DI := (E)DI - 2;
+SDM 2A:P1272 | Vol. 2A 3-568 | pdf 1272 | THEN AL := SRC; (* Byte load *) IF DF = 0 THEN (E)SI := (E)SI + 1; ELSE (E)SI := (E)SI - 1;
+SDM 2A:P886 | Vol. 2A 3-182 | pdf 886 | temp := SRC1 - SRC2; SetStatusFlags(temp);
+SDM 2A:P887 | Vol. 2A 3-183 | pdf 887 | The CF, OF, SF, ZF, AF, and PF flags are set according to the temporary result of the comparison.
+SDM 2B:P1906 | Vol. 2B 4-617 | pdf 1906 | temp := AL - SRC; SetStatusFlags(temp); THEN IF DF = 0 THEN (E)DI := (E)DI + 1; ELSE (E)DI := (E)DI - 1; FI; ELSE IF (Word comparison) THEN temp := AX - SRC; SetStatusFlags(temp); IF DF = 0 THEN (E)DI := (E)DI + 2; ELSE (E)DI := (E)DI - 2; FI; FI; ELSE IF (Doubleword comparison) THEN temp := EAX - SRC;
+SDM 1:P82 | Vol. 1 3-16 | pdf 82 | Set if the result is zero; cleared otherwise.
+SDM 1:P82 | Vol. 1 3-16 | pdf 82 | Set equal to the most-significant bit of the result, which is the sign bit of a signed integer.
+SDM 1:P82 | Vol. 1 3-16 | pdf 82 | Set if the integer result is too large a positive number or too small a negative number (excluding the sign-bit) to fit in the destination operand; cleared otherwise.
+## test_forms_cmpimm
+SDM 2A:CMPPS | Vol. 2A 3-175 | pdf 879 | bits 2:0 define the type of comparison to be made (see the first 8 rows of Table 1-2). Bits 3 through 7 of the immediate are reserved.
+SDM 2A:CMPPS | Vol. 2A 3-175 | pdf 879 | Compare packed single precision floating-point values in CMPPS xmm1, xmm2/m128, imm8 xmm2/m128 and xmm1 using bits 2:0 of imm8 as a comparison predicate.
+## test_forms_ssefp and test_forms_simdclass: SIMD floating-point exceptions (Vol. 1 11.5)
+SDM 1:11.5.2.1 | Vol. 1 11-14 | pdf 286 | If the invalid operation exception is not masked, a software exception handler is invoked and the operands remain unchanged.
+SDM 1:11.5.2.1 | Vol. 1 11-14 | pdf 286 | Normally, when one or more of the source operands are QNaNs (and neither is an SNaN or in an unsupported format), an invalid-operation exception is not generated. The following instructions are exceptions to this rule: the COMISS and COMISD instructions; and the CMPPS, CMPSS, CMPPD, and CMPSD instructions (when the predicate is less than, less-than or equal, not less-than, or not less-than or equal). With these instructions, a QNaN source operand will generate an invalid-operation exception.
+SDM 1:11.5.2.1 | Vol. 1 11-14 | pdf 286 | CMPPS, CMPSS, CMPPD or CMPSD instruction with QNaN or SNaN Return a mask of all 0s (except for the predicates "not-equal," operands "unordered," "not-less-than," or "not-less-than-or-equal," which returns a mask of all 1s).
+SDM 1:11.5.2.1 | Vol. 1 11-14 | pdf 286 | COMISS or COMISD with QNaN or SNaN operand(s) Set EFLAGS values to "not comparable."
+SDM 1:11.5.2.1 | Vol. 1 11-14 | pdf 286 | Conversion to integer when the value in the source register is a Return the integer Indefinite.
+SDM 1:11.5.2.1 | Vol. 1 11-14 | pdf 286 | Divide of (0/0) or ( ∞ / ∞ ) Return the QNaN floating-point Indefinite.
+SDM 1:11.5.2.2 | Vol. 1 11-15 | pdf 287 | The RCPSS, RCPPS, RSQRTSS, and RSQRTPS instruc-tions do not signal any kind of floating-point exception.
+SDM 1:11.5.2.2 | Vol. 1 11-15 | pdf 287 | The CVTPI2PD, CVTPD2PI, CVTTPD2PI, CVTDQ2PD, CVTPD2DQ, CVTTPD2DQ, CVTSI2SD, CVTSD2SI, CVTTSD2SI, CVTPI2PS, CVTPS2PI, CVTTPS2PI, CVTSS2SI, CVTTSS2SI, CVTSI2SS, CVTDQ2PS, CVTPS2DQ, and CVTTPS2DQ conversion instructions do not signal denormal exceptions.
+SDM 1:11.5.2.2 | Vol. 1 11-15 | pdf 287 | When this flag is set, denormal source operands are automatically converted to zeros with the sign of the source operand
+SDM 1:11.5.2.3 | Vol. 1 11-15 | pdf 287 | The processor reports a divide-by-zero exception when a DIVPS, DIVSS, DIVPD or DIVSD instruction attempts to divide a finite non-zero operand by 0.
+SDM 1:11.5.2.6 | Vol. 1 11-16 | pdf 288 | The inexact-result exception (also called the precision exception) occurs if the result of an operation is not exactly representable in the destination format.
+SDM 1:4.9.2 | Vol. 1 4-24 | pdf 114 | The precedence for floating-point exceptions is as follows: 1. Invalid-operation exception, subdivided as follows: a. Stack underflow (occurs with x87 FPU only). b. Stack overflow (occurs with x87 FPU only). c. Operand of unsupported format (occurs with x87 FPU only when using the double extended precision floating-point format). d. SNaN operand. 2. QNaN operand. Though this is not an exception, the handling of a QNaN operand has precedence over lower-priority exceptions. For example, a QNaN divided by zero results in a QNaN, not a zero-divide exception. 3. Any other invalid-operation exception not mentioned above or a divide-by-zero exception. 4. Denormal-operand exception. If masked, then instruction execution continues, and a lower-priority exception can occur as well. 5. Numeric overflow and underflow exceptions; possibly in conjunction with the inexact-result exception. 6. Inexact-result exception.
+SDM 1:4.9.2 | Vol. 1 4-24 | pdf 114 | When an unmasked pre-operation exception is detected, the destination operand has not yet been updated, and appears as if the offending instruction has not been executed. When an unmasked post-operation exception is detected, the destination operand may be updated with a result, depending on the nature of the exception (except for Intel SSE/SSE2/SSE3/AVX instructions, which do not update their destination operands in such cases).
+SDM 1:4.9.1.3 | Vol. 1 4-22 | pdf 112 | The masked response for the divide-by-zero exception is to set the ZE flag and return an infinity signed with the exclusive OR of the sign of the operands. If the divide-by-zero exception is not masked, the ZE flag is set, a software exception handler is invoked, and the operands remain unaltered.
+SDM 1:4.8.4 | Vol. 1 4-18 | pdf 108 | Table 4-9. Rounding Modes and Encoding of Rounding Control (RC) Field Rounding Mode RC Field Description Setting Round to 00B Rounded result is the closest to the infinitely precise result. If two values are equally close, the nearest (even) result is the even value (that is, the one with the least-significant bit of zero). Default Round down 01B Rounded result is closest to but no greater than the infinitely precise result. (toward -∞) Round up 10B Rounded result is closest to but no less than the infinitely precise result.
+SDM 1:4.8.4.2 | Vol. 1 4-19 | pdf 109 | Here, truncation means the round toward zero mode described in Table 4-9.
+## test_forms_simdclass: conversions, comparisons, reciprocals, MXCSR, hints
+SDM 2A:CVTSI2SS | Vol. 2A 3-238 | pdf 942 | the value returned is rounded according to the rounding control bits in the MXCSR register
+SDM 2A:CVTSD2SI | Vol. 2A 3-232 | pdf 936 | the value returned is rounded according to the rounding control bits in the MXCSR register.
+SDM 2A:CVTTSD2SI | Vol. 2A 3-253 | pdf 957 | the indefinite integer value 80000000H is returned.
+SDM 2B:UCOMISS | Vol. 2B 4-735 | pdf 2024 | UNORDERED: ZF,PF,CF := 111; GREATER_THAN: ZF,PF,CF := 000; LESS_THAN: ZF,PF,CF := 001; EQUAL: ZF,PF,CF := 100; ESAC; OF, AF, SF := 0;
+SDM 2B:UCOMISS | Vol. 2B 4-735 | pdf 2024 | The UCOMISS instruction differs from the COMISS instruction in that it signals a SIMD floating-point invalid opera-tion exception (#I) only if a so
+SDM 2B:RCPSS | Vol. 2B 4-540 | pdf 1829 | The relative error for this approximation is: |Relative Error| ≤ 1.5 * 2-12
+SDM 2B:RSQRTPS | Vol. 2B 4-594 | pdf 1883 | The relative error for this approximation is: |Relative Error| ≤ 1.5 * 2-12 The RSQRTPS instruction is not affected by the rounding control bits in the MXCSR register. When a source value is a 0.0, an ∞ of the sign of the source value is returned. A denormal source value is treated as a 0.0 (of the same sign).
+SDM 2A:LDMXCSR | Vol. 2A 3-539 | pdf 1243 | #GP For an attempt to set reserved bits in MXCSR.
+SDM 2B:MOVNTPS | Vol. 2B 4-96 | pdf 1385 | The memory operand must be aligned on a 16-byte (128-bit version), 32-byte (VEX.256 encoded version) or 64-byte (EVEX.512 encoded version) boundary otherwise a general-protection exception (#GP) will be generated.
+SDM 2B:PREFETCHh | Vol. 2B 4-414 | pdf 1703 | Fetches the line of data or code (instructions' bytes) from memory that contains the byte specified with the source operand
+SDM 2B:PAUSE | Vol. 2B 4-226 | pdf 1515 | This instruction does not change the architectural state of the processor
+SDM 2A:EMMS | Vol. 2A 3-282 | pdf 986 | Sets the values of all the tags in the x87 FPU tag word to empty (all 1s).

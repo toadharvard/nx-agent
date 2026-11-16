@@ -50,6 +50,7 @@ void nx_d3d9_scissor(const NxD3D9Rect* r, NxScissor* o) {
     o->h = r->bottom > r->top ? r->bottom - r->top : 0;
 }
 
+// ASM-639 (verify/ASSUMPTIONS.json)
 #define NX_CLAMP(X, MIN, MAX) ((X) > (MIN) ? ((X) > (MAX) ? (MAX) : (X)) : (MIN))   /* Mesa's CLAMP */
 
 void nx_d3d9_translate(const NxD3D9Input* in, NxRenderState* st, NxDynamicState* dyn, uint32_t* sb) {

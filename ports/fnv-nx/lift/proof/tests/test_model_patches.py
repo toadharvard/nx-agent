@@ -1,7 +1,7 @@
 """The model patches of sail_patches/ (the pinned model patch series), each exercised on the prover itself: an encoding that exercises the patched behaviour is proved
-against the DSL by prove.prove_one on the Sail model.  Each test names the SDM section of its hunk and FAILS on the IR without that hunk (checked with SAIL_IR = the IR built from
+against the DSL by prove.prove_one on the Sail model.  Each test names the SDM section of its hunk and FAILS on the IR without that hunk (checked with FNVNX_SAIL_IR = the IR built from
 the series without it: segment_bases -> FS/GS-prefixed push / popal are FAILED(dsl) (the driver added the segment base to the stack accesses); bound -> model-gap
-'Opcode Unimplemented in x86isa!'; CS store -> model-gap ':NON-WRITABLE-SEGMENT').  Needs the proof IR of the toolchain (SAIL_IR / WORK, farm/sail_build.sh): a missing IR is an error, never a skip."""
+'Opcode Unimplemented in x86isa!'; CS store -> model-gap ':NON-WRITABLE-SEGMENT').  Needs the proof IR of the toolchain, three declared inputs of the test: FNVNX_SAIL_WORK, FNVNX_SAIL_IR, FNVNX_ISLA (no default; an unset one is a KeyError, a missing IR an error, never a skip)."""
 import argparse, os, sys, unittest
 
 def _rows():
@@ -14,6 +14,8 @@ ROWS = _rows()
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 from capstone import Cs, CS_ARCH_X86, CS_MODE_32
 from proof import forms, model_sail, prove
+
+model_sail.configure(os.environ['FNVNX_SAIL_WORK'], os.environ['FNVNX_SAIL_IR'], os.environ['FNVNX_ISLA'])   # the declared inputs of this test
 
 def run(hexbytes):
     code = bytes.fromhex(hexbytes); cs = Cs(CS_ARCH_X86, CS_MODE_32); cs.detail = True; ins = list(cs.disasm(code, prove.ADDR)); assert len(ins) == 1 and ins[0].size == len(code), hexbytes

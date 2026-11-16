@@ -2,23 +2,48 @@
 """Code universe of FalloutNV.exe: recursive descent from decomp starts, entry point, call/tail targets, reloc'd
 pointers (rule R3: EVERY relocated value into an executable section is an entry; the consumer rules below only classify bytes
 for the accounting and never exclude an entry); jump tables; R3 byte accounting of .text (codemap.py), entry-set
-comparison (reconcile.py). Output: $FNVNX_FACTS_OUT (default /home/user/l3facts)/{universe,codemap}.tsv + count-only stdout; exit 1 if any byte is unexplained."""
+comparison (reconcile.py). Output: OUTDIR/{universe,codemap}.tsv + count-only stdout; exit 1 if any byte is unexplained."""
 import os, re, sys, json, struct, bisect, capstone
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))      # the tool root: a tool imports its siblings from its own root (the generated stages run it under python3 -I, which has no script directory on the path)
 from types import SimpleNamespace
-import ehtables, codemap, reconcile, pemod, jtab as JT
+import ehtables, codemap, reconcile, pemod, residue, jtab as JT
 from array import array
 from collections import Counter, deque
 from capstone import x86 as X
 import cli
-USAGE = 'usage: universe.py [--module NAME]   code universe of the exe (FNVNX_EXE) or of the module NAME (a name or file of modules.tsv); env FNVNX_FACTS_OUT, FNVNX_MODULES, FNVNX_MODDIRS'
-if __name__ == '__main__': cli.parse(USAGE, sys.argv[1:], (0, 0), {'--module': True})
-ARGV = sys.argv[1:]; MOD = ARGV[ARGV.index('--module') + 1] if '--module' in ARGV else None; STRICT = MOD is not None   # module mode: pointers are code/data only on evidence
-if STRICT: import modlift; sys.exit(modlift.run(MOD))      # module mode: separate engine (every relocated pointer into executable bytes is an entry)
-EXE = MOD or os.environ.get('FNVNX_EXE', '/home/user/game/FalloutNV.exe')
-FUNCS = os.environ.get('FNVNX_FUNCS', None if STRICT else '/home/user/l3facts/funcs.tsv')
-NAME = os.path.splitext(os.path.basename(MOD))[0].lower() if STRICT else ''
-OUTD = os.environ.get('FNVNX_FACTS_OUT', '/home/user/l3facts') + ('/' + NAME if STRICT else ''); OUT = OUTD + '/universe.tsv'; os.makedirs(OUTD, exist_ok=True)
+USAGE = '''usage: universe.py --out OUTDIR (--exe FILE --funcs FILE [--refused FILE] | --module NAME --modules modules.tsv --moddirs DIR[:DIR...] --lib DIR) --keys keys.tsv [--theirs DIR]
+  code universe of the exe (--exe, with the decomp function starts --funcs) or of the module NAME (a name or file of modules.tsv; the module table and the directories
+  that hold the module files are declared inputs). --keys: the import conventions (keys.tsv). --theirs (optional): with --exe, the directory that holds
+  L1's facts.pkl and eh.pkl, for the entry-set comparison (reconcile.py). --refused FILE: one round of the exe's reloc-consistency fixed point (the refusals of the earlier rounds); without it the exe run drives
+  the rounds itself. Every path is an explicit argument: no environment variable, no default.'''
+_OPTS = {'--out': True, '--exe': True, '--funcs': True, '--module': True, '--modules': True, '--moddirs': True, '--keys': True, '--theirs': True, '--refused': True, '--lib': True}
+if __name__ == '__main__': _POS, _O = cli.parse(USAGE, sys.argv[1:], (0, 0), _OPTS)
+else: _O = {}
+def _need(*ks):
+    miss = [k for k in ks if k not in _O]
+    if miss: sys.exit('universe.py: missing %s\n\n%s' % (' '.join(miss), USAGE))
+MOD = _O.get('--module'); STRICT = MOD is not None   # module mode: pointers are code/data only on evidence
+_need('--out', '--keys'); import ehflow; ehflow.configure_keys(_O['--keys'])
+if STRICT:      # separate engine (every relocated pointer into executable bytes is an entry)
+    _need('--modules', '--moddirs', '--lib'); sys.path.insert(0, _O['--lib'])      # --lib: the directory that holds the package fnvlift (the lifter's PE loader and decoder); a stage mounts it as an input
+    import modlift; modlift.run(MOD, SimpleNamespace(modules=_O['--modules'], moddirs=_O['--moddirs'].split(':'), facts_out=_O['--out'])); sys.exit(0)      # modlift.run raises on failure; its verdict is in the gate JSONs
+_need('--exe', '--funcs')
+EXE = _O['--exe']; FUNCS = _O['--funcs']; NAME = ''
+OUTD = _O['--out']; OUT = OUTD + '/universe.tsv'; os.makedirs(OUTD, exist_ok=True)
+if '--refused' not in _O:       # driver: reloc-consistency refusals to their fixed point (each round is a whole run; R_{k+1} = R_k + the pointer-only entries with a misfit; refusals only shrink the flow, so R grows monotonically)
+    import subprocess; _rf = OUTD + '/refused.tsv'; _R = set()
+    _k = -1
+    while True:      # terminates: R only grows (R_{k+1} = R_k + _nx, and the loop ends when _nx adds nothing) and the pointer-only entries are finite; there is no round cap
+        _k += 1
+        open(_rf, 'w').write(''.join('%08x\n' % a for a in sorted(_R)))
+        _p = subprocess.run([sys.executable, '-I', os.path.abspath(__file__)] + sys.argv[1:] + ['--refused', _rf], stdout=subprocess.PIPE, text=True)      # the round's stderr streams to this stage's stderr as it happens
+        if _p.returncode:      # a failed round: its output and the reason go to stderr (a signal kill, e.g. the out-of-memory killer, has a negative returncode and no output of its own)
+            sys.stderr.write(_p.stdout); sys.stderr.write('universe.py: reloc-consistency round %d: the round process %s\n' % (_k, 'was killed by signal %d' % -_p.returncode if _p.returncode < 0 else 'exited with status %d' % _p.returncode)); sys.exit('universe.py: stopped')
+        _nx = set(int(l.split()[0], 16) for l in open(OUTD + '/refused_next.tsv') if l.strip()) if os.path.exists(OUTD + '/refused_next.tsv') else set()
+        if _nx <= _R:
+            sys.stdout.write(_p.stdout); print('reloc-consistency fixed point after %d rounds: %d entries refused' % (_k + 1, len(_R)))
+            open(_rf, 'w').write('# columns: entry; unproven pointer-only entries refused by reloc-consistency (the bytes go to data, the relocated pointer is a data fact)\n' + ''.join('%08x\n' % a for a in sorted(_R))); sys.exit(0)      # a failed round was reported above
+        _R |= _nx
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True
 M = pemod.load(EXE); d, pe, base, secs, loc, off, sec, u32, dirent = M.d, M.pe, M.base, M.secs, M.loc, M.off, M.sec, M.u32, M.dirent
 RL = pemod.relocs(M); relocs = sorted(RL or []); rset = set(relocs); imports = pemod.imports(M)
@@ -27,7 +52,8 @@ V = bytearray(TN); tx = bytearray(b'\xcc' * TN)                   # V: byte belo
 for n, a, z, ro in M.xs: V[a - T0:a - T0 + z] = b'\1' * z; tx[a - T0:a - T0 + z] = d[ro:ro + z]
 text = bytes(tx)
 def intext(a): return T0 <= a < T1 and (SINGLE or V[a - T0] == 1)
-rvals = [(r, u32(r)) for r in relocs]; rvals = [(r, v) for r, v in rvals if intext(v)]
+REFD = set(int(l.split()[0], 16) for l in open(_O['--refused']) if l.strip() and l[0] != '#') if os.path.exists(_O['--refused']) else set()      # reloc-consistency (residue.misfit_next): pointer-only entries refused in an earlier round, their values are data facts
+rvals = [(r, u32(r)) for r in relocs]; rvals = [(r, v) for r, v in rvals if intext(v) and v not in REFD]
 funcs = []
 for ln in (open(FUNCS) if FUNCS and os.path.exists(FUNCS) else ()):
     if ln.strip() and not ln.startswith('#'):
@@ -348,7 +374,10 @@ for v, ss in psites.items():
 # `ud`), they are not a build error. Entries made here are not committed to insns/cov: their bodies are re-readings of bytes that byte accounting (codemap.py) has
 # already classified exactly once, so accounting stays total; an address inside a decomp function gets parent= like every inner entry.
 scx = {}; udset = set(); r3call = Counter(); r3site = {}
-for r, v in rvals: r3site.setdefault(v, r)
+# R3 refined (residue.disp_only): a relocation that is only the displacement of a non-lea memory operand of committed flow is a data address, not a value; the value sites alone make entries
+vals = [(r, v) for r, v in rvals if not residue.disp_only(md, text, T0, cov, r)]; U.vals = vals
+print('R3 refinement: relocated in-span sites %d, displacement-only (not entry sites) %d, value sites %d' % (len(rvals), len(rvals) - len(vals), len(vals)))
+for r, v in vals: r3site.setdefault(v, r)
 for v in sorted(r3site):
     if v in entries: continue
     f = indec(v); entries[v] = None; kinds[v] = {'ptr'}; esite[v] = r3site[v]; r3set.add(v)
@@ -373,11 +402,18 @@ def uni(I):
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fnvlift import Image as LImage; from fnvlift import core as LCore
 limg = LImage(EXE); cl_cache = {}; cl_ft = set(); cl_out = Counter(); cl_outex = {}; cl_outt = {}; cl_outsrc = Counter(); cl_add = Counter(); cl_jx = set(); cl_rounds = 0
+def span_of(a):
+    """the universe.tsv extent of entry a: residue.span over the instructions it reaches (R3 bodies: scx, committed code: extent_insns)"""
+    I = scx.get(a)
+    return residue.span(a, ((x, I[x][0]) for x in I) if I is not None else ((x, insns[x][0]) for x in extent_insns(a)))
 def cl_range(a):
     p = parent.get(a)
     if p is not None and p in entries: return p, p + fsize[p]
-    I = scx.get(a)
-    return a, a + (sum(y - x for x, y in uni(I)) if I is not None else sum(insns[x][0] for x in extent_insns(a)))
+    return a, a + span_of(a)
+def lift_detail(a, kids):        # the lifter's own flow of one entry with sizes, call targets and fall-through flags (only for the rare entry whose flow leaves its ranges)
+    lo, hi = cl_range(a); own = tuple(x for x in kids.get(lo, ()) if lo <= x < hi)
+    ins, tabs, tk, bad = LCore.explore(limg, lo, hi, limg.bytes(lo, hi - lo + 16), a, own if a == lo else (), hi)
+    return {x: (g.size, g.operands[0].imm & 0xffffffff if g.mnemonic.split(' ')[-1] == 'call' and g.operands[0].type == X.X86_OP_IMM else None, g.mnemonic.split(' ')[-1] not in ('jmp', 'ret', 'retf', 'iret', 'iretd', 'hlt', 'ud2')) for x, g in ins.items()}
 def cl_targets(a, kids):
     lo, hi = cl_range(a); own = tuple(x for x in kids.get(lo, ()) if lo <= x < hi)
     key = (lo, hi, a, own)
@@ -392,14 +428,14 @@ def cl_targets(a, kids):
             elif m == 'jecxz' and not lo <= (o[0].imm & 0xffffffff) < hi: jx.add(x); ts.add(o[0].imm & 0xffffffff)      # jecxz leaving the range: a direct jump out (f_sys, f_flow.jump_out)
             if m not in ('jmp', 'ret', 'retf', 'hlt', 'ud2') and not (m == 'int3' and x + g.size >= hi) and x + g.size not in ins and x + g.size not in bad:       # explore's own stop rule: a fall-out is a control transfer to the successor (f_flow.jump_out)
                 ts.add(x + g.size); cl_ft.add((a, x + g.size))
-        cl_cache[key] = (cs, ts, jx)
+        cl_cache[key] = (cs, ts, jx, residue.body_facts(ins, tabs, None, intext, imports), frozenset(ins))
     return cl_cache[key]
 while True:
     kids = {}
     for x, q in parent.items(): kids.setdefault(q, []).append(x)
     miss = {}
     for a in sorted(entries):
-        cs, ts, jx = cl_targets(a, kids); cl_jx |= {(a, x) for x in jx}
+        cs, ts, jx, _rf, _ia = cl_targets(a, kids); cl_jx |= {(a, x) for x in jx}
         for kd, T in (('call', cs), ('tail', ts)):
             for t in T:
                 if t in entries: continue
@@ -413,6 +449,22 @@ while True:
         if cov[t - T0] == 1: continue
         ok, out, refs, tabs = walk(t, f[0] if f else T0, f[0] + f[1] if f else T1, bool(f), True); scx[t] = out
         if not ok: udset.add(t)
+# ---- reloc-consistency, exe class (weak: an exe without DYNAMIC_BASE is never rebased): an entry that only a relocated pointer names (kinds == {ptr}, no flow reaches it, no decomp row) whose decoding has a relocation-misfit
+# is refused (round input of the next run; the fixed point is reached by the driver below); a misfit in the decoding of any other entry is a red contradiction, never a refusal.
+def misfit_addrs(xs):
+    n = []
+    for x in xs:
+        g = next(md.disasm(text[x - T0:x - T0 + 15], x, 1), None)
+        if g is not None and reloc_conflict(x, g): n.append(x)
+    return n
+REFN = {}; PMFX = {}
+for a in sorted(entries):
+    xs_ = sorted(scx[a]) if a in scx else extent_insns(a); m_ = misfit_addrs(xs_)
+    if not m_: continue
+    if a in fsize or a in parent or kinds[a] - {'ptr'}: PMFX[a] = m_
+    else: REFN[a] = m_
+open(OUTD + '/refused_next.tsv', 'w').write(''.join('%08x\t%d\treloc-misfit\n' % (a, len(m)) for a, m in sorted(REFN.items())))
+print('reloc-consistency (exe, weak): refused-so-far %d, newly refusable pointer-only entries %d, entries other than pointer-only with a misfit instruction %d (%d instructions)' % (len(REFD), len(REFN), len(PMFX), sum(len(m) for m in PMFX.values())))
 rows = []; rgs = []; rbad = rdec = eclo = 0; kc = Counter(); kany = Counter(); fe = Counter(); extsum = 0
 for a in sorted(entries):
     pk = next(k for k in PRI if k in kinds[a]); isd = a in fsize; I = scx.get(a, insns); xs = sorted(I) if a in scx else extent_insns(a); ft = 0
@@ -422,12 +474,20 @@ for a in sorted(entries):
     if not isd and a not in parent: extsum += ex
     fts = [nm for i, nm in enumerate(FEATS) if ft >> i & 1]; fe.update((nm, isd) for nm in fts)
     fl = sorted(kinds[a] - {pk}) + fts + (['baddecode'] if a in bad_entries else []) + (['ud'] if a in udset else []) + (['parent=%08x' % parent[a]] if a in parent else [])
-    rows.append('%08x\t%s\t%d\t%s' % (a, pk, fsize.get(a, ex), ','.join(fl) or '-'))
+    rows.append('%08x\t%s\t%d\t%s' % (a, pk, fsize.get(a, span_of(a)), ','.join(fl) or '-'))
     if not isd and a not in scx: ss_ = set(xs); eclo += sum(1 for x in xs for t in insns[x][4] if intext(t) and t not in entries and t not in ss_)       # closure check (report only)
     rg = uni(I) if a in scx else codemap.ranges(xs, lambda x: insns[x][0]); rgs.append('%08x\t%s' % (a, codemap.rng_str(rg))); s_ = sum(y - x for x, y in rg); rbad += (s_ != ex) if not isd else (s_ > fsize[a] + 15); rdec += isd
+kids = {}
+for x, q in parent.items(): kids.setdefault(q, []).append(x)
+RI = {}; LOX = {}; LOT = {}; NRS = {a for a, _ in NRR}                                      # retn.tsv: how each entry returns (residue.retn_rows)
+for a in sorted(entries):
+    cs_, ts_, jx_, rf_, ia_ = cl_targets(a, kids); _xs = scx[a] if a in scx else extent_insns(a); LOX[a], _, LOT[a] = (0, [], 0) if ia_ <= set(_xs) else residue.lifter_outside(lift_detail(a, kids), _xs, NRS)
+    RI[a] = dict(rets=rf_['rets'], far=rf_['far'], open=rf_['open'], tails={t for t in ts_ if t in entries}, outside=any(t not in entries for t in ts_), noreturn=a in NRS)
 os.makedirs(os.path.dirname(OUT), exist_ok=True); HD = '# base=0x%08x: absolute VAs at the preferred image base (not RVAs)' % base
-open(OUT, 'w').write(HD + '; columns: entry, kind, extent, flags; extent is the SUM of the bytes the entry reaches (not a contiguous span; decomp rows: the declared function size), see ranges.tsv\n' + '\n'.join(rows) + '\n')
+open(OUT, 'w').write(HD + '; columns: entry, kind, extent, flags; extent is the SPAN [entry, entry + extent) that holds every instruction the entry reaches at or above it (the range the lifter takes; decomp rows: the declared function size; the bytes reached: ranges.tsv)\n' + '\n'.join(rows) + '\n')
 open(OUTD + '/ranges.tsv', 'w').write(HD + '; columns: entry, half-open ranges start-end (hex) of the instruction bytes reached\n' + '\n'.join(rgs) + '\n')
+rc = residue.write_retn(OUTD, HD, residue.retn_rows(RI)); print('retn.tsv %d rows: %s' % (len(RI), dict(sorted(rc.items()))))
+print('invariant ranges: instructions the lifter reaches outside the entry ranges, other than the dead tail after a call to a never-returning entry: %d (entries %d of %d); dead tails after NORETURN calls: %d instructions in %d entries' % (sum(LOX.values()), sum(1 for v in LOX.values() if v), len(LOX), sum(LOT.values()), sum(1 for v in LOT.values() if v)))
 open(OUTD + '/noreturn.tsv', 'w').write(HD + '; columns: entry, reason\n' + ''.join('%08x\t%s\n' % kv for kv in NRR))
 print('R3 pointer entries: %d new (%d insn-start of decoded code, %d bodies re-read from their first byte, %d of them hit undecodable bytes #UD, %d inside decomp functions); direct targets of those bodies: %s' % (
     len(r3set), len(r3set) - len(scx), len(scx), len(udset), sum(1 for a in r3set if a in parent), dict(sorted(r3call.items()))))
@@ -437,15 +497,24 @@ print('closure under direct targets: %d rounds, entries added %s; targets outsid
 print('fall-through successors of lifter bodies (entry, successor) %d, distinct successors %d' % (len(cl_ft), len({t for e, t in cl_ft})))
 print('ranges.tsv %d rows, noreturn.tsv %d rows; range-sum vs extent mismatches %d (non-decomp rows: equality; %d decomp rows: sum <= declared size)' % (len(rgs), len(NRR), rbad, rdec))
 def gate(green, TNu, why):
+    import pcsrc; pc_red, pc_res = pcsrc.run_facts(OUTD, NAME if STRICT else 'exe', text, T0, u32, rset); print('gate %s red=%d sources=%d rows=%d' % (pc_res['name'], pc_red, pc_res['sources'], pc_res['rows']))
     open(OUTD + '/gate_codemap.json', 'w').write(json.dumps({'schema': 'fnvnx-gate/1', 'name': 'l3.codemap' + ('.' + NAME if STRICT else ''), 'status': 'green' if green else 'red', 'universe': TNu, 'certified': TNu - unexpl, 'uncertified': unexpl}) + '\n')
     print('gate l3.codemap%s: %s (certified %d of %d, uncertified %d, rejected pointers %d, bad-decode entries %d)%s' % ('.' + NAME if STRICT else '', 'green' if green else 'red', TNu - unexpl, TNu, unexpl, len(rejects), len(bad_entries), ''.join('; RED: ' + w for w in why)))
-    sys.exit(0 if green else 1)
+    bad = residue.entries_on_data(OUTD); print('invariant entries on class-3 data bytes: %d%s' % (len(bad), ' RED: ' + ' '.join('%08x' % a for a in bad[:8]) if bad else ''))
+    sys.exit(0)      # the facts are written; their verdict is gate_codemap.json (status, uncertified, entries_on_data) and gate_pcsrc.json, judged by the gate that reads them, not by this producer's exit code
 CL, unexpl, cls = codemap.finish(U); cc = Counter(cls)
 if not STRICT: print('noreturn: %d entries never return (seeds: thrower %s); %d instructions / %d bytes (decomp %d, non-decomp %d) only flowed after such calls and are no longer reached; entry set unchanged (%d)' % (NRN, 'yes' if eh.thrower in entries else 'no', NRI, NRB[0], NRB[1], NRB[0] - NRB[1], len(entries)))
 if not STRICT:
     midf = len({s for t, s in midsrc if s is not None and indec(s)}); nonde = [a for a in entries if a not in fsize]
     exo = sorted(a for a, v in insns.items() if v[1] in EXOTIC)
     print('\n'.join(eh.finish(entries)))
+    import dic
+    DR = dic.jtab_ranges(OUTD); dic.write(OUTD, HD, DR)          # data in code: the ranges a proven consumer reads (tools/dic.py)
+    DW, DWd = dic.nonoperand_words(md, text, T0, relocs, {(a_, (scx[e_] if e_ in scx else insns)[a_][0]) for e_ in entries for a_ in (sorted(scx[e_]) if e_ in scx else extent_insns(e_))}, DR)
+    print('data_in_code: %d ranges (jtab %d), %d bytes; relocated words overlapping a reached instruction without being its operand: %d (of them inside a data range %d)' % (len(DR), len(DR), sum(b_ - a_ for a_, b_, k, d in DR), len(DW), len(DWd)))
+    _INS = {(a_, (scx[e_] if e_ in scx else insns)[a_][0]) for e_ in entries for a_ in (sorted(scx[e_]) if e_ in scx else extent_insns(e_))}
+    PS = dic.protect_sites(md, text, T0, _INS, imports); open(OUTD + '/protect_sites.tsv', 'w').write(HD + '; columns: site, api, via; call sites of VirtualProtect/WriteProcessMemory/FlushInstructionCache in reached code: OPEN until the points-to (ASM-234)\n' + ''.join('%08x\t%s\t%s\n' % x for x in PS))
+    print('protect sites (ASM-234, open until the points-to): %d' % len(PS))
     print('text %d bytes (%08x-%08x), decomp funcs %d, relocs %d; mid-decomp jumps %d, calls %d' % (TN, T0, T1, len(funcs), len(relocs), midf, len(midcall)))
     print('\n'.join(CL))
     print('entries %d; per primary kind: %s' % (len(entries), dict(kc)))
@@ -458,12 +527,11 @@ if not STRICT:
         e = next((e for e in reversed(OWN[max(0, bisect.bisect_right(OWN, x) - 40):bisect.bisect_right(OWN, x)]) if x in set(extent_insns(e))), None)
         print('  %08x %s in entry %s kind %s via site@%s' % (x, insns[x][1], '%08x' % e if e else '-', next((k for k in PRI if e and k in kinds[e]), '-'), '%08x' % esite[e] if e in esite and esite[e] else '-'))
     print('\n'.join(codemap.consumers(U, eh)))
-    print('\n'.join(reconcile.run(U)))
+    if '--theirs' in _O: print('\n'.join(reconcile.run(U, _O['--theirs'])))      # a comparison report with L1's facts: not an input of any fact
     pts = sorted({v for r, v in rvals}); ne = [v for v in pts if v not in entries]; dfr = [(x[1], x[1] + x[3]) for x in datarec]
     print('relocated pointer targets in .text: %d, entries %d, NOT entries %d: %s' % (len(pts), len(pts) - len(ne), len(ne), dict(sorted(Counter(
         'didataformat-blob' if any(x <= v < y for x, y in dfr) else ('data-by-reloc@object-start' if not tbl[v - T0 - 1] else 'data-by-reloc@object-interior') if tbl[v - T0] else 'inside-other-insn' if cov[v - T0] == 2 else 'insn-start-not-entry' if cov[v - T0] == 1 else 'unreached' for v in ne).items()))))
-    if '--mnemonics' in ARGV: open(OUTD + '/exe_mnemonics.tsv', 'w').write(''.join('%s\t%d\n' % kv for kv in sorted(Counter(v[1] for v in insns.values()).items())))
-    gate(not unexpl and not bad_entries and not rejects and not rbad, TN, [])
+    gate(not unexpl and not bad_entries and not rejects and not rbad and not sum(LOX.values()) and not PMFX and not DW, TN, [])
 # ---- module report
 midf = 0; why = []; TNu = TN - cc[7]; exs = [n for n, a, z, ro in M.xs]
 PL, nc = codemap.ptrclass(U)

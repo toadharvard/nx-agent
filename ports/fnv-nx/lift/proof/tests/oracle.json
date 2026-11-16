@@ -13,6 +13,28 @@
     "ports/fnv-nx/lift/proof/sail_patches/bump/bit_bsf_bsr.sail"
    ]
   },
+  "test_census.py": {
+   "references": [
+    {
+     "anchor": "L3-L4",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/tools/CODEMAP.md"
+    },
+    {
+     "anchor": "# data-reloc",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/tools/CODEMAP.md"
+    },
+    {
+     "anchor": "# padding",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/tools/CODEMAP.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/census.py"
+   ]
+  },
   "test_certs_build.py": {
    "references": [
     {
@@ -40,13 +62,31 @@
   "test_declared_gen.py": {
    "references": [
     {
-     "anchor": "L26-L61",
+     "anchor": "L31-L31",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/rt/cpumodel.c"
+    },
+    {
+     "anchor": "L51-L51",
      "kind": "spec",
      "path": "ports/fnv-nx/lift/rt/cpumodel.c"
     }
    ],
    "subject": [
     "ports/fnv-nx/lift/proof/declared_gen.py"
+   ]
+  },
+  "test_defectspec.py": {
+   "references": [
+    {
+     "anchor": "L158-L158",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/CERTS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/defects.py",
+    "ports/fnv-nx/lift/proof/defectspec.py"
    ]
   },
   "test_dsl_int_classes.py": {
@@ -78,6 +118,18 @@
    ],
    "subject": [
     "ports/fnv-nx/lift/proof/lift_dsl.py"
+   ]
+  },
+  "test_dsl_xsimd.py": {
+   "references": [
+    {
+     "anchor": "## Classes of run-time failure and their gates",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/VERDICT.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/fnvlift/dsl.py"
    ]
   },
   "test_ehoracle.py": {
@@ -118,6 +170,105 @@
    ],
    "subject": [
     "ports/fnv-nx/lift/proof/formgate.py"
+   ]
+  },
+  "test_forms_cmpimm.py": {
+   "references": [
+    {
+     "anchor": "L17-L19",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/tests/sdm_oracle_cites.txt"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/symform.py",
+    "ports/fnv-nx/lift/proof/shape.py"
+   ]
+  },
+  "test_forms_far.py": {
+   "references": [
+    {
+     "anchor": "L2-L16",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/sysspec_far.py"
+    },
+    {
+     "kind": "contract",
+     "path": "ports/fnv-nx/platform/declared/x86sys.json"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/forms.py",
+    "ports/fnv-nx/lift/proof/forms_flow.py"
+   ]
+  },
+  "test_forms_immsel.py": {
+   "references": [
+    {
+     "anchor": "L159-L159",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/CERTS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/forms_simd.py",
+    "ports/fnv-nx/lift/proof/symform.py"
+   ]
+  },
+  "test_forms_simdclass.py": {
+   "references": [
+    {
+     "anchor": "L20-L49",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/tests/sdm_oracle_cites.txt"
+    },
+    {
+     "kind": "model",
+     "path": "ports/fnv-nx/lift/rt/rcptab.c"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/forms_ssefp.py",
+    "ports/fnv-nx/lift/proof/ssefp.py"
+   ]
+  },
+  "test_forms_ssefp.py": {
+   "references": [
+    {
+     "anchor": "L20-L36",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/tests/sdm_oracle_cites.txt"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/forms_ssefp.py",
+    "ports/fnv-nx/lift/proof/ssefp.py"
+   ]
+  },
+  "test_gate_fpexact.py": {
+   "references": [
+    {
+     "anchor": "## Classes of run-time failure and their gates",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/VERDICT.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/gate_fpexact.py",
+    "ports/fnv-nx/verify/recipe.py",
+    "ports/fnv-nx/verify/unitstage.py"
+   ]
+  },
+  "test_generated_readers.py": {
+   "references": [
+    {
+     "anchor": "L193-L196",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/rt/build.json"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/genout.py"
    ]
   },
   "test_imageset.py": {
@@ -257,6 +408,18 @@
     "ports/fnv-nx/lift/proof/shape.py"
    ]
   },
+  "test_shardok.py": {
+   "references": [
+    {
+     "anchor": "L120-L120",
+     "kind": "spec",
+     "path": "ports/fnv-nx/farm/farm_shapeprove.sh"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/shardok.py"
+   ]
+  },
   "test_simdcheck.py": {
    "references": [
     {
@@ -288,6 +451,18 @@
     "ports/fnv-nx/lift/proof/ssefp.py"
    ]
   },
+  "test_stringspec.py": {
+   "references": [
+    {
+     "anchor": "L1-L16",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/tests/sdm_oracle_cites.txt"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/stringspec.py"
+   ]
+  },
   "test_sysspec.py": {
    "references": [
     {
@@ -299,6 +474,18 @@
    "subject": [
     "ports/fnv-nx/lift/proof/sysspec.py",
     "ports/fnv-nx/lift/proof/x86sys.py"
+   ]
+  },
+  "test_treeid.py": {
+   "references": [
+    {
+     "anchor": "L160-L160",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/CERTS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/treeid.py"
    ]
   },
   "test_vendormap.py": {

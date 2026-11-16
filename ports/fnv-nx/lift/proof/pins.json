@@ -12,9 +12,9 @@
   {
    "path": "ports/fnv-nx/platform/declared/x86sys.json",
    "owner": "L5",
-   "blob": "146642e5b99bce67bb8e84cac6c513512879c525",
-   "sha256": "4ebe365ed3c9e33bdbf55d15aaeff9d6f7845299f7cf85dd62de2ee72384e265",
-   "commit": "1625dfd84005536f13b67c731f985efaaa18e529"
+   "blob": "1a26cb0d4853b32f96e73f2e6515c6175c1099f4",
+   "sha256": "55964ce78657896733a046bb19982c9af922de1056bea5e8a4cd7ad87095ad2e",
+   "commit": "ad3af10c52a8cb97a675b204e625fa1860e03a07"
   }
  ],
  "external": [
@@ -23,10 +23,20 @@
    "owner": "L3b",
    "repo": "fnv-nx-build",
    "ref": "tools/amd-apm",
-   "commit": "aa490c484c899d0097689845af971a2ff6712394",
+   "commit": "bd63d66d5cc81cd2f1beb7080747f5d06bc044c6",
    "file": "amd64-apm-vol3.pdf",
-   "sha256": "cc08e3b58bb6d5026aa8737d41ddf35ef687adfaea5aeb1eed77e2e68f56c6e3",
-   "edition": "AMD64 Architecture Programmer's Manual Vol. 3, publication 24594 rev 3.14, September 2007"
+   "sha256": "b598514b19f204d973040d9867a7ffc48c949009a8b3dc86b20c9188e721ee45",
+   "edition": "AMD64 Architecture Programmer's Manual Vol. 3, publication 24594 rev 3.39, October 2026"
+  },
+  {
+   "name": "amd-apm-vol5",
+   "owner": "L3b",
+   "repo": "fnv-nx-build",
+   "ref": "tools/amd-apm",
+   "commit": "bd63d66d5cc81cd2f1beb7080747f5d06bc044c6",
+   "file": "amd64-apm-vol5.pdf",
+   "sha256": "8c8c63c5e285c50faac2e7d474cf5046f5fcccb54673f464f57a8cb171ef0767",
+   "edition": "AMD64 Architecture Programmer's Manual Vol. 5, publication 26569 rev 3.16, November 2021"
   }
  ]
 }

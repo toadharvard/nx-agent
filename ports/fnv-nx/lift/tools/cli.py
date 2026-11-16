@@ -9,7 +9,7 @@ import sys
 def parse(usage, argv, npos=(0, 0), opts=None):
     opts = opts or {}; pos = []; got = {}; k = 0
     def bad(msg):
-        sys.stderr.write('%s\n\n%s\n' % (msg, usage)); sys.exit(2)
+        sys.exit('%s\n\n%s' % (msg, usage))
     if any(a in ('-h', '--help') for a in argv):
         sys.stdout.write(usage + '\n'); sys.exit(0)
     while k < len(argv):

@@ -14,6 +14,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PROOF = os.path.join(HERE, '..')
 LIFT = os.path.join(PROOF, '..')
 sys.path.insert(0, HERE)
+import declared_x86sys; declared_x86sys.configure()
 sys.path.insert(0, LIFT)
 sys.path.insert(0, os.path.join(LIFT, "..", "verify"))     # cas, recipe: the trunk loader the gate itself uses (-I drops PYTHONPATH)
 import fakeext

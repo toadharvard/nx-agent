@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Import entries: one guest entry per row of the platform's bridge table (L5: fnv-nx-build l5-platform/manifest bridge.tsv).
-    impgen.py --bridge bridge.tsv --out DIR [--need iat.tsv ...] [--l3 rt/bridge_l3.tsv]
+    impgen.py --bridge bridge.tsv --out DIR [--imported IMPORTED_TSV] [--l3 rt/bridge_l3.tsv]
 Writes DIR/imp.cpp (compile with the lifted-code flags, -I rt), DIR/imp_entries.tsv (key, symbol, dll, name, bind) and DIR/imp_blocked.tsv
 (key, dll, name, reason). Deterministic; no clocks.
 
@@ -20,8 +20,8 @@ Rule (the contract agreed with L1 CONTRACT and L5 PLATFORM):
 - conv vararg (cdecl, the caller pops): `args` lists the fixed slots only; the native body is called with them followed by the guest address
   of the first stack word after them (the x86 argument words: int/pointer 1 word, 64-bit and double 2 words, low word first).
 - no entry can be generated for: bind none (the platform has no body), bind data (the slot holds an object address: the
-  loader's business, no entry). They are listed in imp_blocked.tsv; if a row listed there is named by a --need file (column layout of L1's
-  iat.tsv: slot, dll, name, ...), the generator fails: a build that needs the row must fail."""
+  loader's business, no entry). They are listed in imp_blocked.tsv; if a row listed there is named by a --need file (column layout of the loader's
+  IMPORTED_TSV: key, dll, name, ...), the generator fails: a build that needs the row must fail."""
 import argparse, collections, os, sys
 CT = {'i': 'u32', 'q': 'u64', 'f': 'float', 'd': 'double', 'v': 'void'}
 RD = {'i': ('M32', 4), 'q': ('M64', 8), 'f': ('MF32', 4), 'd': ('MF64', 8)}
@@ -71,7 +71,7 @@ def thunk(r, target):
             '  fnvl_native_out(&nf); REGS(); %s c->ra=M32(sp); esp=sp+%du; }\n') % (r['key'], r['dll'], r['name'], conv, ret, args, do, put, pop)
 
 
-def generate(bridge, out, need=(), l3=None, rt_defined=None):
+def generate(bridge, out, need=(), l3=None, rt_defined=None, prelude=None):
     """rt_defined: the global symbols the runtime objects define (nm); a bind-l3 row whose symbol is not among them has no body yet and is blocked like a
     bind-none row (None: not checked, the unit test's case)."""
     rs, table_id = rows(bridge)
@@ -81,11 +81,11 @@ def generate(bridge, out, need=(), l3=None, rt_defined=None):
             if l.strip() and l[0] != '#':
                 d, n, s = l.split(); over[(d.lower(), n)] = s
     needed = set()
-    for f in need:
+    for f in need:      # the loader's IMPORTED_TSV: the rows of the bridge table (key, dll, name, ...) that an import slot of a loaded image binds to
         for l in open(f):
-            p = l.rstrip('\n').split('\t')
-            if len(p) >= 4 and p[3] == 'key': needed.add((p[1].lower(), p[2]))
-    T = ['#include "fnvl.h"', '#include "imp.h"', 'extern "C" { void *fnvnx_win32_lookup_export(const char *dll, const char *name); int fnvnx_lift_imports_init(void); void fnvl_runtime_install(void); }']
+            if l.strip() and l[0] != '#':
+                p = l.rstrip('\n').split('\t'); needed.add((p[1].lower(), p[2]))
+    T = ['#include "fnvl.h"' if prelude is None else '#include "%s"' % prelude, '#include "imp.h"', 'extern "C" { void *fnvnx_win32_lookup_export(const char *dll, const char *name); int fnvnx_lift_imports_init(void); void fnvl_runtime_install(void); }']
     ent, blocked, look, body = [], [], [], []
     for r in rs:
         k = (r['dll'], r['name'])
@@ -127,10 +127,10 @@ def generate(bridge, out, need=(), l3=None, rt_defined=None):
 
 def main():
     ap = argparse.ArgumentParser(); A = ap.add_argument
-    A('--bridge', default=os.environ.get('FNVNX_BRIDGE', '/home/user/wt-l5/manifest/bridge.tsv')); A('--out', required=True); A('--need', action='append', default=[])
-    A('--l3', default=None)
+    A('--bridge', required=True, help='the loader BRIDGE_TSV'); A('--out', required=True); A('--imported', action='append', default=[], dest='need')
+    A('--l3', default=None); A('--prelude', default=None, help='the header that replaces fnvl.h as the first include (the pack: fnvl_prelude.h)')
     a = ap.parse_args()
-    ent, blocked, hit, absent = generate(a.bridge, a.out, a.need, a.l3)
+    ent, blocked, hit, absent = generate(a.bridge, a.out, a.need, a.l3, None, a.prelude)
     sys.exit(1 if hit or absent else 0)
 
 

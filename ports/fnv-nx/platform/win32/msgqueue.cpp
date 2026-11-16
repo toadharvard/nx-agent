@@ -60,7 +60,7 @@ bool take(qnode *&h, qnode *&t, HWND f, UINT lo, UINT hi, bool rm, MSG *out)   /
     for (qnode *n = h; n; prev = n, n = n->next)
         if (match(n->m, f, lo, hi)) {
             *out = n->m;
-            out->time = clk_msg_retrieve(n->ck, n->m.time);
+            out->time = VT_MSG_RETRIEVE(n->ck, n->m.time);
             if (rm) {
                 (prev ? prev->next : h) = n->next;
                 if (t == n) t = prev;
@@ -130,17 +130,17 @@ void service_sent(mq *me)   /* the receiver replies to what other threads sent *
         if (s) { me->sh = s->next; if (!me->sh) me->st = NULL; }
         os_unlock(&g_mql);
         if (!s) return;
-        clk_merge(s->ck);
+        VT_MERGE(s->ck);
         LRESULT r = deliver(s->h, s->m, s->w, s->l, 0);
         os_lock(&g_mql);
-        s->r = r; s->rck = clk_stamp(); s->done = 1;
+        s->r = r; s->rck = VT_STAMP(); s->done = 1;
         os_cond_broadcast(&g_mqc);
         os_unlock(&g_mql);
     }
 }
 LRESULT send_cross(DWORD tid, HWND h, UINT m, WPARAM w, LPARAM l)
 {
-    snode s = { NULL, h, m, w, l, 0, 0, clk_msg_post(), 0 };
+    snode s = { NULL, h, m, w, l, 0, 0, VT_MSG_POST(), 0 };
     os_lock(&g_mql);
     mq *t = mq_get(tid), *me = mq_get(GetCurrentThreadId());
     if (!t || !me) { os_unlock(&g_mql); SetLastError(ERROR_NOT_ENOUGH_MEMORY); return 0; }
@@ -167,7 +167,7 @@ LRESULT send_cross(DWORD tid, HWND h, UINT m, WPARAM w, LPARAM l)
         }
     }
     os_unlock(&g_mql);
-    clk_merge(s.rck);   /* the reply takes the receiver's time */
+    VT_MERGE(s.rck);   /* the reply takes the receiver's time */
     return s.r;
 }
 int post_to(DWORD tid, HWND h, UINT m, WPARAM w, LPARAM l)   /* 0 ok, else the error */
@@ -178,7 +178,7 @@ int post_to(DWORD tid, HWND h, UINT m, WPARAM w, LPARAM l)   /* 0 ok, else the e
     os_lock(&g_mql);
     mq *t = mq_get(tid);
     int err = !t ? ERROR_NOT_ENOUGH_MEMORY : t->np >= QMAX ? 1816 /* ERROR_NOT_ENOUGH_QUOTA */ : 0;
-    if (!err) { stamp(&n->m); n->ck = clk_msg_post(); app(t->ph, t->pt, n); t->np++; os_cond_broadcast(&g_mqc); }
+    if (!err) { stamp(&n->m); n->ck = VT_MSG_POST(); app(t->ph, t->pt, n); t->np++; os_cond_broadcast(&g_mqc); }
     os_unlock(&g_mql);
     if (err) free(n);
     return err;
@@ -192,7 +192,7 @@ void to_input(HWND h, const MSG &m0)
     n->m = m0; n->m.hwnd = h;
     os_lock(&g_mql);
     mq *t = mq_get(wi.tid);
-    n->m.time = clk_peek_tick_ms(); n->ck = clk_msg_post(); n->m.pt.x = g_cx; n->m.pt.y = g_cy;
+    n->m.time = clk_peek_tick_ms(); n->ck = VT_MSG_POST(); n->m.pt.x = g_cx; n->m.pt.y = g_cy;
     if (t) { app(t->ih, t->it, n); os_cond_broadcast(&g_mqc); }
     os_unlock(&g_mql);
     if (!t) free(n);

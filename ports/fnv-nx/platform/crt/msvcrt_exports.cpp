@@ -1,12 +1,18 @@
 /* msvcrt_exports.cpp - the msvcrt.dll imports of the lifted D3DX DLLs, provided by name (fnvnx_msvcrt_lookup, called
  * by fnvnx_win32_lookup_export for dll "msvcrt"). Each function follows MSVCRT.DLL (the Windows system C runtime,
- * not a C99 libc): the table at the end says which come from the libc and which from the other platform/crt files. Provider and
- * status of every name: MSVCRT_EXPORTS.tsv. The exception / FPU runtime (provider L3) is deliberately absent.
+ * not a C99 libc): the table at the end says which come from the libc and which from the other platform/crt files. The names served
+ * are msvcrt_names.tsv (name, provider symbol, kind), the one list: the lookup table is generated from it and the gate `imports` finds
+ * each provider in the symbol tables. The exception / FPU runtime (provider L3: __CxxFrameHandler, _CxxThrowException,
+ * _except_handler3, _setjmp3, longjmp, _XcptFilter, ?terminate@@YAXXZ, ??1type_info@@UAE@XZ, _CI*, _adjust_fdiv, _clearfp, _controlfp,
+ * _fpclass, _finite, _isnan) is deliberately absent. Known limits of two bodies (reported to the lead, not rules): ??2@YAPAXI@Z
+ * (operator new) is malloc: no new-handler loop (_set_new_handler/_callnewh are not provided), NULL with errno ENOMEM when the heap is
+ * exhausted; __pioinfo (iob.c) holds blocks 0..7 (256 descriptors) with the osfile bits FOPEN FEOFLAG FAPPEND FDEV FTEXT only.
  *
  * Rules (each closes its class): numbers are parsed by a grammar scanner and converted by the libc's correctly
  * rounded strtod (glibc and newlib's gdtoa round exactly, to nearest even); qsort is an in-place heapsort whose
  * indices stay below n whatever the comparator answers; character classes come from the layer's own NLS tables
  * (GetStringTypeW / LCMapStringW) for every code page the layer supports ("C" = identity below 128, 1252). */
+#include <fnvnx/cite.h>
 #include "../win32/w32.h"
 
 #include <cmath>
@@ -21,12 +27,12 @@
 
 #include "fnvnx_iobuf.h"
 #include "fnvnx_msvcrt.h"
+#include "fnvnx_cxx.h"
 
 extern "C" {
 struct fnvnx_ioinfo;
 extern struct fnvnx_ioinfo *__pioinfo[64];   /* iob.c */
 extern struct fnvnx_ioinfo __badioinfo;
-void ExitProcess(UINT);
 void GetLocalTime(LPSYSTEMTIME);
 }
 
@@ -40,6 +46,19 @@ extern "C" void *c_malloc(size_t n)
     if (!p)
         errno = ENOMEM;
     return p;
+}
+/* ??2@YAPAXI@Z, operator new(size_t): Wine 9.0 dlls/msvcrt/heap.c operator_new (_MSVCR_VER >= 80):
+ *   do { retval = msvcrt_heap_alloc(0, size); if (retval) return retval; } while (_callnewh(size)); throw_bad_alloc();
+ * _callnewh calls MSVCRT_new_handler, whose only writer is _set_new_handler. That function (and set_new_handler,
+ * _query_new_handler) is not in the import closure of the exe and modules (msvcrt_names.tsv), so the handler is NULL for
+ * the whole run and _callnewh returns 0: the loop is one allocation. throw_bad_alloc is cxx_bodies.cpp (Wine cpp.c, with the records of
+ * cxx_types.tsv), which ends in _CxxThrowException, the dispatch through the lifted frames (the exceptions layer, not defined here).  */
+extern "C" void *c_new(size_t n)
+{
+    void *p = malloc(n ? n : 1);   /* msvcrt_heap_alloc(0, size): one block, size 0 gives a unique non-NULL block */
+    if (p)
+        return p;
+    throw_bad_alloc();
 }
 extern "C" void *c_calloc(size_t a, size_t b)
 {
@@ -397,20 +416,21 @@ extern "C" onexit_fn c_dllonexit(onexit_fn f, onexit_fn **begin, onexit_fn **end
     *begin = t, *end = t + len;
     return f;
 }
+/* C11 7.22.4.4 exit: cannot return to its caller (abort: 7.22.4.1; _amsg_exit: Wine 9.0 dlls/msvcrt/exit.c _amsg_exit ends in _exit) */
 extern "C" void c_exit(int code)
 {
     fnvnx_doexit(code, 0, 1); /* the handlers, last registered first */
     fnvnx_iob_fflush(NULL);
     ExitProcess((UINT)code);
-    os_exit_process(code);
 }
+FNVNX_CITE(c_exit, "dm:3");
 extern "C" void c_abort(void)
 {
     static const char m[] = "\nabnormal program termination\n";
     fnvnx_write(2, m, sizeof m - 1);
     ExitProcess(3);
-    os_exit_process(3);
 }
+FNVNX_CITE(c_abort, "dm:4");
 extern "C" void c_amsg_exit(int n)
 {
     const char *t;
@@ -429,9 +449,10 @@ extern "C" void c_amsg_exit(int n)
     int l = snprintf(m, sizeof m, "\nR60%02d\n- %s\n", n, t);
     fnvnx_write(2, m, (unsigned)l);
     ExitProcess(255);
-    os_exit_process(255);
 }
+FNVNX_CITE(c_amsg_exit, "dm:5");
 extern "C" void c_purecall(void) { c_amsg_exit(25); }
+FNVNX_CITE(c_purecall, "dm:9");
 
 struct rlock { os_lock_t m; void *volatile owner; int count; };
 rlock g_locks[64];

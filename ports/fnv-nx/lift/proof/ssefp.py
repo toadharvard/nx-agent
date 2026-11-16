@@ -166,15 +166,28 @@ def minmax(op, a, b, mx, w):
 # by tests/test_simdspec.py RcpRows.  MXCSR does not influence either instruction (rcptab.c header: checked on 20e6 inputs x 8 MXCSR values), so no MXCSR state is read or written.
 _RT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'rt')
 _TAB = []
+_CACHE = []
+
+
+class ArgError(Exception):
+    """the verdict store (cache) of the published generated headers was not passed: ssefp.configure(cache) was not called"""
+
+
+def configure(cache, repo='.'):
+    """the verdict store holding the published GEN output of lift/rt (genout.gen_dir); required, no default, no environment read"""
+    if not cache: raise ArgError('ssefp.configure: cache is required')
+    _CACHE[:] = [(cache, repo)]; _TAB[:] = []
 
 
 def rcp_tables():
     if _TAB: return _TAB[0]
+    if not _CACHE: raise ArgError('ssefp: configure(cache) was not called (explicit argument --cache)')
     import hashlib, json
     src = open(os.path.join(_RT, 'rcptab.c'), 'rb').read()
     try: cert = json.load(open(os.path.join(_RT, 'rcptab.cert.json')))
     except (OSError, ValueError): raise Uncertified('rcptab.cert.json missing')
-    ref = open(os.path.join(_RT, 'rcpref.h')).read()
+    import genout
+    ref = open(os.path.join(genout.gen_dir(*_CACHE[0]), 'rcpref.h')).read()      # the published GEN output of the root lift/rt (stage gen_cpuref), not a file of rt/
     cpu = (re.search(r'FNVL_RCP_REF_VENDOR "(\w+)"', ref).group(1), int(re.search(r'FNVL_RCP_REF_FAMILY (\d+)', ref).group(1)),
            int(re.search(r'FNVL_RCP_REF_MODEL (\d+)', ref).group(1)), int(re.search(r'FNVL_RCP_REF_STEPPING (\d+)', ref).group(1)))
     c = cert['cpu']

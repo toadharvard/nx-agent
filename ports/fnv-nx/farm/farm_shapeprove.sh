@@ -4,6 +4,7 @@
 # --queue FILE: the PINNED queue of a pack (fnv-nx-build branch l3b-lift/queue/<pack12>-<prover12>, file queue.tsv, proof/packqueue.py): the rows `shape_key<TAB>shape_sha`
 #   are the work, split by position mod N; nothing is fetched or scanned (steps 2 and 2b are skipped), so every farm of one run has the same queue.  The header's ir_sha256 must be
 #   the IR of this machine and the rows must hash to the header's queue_id, else exit 1.  Output branch id = <IR id>-<queue_id>.  Every record carries model_fns / closure_sha (K).
+# Mode: a queue whose header has `# mode=simd` is checked by simdshard.py (simdcheck.check per shape, wall-clock budget TIMEOUT s, default 60) instead of shapeprove.py; same shards, records, branches, resume.  `# qcache=<branch>:<file>` seeds simdcheck's proved-query cache.
 # Inputs (private / exe-derived, fetched from the artifacts repository fnv-nx-build, never stored in this repository):
 #   branch l3b-lift/shapes        KEYS.tsv + <module>/shapes.tsv (output of proof/census.py); every shapes.tsv is checked against KEYS.tsv
 #   branch tools/sail-mirror      the pinned downloads of the Sail/isla toolchain; used by farm/sail_setup.sh (MIRROR=...) only when the toolchain
@@ -26,15 +27,15 @@ if [ "${1:-}" = "--queue" ]; then PINQ=${2:?usage: farm_shapeprove.sh [--queue F
 K=${1:?usage: farm_shapeprove.sh [--queue FILE] K N}; N=${2:?usage: farm_shapeprove.sh [--queue FILE] K N}
 FARM=$(cd "$(dirname "$0")" && pwd); HERE=$(cd "$FARM/../lift/proof" && pwd)
 B=${FNVNX_BUILD:?FNVNX_BUILD (clone of fnv-nx-build)}; W=${FNVNX_WORK:-${GATE_CACHE:?GATE_CACHE not set}/farm-shapeprove}
+GL="$B/.git/farm.lock"; gl() { flock "$GL" "$@"; }      # every command that changes the shared clone $B (fetch, FETCH_HEAD, worktree add, refs) runs under this one lock, so concurrent shards on a machine cannot race (shallow file, FETCH_HEAD)
 PREFIX=${BRANCH_PREFIX:-l3b-lift/shapeprove}; PUBLISH=${PUBLISH:-1}
-SAILBASE="${GATE_CACHE:?GATE_CACHE (the verdict cache) is not set}/sail/$(sha256sum "$HERE/sail_pins.txt" | cut -c1-12)"      # the toolchain and its caches live in the verdict cache, keyed by the pins (proof/sail_pins.txt)
-WORKDIR=${WORK:-$SAILBASE/work}
+. "$FARM/sail_toolchain.sh"      # SAILBASE, WORKDIR, ISLA, sail_pinned_ir, sail_args
 mkdir -p "$W/in"
 { flock 9      # shards started together on one machine stage the inputs one after the other; fd 9 exists only inside this group, so no child of the proving phase holds the lock
 T0=$(date +%s)
 fetch_branch() {   # fetch_branch <branch> <dir>: a worktree of the branch head in <dir> (reused when present)
     local d=$2
-    if [ ! -d "$d" ]; then git -C "$B" fetch -q --depth 1 origin "$1"; git -C "$B" worktree add -f "$d" FETCH_HEAD >/dev/null; fi
+    if [ ! -d "$d" ]; then gl bash -c 'git -C "$1" fetch -q --depth 1 origin "$2" && git -C "$1" worktree add -f "$3" FETCH_HEAD >/dev/null' _ "$B" "$1" "$d"; fi
 }
 
 # 0. python dependencies of the prover: capstone (shape.py, the decoder) and keystone-engine (enc_table.py, imported by prove.py), ONLY from the mirror branch
@@ -54,26 +55,31 @@ fi
 
 # 1. toolchain: the installed isla binary, else built from the mirror branch (sail_setup.sh).  The proof IR is NOT built here: it is fetched by its sha (the pin of
 #    formgate_inputs.json, the external x86ir) from the artifacts repository by the loader; farm/sail_build.sh produced and published it once (PUBLISH_IR=1)
-ISLA=${ISLA_EXEC:-$SAILBASE/rems-project/isla/target/release/isla-execute-function}
-export ISLA_EXEC=$ISLA SAIL_WORK=$WORKDIR      # tests (gate_tests strips GATE_*) and model_sail.py read the toolchain through these
 if [ ! -x "$ISLA" ]; then
     fetch_branch tools/sail-mirror "$W/in/sail-mirror"
     MIRROR="$W/in/sail-mirror" bash "$FARM/sail_setup.sh" > "$W/sail_setup_$K.log" 2>&1 || { echo "sail_setup.sh failed (see $W/sail_setup_$K.log)" >&2; exit 1; }
 fi
-# the IR is pinned in ONE place: the external x86ir of formgate_inputs.json (commit + tree_sha256); the trunk's loader (model_sail.ir_file) fetches it into GATE_CACHE.  No pin literal here.
-SHA=$(python3 -I "$HERE/certs_build.py" --model-sha) || { echo "the IR (SAIL_IR, else the external x86ir of formgate_inputs.json) does not load" >&2; exit 1; }
-PINSHA=$(env -u SAIL_IR python3 -I "$HERE/certs_build.py" --model-sha) || { echo "the pinned IR (external x86ir of formgate_inputs.json) does not load" >&2; exit 1; }
+# the IR is pinned in ONE place: the external x86ir of formgate_inputs.json (commit + tree_sha256); formgate.ir_path fetches it through the trunk's loader into GATE_CACHE.  No pin literal here.
+# The toolchain is passed to every prover program as explicit arguments (model_sail.configure): --sail-work --sail-ir --isla; no program reads it from the environment.  SAIL_IR (a farm build of the series) replaces the pinned IR.
+PINIR=$(sail_pinned_ir) || { echo "the pinned IR (external x86ir of formgate_inputs.json) does not load" >&2; exit 1; }
+IR=${SAIL_IR:-$PINIR}
+sail_args "$IR"
+SHA=$(python3 -I "$HERE/certs_build.py" "${TC[@]}" --model-sha) || { echo "the IR $IR does not load" >&2; exit 1; }
+PINSHA=$(python3 -I "$HERE/certs_build.py" --sail-work "$WORKDIR" --sail-ir "$PINIR" --isla "$ISLA" --x86sys "$X86SYS_FILE" --model-sha) || { echo "the pinned IR (external x86ir of formgate_inputs.json) does not load" >&2; exit 1; }
 [ "$SHA" = "$PINSHA" ] || { echo "IR sha256 $SHA is not the pinned IR $PINSHA (external x86ir of formgate_inputs.json)" >&2; exit 1; }
 
 if [ -n "$PINQ" ]; then
     # 2. the pinned queue: its header names the IR and the queue id; the rows must hash to it
     QUEUE=$PINQ
-    QID=$(python3 -I - "$QUEUE" "$SHA" <<'PY' || exit 1
+    XSHA=$(sha256sum "$X86SYS_FILE" | cut -d' ' -f1)
+    QID=$(python3 -I - "$QUEUE" "$SHA" "$XSHA" <<'PY' || exit 1
 import hashlib, re, sys
-q, sha = sys.argv[1], sys.argv[2]
+q, sha, xsha = sys.argv[1], sys.argv[2], sys.argv[3]
 hdr = [l for l in open(q) if l.startswith('#')]; rows = [l for l in open(q) if l.strip() and l[0] != '#']
 m = re.search(r'queue_id=([0-9a-f]{12})', hdr[0]); ir = [l.split('=', 1)[1].strip() for l in hdr if l.startswith('# ir_sha256=')]
 if not m or ir != [sha]: sys.exit('queue header: queue_id missing or ir_sha256 differs from the IR of this machine (%s)' % sha)
+xs = [l.split('=', 1)[1].strip() for l in hdr if l.startswith('# x86sys_sha256=')]
+if xs != [xsha]: sys.exit('queue header: x86sys_sha256 missing or differs from this tree\'s platform/declared/x86sys.json (%s)' % xsha)
 if hashlib.sha256(''.join(rows).encode()).hexdigest()[:12] != m.group(1): sys.exit('queue rows do not hash to the queue_id of the header')
 print(m.group(1))
 PY
@@ -101,17 +107,16 @@ if [ "$PUBLISH" = 1 ] || [ -n "${FETCH_PUBLISHED:-}" ]; then
     REFS=$(git -C "$B" ls-remote origin "refs/heads/$PREFIX/*" | awk '{print $2}')
     if [ -n "$REFS" ]; then
         SPECS=(); i=0; for r in $REFS; do i=$((i+1)); SPECS+=("+$r:refs/farm-pub/$i"); done
-        git -C "$B" fetch -q --depth 1 origin "${SPECS[@]}"
-        for j in $(seq 1 $i); do mkdir -p "$PUBD/$j"; git -C "$B" archive "refs/farm-pub/$j" | tar -x -C "$PUBD/$j"; git -C "$B" update-ref -d "refs/farm-pub/$j"; done
+        gl bash -c 'set -e; B=$1; P=$2; n=$3; shift 3; git -C "$B" fetch -q --depth 1 origin "$@"; for j in $(seq 1 "$n"); do mkdir -p "$P/$j"; git -C "$B" archive "refs/farm-pub/$j" | tar -x -C "$P/$j"; git -C "$B" update-ref -d "refs/farm-pub/$j"; done' _ "$B" "$PUBD" "$i" "${SPECS[@]}"
     fi
 fi
 QUEUE="$W/queue.tsv"
-QLINE=$(python3 -I "$HERE/certs_build.py" --queue "$SHAPES" --shards "$PUBD" --out "$QUEUE")
+QLINE=$(python3 -I "$HERE/certs_build.py" "${TC[@]}" --queue "$SHAPES" --shards "$PUBD" --out "$QUEUE")
 QID=$(echo "$QLINE" | awk '{print $2}'); echo "queue $QLINE (from $(find "$PUBD" -name 'shapeprove_*.jsonl' | wc -l) published shard files)"
 [ "$(awk '{print $3}' <<< "$QLINE")" != 0 ] || { echo "SHAPEPROVE shard=$K/$N: queue empty, every encoding with a Form has a valid certificate"; exit 0; }
 fi
 } 9> "$W/in/.lock"
-ID="$(python3 -I "$HERE/certs_build.py" --id)-$QID"
+ID="$(python3 -I "$HERE/certs_build.py" "${TC[@]}" --id)-$QID"
 OUT="$W/out/$ID"; mkdir -p "$OUT"
 J="$OUT/shapeprove_${K}_of_$N.jsonl"
 # a results branch is WRITE-ONCE (the git proxy refuses deletes and forced updates): its name carries the content, <prefix>/<ID>/<K>of<N>-<sha12 of the jsonl>.  A rerun writes a new branch.  A branch counts as
@@ -132,8 +137,7 @@ publish() {   # an orphan commit holding the jsonl only, on a NEW branch named b
 if [ "$PUBLISH" = 1 ] && [ ! -s "$J" ]; then
     BEST=0
     for r in $(git -C "$B" ls-remote origin "refs/heads/$PREFIX/$ID/${K}of${N}-*" | awk '{print $2}'); do
-        git -C "$B" fetch -q --depth 1 origin "$r" || continue
-        git -C "$B" show FETCH_HEAD:"shapeprove_${K}_of_$N.jsonl" > "$J.try" 2>/dev/null || continue
+        gl bash -c 'git -C "$1" fetch -q --depth 1 origin "$2" && git -C "$1" show FETCH_HEAD:"$3"' _ "$B" "$r" "shapeprove_${K}_of_$N.jsonl" > "$J.try" 2>/dev/null || continue
         c=$(wc -l < "$J.try"); if [ "$c" -gt "$BEST" ]; then BEST=$c; mv "$J.try" "$J"; fi
     done
     rm -f "$J.try"
@@ -142,7 +146,15 @@ if [ "$PUBLISH" = 1 ] && [ ! -s "$J" ]; then
 fi
 # 4. prove; the results are published every PUBLISH_EVERY seconds (default 600) while it runs, and at the end or on SIGTERM/SIGINT
 ulimit -v "${VMEM_KB:-6000000}"
-python3 -I "$HERE/shapeprove.py" --shapes "$QUEUE" --shard "$K/$N" --out "$OUT" --timeout "${TIMEOUT:-600}" --eip "${EIP:-sym}" --slice "${SLICE:-1}" ${LIMIT:+--limit "$LIMIT"} >> "$OUT/shapeprove_${K}_of_$N.log" 2>&1 &
+# the prover is selected by the queue header (`# mode=simd`: simdcheck over the queue's SIMD shapes, its proved-query cache seeded from the header's `# qcache=<branch>:<file>`); no other difference
+MODE=$(sed -n 's/^# mode=//p' "$QUEUE" | head -1)
+if [ "$MODE" = simd ]; then
+    QCS=$(sed -n 's/^# qcache=//p' "$QUEUE" | head -1)
+    if [ -n "$QCS" ]; then fetch_branch "${QCS%%:*}" "$W/in/simdqc-$K"; cp "$W/in/simdqc-$K/${QCS#*:}" "$W/qcache-$K.txt"; export SIMD_QCACHE="$W/qcache-$K.txt"; fi
+    python3 -I "$HERE/simdshard.py" --x86sys "$X86SYS_FILE" --shapes "$QUEUE" --shard "$K/$N" --out "$OUT" --timeout "${TIMEOUT:-60}" --slice "${SLICE:-1}" --cache "$GATE_CACHE" ${LIMIT:+--limit "$LIMIT"} >> "$OUT/shapeprove_${K}_of_$N.log" 2>&1 &
+else
+python3 -I "$HERE/shapeprove.py" "${TC[@]}" --shapes "$QUEUE" --shard "$K/$N" --out "$OUT" --timeout "${TIMEOUT:-600}" --eip "${EIP:-sym}" --slice "${SLICE:-1}" ${LIMIT:+--limit "$LIMIT"} >> "$OUT/shapeprove_${K}_of_$N.log" 2>&1 &
+fi
 PP=$!
 trap 'kill $PP 2>/dev/null; wait $PP 2>/dev/null; publish; exit 143' TERM INT
 LASTP=$(date +%s)

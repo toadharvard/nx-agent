@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Sharded prover of ENCODING SHAPES (rule R2): one obligation per shape, immediate / displacement / relative-target bytes (and eip) symbolic.
-  shapeprove.py --shapes FILE --shard K/N --out DIR [--timeout SEC] [--eip sym|fixed] [--slice STRIDE] [--only SUBSTR]
+  shapeprove.py --shapes FILE --shard K/N --out DIR [--timeout SEC] [--eip sym|fixed] [--slice STRIDE] [--only SUBSTR] --sail-work DIR --sail-ir FILE --isla EXE
 FILE: shapes.tsv (first column = shape key; '#' lines ignored; the output of proof/census.py); a key is re-derived by shape.shape_key from
 its representative bytes, so the canonical key (shape.py) is the unit whatever the census format.  Integer family only (shape.family == 'int'); the other
 families have their own provers.  Order: sorted canonical keys; shard K/N (K = 1..N) takes the shapes whose position is = K-1 mod N.  --slice STRIDE keeps
@@ -23,7 +23,7 @@ into are exhaustive with their path conditions in the merge)."""
 import argparse, collections, json, os, sys, time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import z3
-from proof import shape as shp, symform, prove, model_sail, certbasis
+from proof import shape as shp, symform, prove, model_sail, certbasis, treeid, x86sys
 
 def load_shapes(path):
     """canonical integer-family shape keys, sorted"""
@@ -86,7 +86,9 @@ def main():
     ap = argparse.ArgumentParser(); ap.add_argument('--shapes', required=False, default=None); ap.add_argument('--shard', default='1/1'); ap.add_argument('--out', required=True)
     ap.add_argument('--timeout', type=float, default=600); ap.add_argument('--eip', choices=('sym', 'fixed'), default='sym'); ap.add_argument('--slice', type=int, default=1)
     ap.add_argument('--only'); ap.add_argument('--migrate', metavar='JSONL', help='K: copy the records of JSONL (a shard of this model) to the shard file, adding model_fns / closure_sha to the proved ones'); ap.add_argument('--limit', type=int)
-    a = ap.parse_args(); k, n = [int(x) for x in a.shard.split('/')]; assert 1 <= k <= n
+    ap.add_argument('--sail-work', required=True); ap.add_argument('--sail-ir', required=True); ap.add_argument('--isla', required=True)
+    x86sys.add_arg(ap)
+    a = ap.parse_args(); model_sail.configure(a.sail_work, a.sail_ir, a.isla); xsha = x86sys.configure(a.x86sys); k, n = [int(x) for x in a.shard.split('/')]; assert 1 <= k <= n
     os.makedirs(a.out, exist_ok=True); path = os.path.join(a.out, 'shapeprove_%d_of_%d.jsonl' % (k, n))
     if a.migrate:
         with open(a.migrate) as fi, open(path, 'a') as out:
@@ -94,27 +96,23 @@ def main():
                 if ln.strip(): out.write(json.dumps(migrate(json.loads(ln), a), sort_keys=True) + '\n'); out.flush()
         return 0
     keys, bad = load_shapes(a.shapes); keys = keys[::a.slice]
+    qsha = {l.split()[0]: l.split()[1] for l in open(a.shapes) if l.strip() and not l.startswith('#') and len(l.split()) > 1}     # the queue row's shape_sha: the Form of the tree must be the Form the queue was built from
     if a.only: keys = [x for x in keys if a.only in x]
     mine = [x for i, x in enumerate(keys) if i % n == k - 1][:a.limit]
-    done = set()
-    if os.path.exists(path):                       # a kill can leave one partial last line: drop it (that shape is proved again), keep every complete record
-        with open(path) as fh: lines = fh.read().split('\n')
-        good = []
-        for l in lines:
-            try: done.add(json.loads(l)['shape']); good.append(l)
-            except (ValueError, KeyError): pass
-        with open(path, 'w') as fh: fh.write(''.join(l + '\n' for l in good))
+    tree = treeid.current(); done = treeid.resume(path, tree)
     print('shard %d/%d: %d shapes (%d integer shapes in the universe after --slice %d), %d already done, %d undecodable representatives' % (k, n, len(mine), len(keys), a.slice, len(done), len(bad)), flush=True)
     with open(path, 'a') as out:
         for key in mine:
             if key in done: continue
             t0 = time.time()
-            try: rec = one(key, a)
+            try:
+                if key in qsha and symform.shape_sha(key) != qsha[key]: raise ValueError('shape_sha of this tree differs from the queue row (the queue was built from another tree)')
+                rec = one(key, a)
             except Exception as e:                 # a prover exception on a shape is a record (error + the traceback hash), never a missing one
                 import hashlib, traceback
                 tb = traceback.format_exc(); rec = {'shape': key, 'result': 'error', 'note': ('%s: %s' % (type(e).__name__, e))[:300], 'traceback_sha': hashlib.sha256(tb.encode()).hexdigest()[:16], 'model_sha': model_sail.ir_sha()}
                 print(tb, file=sys.stderr, flush=True)
-            rec['seconds'] = round(time.time() - t0, 2)           # the wall time of the shape (not part of the certificate): the shard count is derived from its distribution
+            rec['seconds'] = round(time.time() - t0, 2); rec['tree'] = tree; rec['x86sys_sha256'] = xsha           # the wall time of the shape (not part of the certificate): the shard count is derived from its distribution
             out.write(json.dumps(rec, sort_keys=True) + '\n'); out.flush()
     rs = [json.loads(l) for l in open(path)]; c = collections.Counter(r['result'] for r in rs)
     print('shard %d/%d done: %d shapes  ' % (k, n, len(rs)) + ' '.join('%s=%d' % x for x in sorted(c.items())))

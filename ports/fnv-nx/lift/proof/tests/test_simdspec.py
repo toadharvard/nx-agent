@@ -6,6 +6,8 @@ import os, random, sys, unittest
 import z3
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.dirname(HERE))
 import simdspec as S
+CACHE = os.environ.get('GATE_CACHE')      # declared input of this test (the verdict store); without it the tests that need the published GEN output are skipped with the reason
+if CACHE: S.F.configure(CACHE)
 K = S.K
 
 
@@ -68,10 +70,13 @@ class Rows(unittest.TestCase):
 class RcpRows(unittest.TestCase):
     def test_rcp_rsqrt_structure_against_the_c_function(self):
         """ssefp.rcp32 / rsqrt32 (table read from rt/rcptab.c, structure transcribed) equal fnvl_rcp32 / fnvl_rsqrt32 compiled from the same file"""
-        import ctypes, subprocess, tempfile
-        d = tempfile.mkdtemp(); so = os.path.join(d, 'rcp.so')
-        rt = os.path.join(os.path.dirname(HERE), '..', 'rt')
-        subprocess.check_call(['gcc', '-O1', '-shared', '-fPIC', '-I', rt, '-o', so, os.path.join(rt, 'rcptab.c')])
+        import ctypes
+        if not CACHE: self.skipTest('GATE_CACHE (declared input: the verdict store) is not set')
+        # the shared object is the linked output of the host root lift/rcphost (unit lift/rt:rcptab.c, rcpref.h from lift/rt GEN), built by the recipe in the declared cache
+        sys.path.insert(0, os.path.join(HERE, '..', '..', '..', 'verify'))
+        import gate_build
+        res, _ = gate_build.ensure('ports/fnv-nx/lift/rcphost', CACHE, os.path.normpath(os.path.join(HERE, '..', '..', '..', '..', '..')))
+        so = res['elf']['path']
         lib = ctypes.CDLL(so); lib.fnvl_rcp32.restype = lib.fnvl_rsqrt32.restype = ctypes.c_uint32; lib.fnvl_rcp32.argtypes = lib.fnvl_rsqrt32.argtypes = [ctypes.c_uint32]
         rng = random.Random(5); xs = [rng.getrandbits(32) for _ in range(300)] + [0, 0x80000000, 0x7F800000, 0xFF800000, 0x7FC00000, 0x7F800001, 1, 0x007FFFFF, 0x7E800000, 0x7F000000, 0x3F800000]
         X = z3.BitVec('x', 32)

@@ -3,8 +3,8 @@
  * key with no declared value is absent, ERROR_FILE_NOT_FOUND). boot.cpp calls fnvnx_registry_first_run() before WinMain;
  * the hive file is made only when it does not exist, so what the game or the player changed is never overwritten.
  *
- * The rows are platform/manifest/declared_registry.tsv, generated into registry_seed.gen.inc by
- * platform/manifest/gen_registry_seed.py, which refuses a row that no static read site (platform/manifest/regsites.py) reads.
+ * The rows are manifest/declared_registry.tsv, generated into registry_seed.gen.inc by
+ * manifest/gen_registry_seed.py, which refuses a row that no static read site (manifest/regsites.py) reads.
  * No file is read at run time. Text data holds the byte 0x01 where the declared row says {game_dir}: the game directory
  * W32_GAME_DIR with its trailing backslash, the same constant the file layer serves, not a second literal. The rows are
  * validated at build time (types, sizes, tokens), so applying them has no parse step; a status other than success from the
