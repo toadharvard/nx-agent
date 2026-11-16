@@ -1412,3 +1412,11 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - The next rule is scoped to the 13 residue sites. w7 measures their operand classes and the store sets of their globals first.
 - K2: a measurement compiler d1a92e26 (old path) carries ENTRY1-ATOMIC and ORDER-RTLBUILTIN. w8 measures lift/rt, contract/facts and lift/disp on it. The real pin is L2 w3's recipe-path build.
 - bottleneck: L2's recipe-path K2 pin; pcsrc red (RULE T scope).
+
+## 2026-11-16 04:00: measurement at the farm compiler d1a92e26 (w8, local tree)
+- lift/rt: 18 of 21 objects. Red:
+  - (a) dispatch.c (C): ENTRY1-CONT remains, because ENTRY1-ATOMIC covers only the C++ front end. Owner: L2, for both front ends, with a C fixture.
+  - (b) msvcrt_ci.cc and msvcrt_eh.cc: `.fnvnx.decltype` has no declaration line for the FNVNX_EXPORT symbol operand. The owner is the L1 macro / L2 writer boundary, and they decide which side closes it as a class.
+- contract/facts and lift/disp are red behind lift/rt.
+- render/gl4: the ld stage needs L2's recipe-path toolchain root (w3).
+- bottleneck: L2 ENTRY1-ATOMIC for C, the L1/L2 decltype export line, and the L2 recipe-path pin.
