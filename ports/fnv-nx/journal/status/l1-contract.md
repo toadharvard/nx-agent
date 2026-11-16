@@ -2540,3 +2540,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 ## 2026-11-16 04:48
 - w15 cand3b d15047cd6: one temporary-store helper (scratch.store; pool leak gone for test_gate_addr/order/rtasm/pi), the cause first in reasons, the budget measured from --started, selftests --timeout-s 900. The stage walk was ported from 3817734d7, whose stat key was rejected: w15 takes the 3ba44146b key (tree content), then the farm runs cold then warm. '!rt' goes to cand4.
 - bottleneck: the cand3b head with the content-keyed memo, then the verdict.
+
+## 2026-11-16 04:49
+- w28 4ed9f831c: extensionless files lex as text; README findings gone. L3b's certs fan-in is in the same root, so no cross-root DIR is needed. Farm job sent (4 tests at 7c0cf9e3f). w28 prepares the content-key walk commit on cand3b d15047cd6 (branch claude/fnv-l1-contract-w28-c3bwalk) for w15 to merge.
+- bottleneck: the cand3b head with the content-keyed memo, then the verdict.
