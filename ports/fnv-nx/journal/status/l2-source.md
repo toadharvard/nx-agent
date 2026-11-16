@@ -658,3 +658,7 @@ After the first frame:
   - DECLTYPE-REF-PLUGSYM: a plugin-defined symbol takes reason `plugin` from the one plugsym registry;
   - the test_plugins fixtures take their flags from recipe.py's profile.
 - bottleneck: COMPILER-STAGE recipe path gcc1 green (w3); then the platform root decltype (w2).
+- 2026-11-16 04:00Z: L3a w8 measured lift/rt on d1a92e26: 18 of 21 units build, and the 3 red ones are L2's.
+  - The decltype error at msvcrt_ci.cc:69 and msvcrt_eh.cc:530 (FNVNX_EXPORT records) is the same class as the platform backend.cpp:163. Decision: the writer side closes it. DECLTYPE-REF resolves every referenced symbol by asmname through the symtab; only a symbol with no node is `plugin` from plugsym.
+  - ENTRY1-ATOMIC misses the C front end (dispatch.c `__atomic_store`). Both go to w2, ahead of the test_plugins fixtures.
+- bottleneck: COMPILER-STAGE recipe path gcc1 green (w3), then DECLTYPE-REF and ENTRY1-ATOMIC-C (w2). They block lift/rt and the platform root. render/gl4's ld also waits on the recipe-path toolchain root (w3).
