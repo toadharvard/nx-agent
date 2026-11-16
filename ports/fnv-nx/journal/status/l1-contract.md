@@ -2873,3 +2873,6 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - w28 takes exportgen and ctypes_compat (doing), and L2 takes the plugin marker (asked).
   - L5 changes nothing: fnvnx_guestfn.h:186 already static-asserts that the type is trivially copyable and trivially destructible.
 - bottleneck: cand4 verdict; farm 3 waits on the exportgen and marker heads; L3a base3 head.
+- The exportgen side is done: w28-exportrec 6a9465a57 sits on d884fe727 and adds the `!` parse and record_class (4 bytes gives i, 8 gives q; a bit-field, marked or float record is red), with tests.
+  - It is held back from the farm head until L2's plugin marker lands, and the two land together.
+- bottleneck: L2's layout-plugin `!` marker; cand4 verdict; L3a base3 head.
