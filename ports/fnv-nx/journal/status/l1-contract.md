@@ -2909,3 +2909,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - bottleneck: farm 3 bridgetable; the w28 prefix head; cand4 verdict; L3a base3 head.
 - Farm 3: merging 96fcecc into 0430a1863 conflicts on 110 paths, because L6's line is based on an older platform and verify tree. The merge was aborted.
   - Instead, farm 3 cherry-picks only the three record commits (9cab4b24a, e24edc9ee, 96fcecc2e) onto 0430a1863 and runs dens/b (doing).
+- Farm 3 cherry-picked the record commits onto 0430a1863 (28723c0c9, admit conflict resolved, 0 imports fields). Red: render/d3d9 includes contract/include, which is not a root on the relift line. Farm 3 switches it to the header root contract/exporthdr and pushes the result as w28-exportrec-d9 (doing).
+- L6 w10 60c5ba7: all render/ and bridgefacts/ imports use fnvnx.<rel>.
+  - The remaining reds come from the stage not mounting the tool's own root under /imp/fnvnx. That is added to w28's item A, with /tool replaced by `python -m` if possible.
+- bottleneck: the w28 prefix head (it unblocks L5, L6 and L2); farm 3 bridgetable; cand4 verdict; L3a base3 head.
