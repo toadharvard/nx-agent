@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(HERE), "contract"))
 import cas  # noqa: E402
 import gate_build  # noqa: E402
 import gate_imports  # noqa: E402
+import exportgen  # noqa: E402
 import hive  # noqa: E402
 import recipe  # noqa: E402
 
@@ -58,13 +59,24 @@ def calls_of(res):
     return out
 
 
+def writer_bodies(res):
+    """{unit}: the units of a build that carry an `.fnvnx.export` record (contract/include/fnvnx_export.h) whose import name is a hive-writing API: the import
+    implementations of the writers. Exempt from the writer rule by the record, never by a name."""
+    out = set()
+    for o in res["objects"]:
+        recs, _ = exportgen.scan(o["object"])
+        if any(n in hive.WRITERS for _, n, _, _ in recs):
+            out.add(o["unit"])
+    return out
+
+
 def root_items(root, rec, res, decl, repo, cache):
     if set(decl) != IN_KEYS or decl["format"] != "fnvnx-registry-in/1":
         raise ValueError("%s/registry.in.json: need exactly the keys %s and format fnvnx-registry-in/1" % (root, sorted(IN_KEYS)))
     def rp(ref):
         return recipe.resolve_input(root, ref, repo, cache, rec)[0]
     sites, declared, seed = (gate_imports.read(rp(decl[k])) for k in ("sites", "declared", "seed"))
-    return hive.judge(sites, declared, seed, calls_of(res), decl["seed_unit"])
+    return hive.judge(sites, declared, seed, calls_of(res), decl["seed_unit"], writer_bodies(res))
 
 
 def judge_root(root, repo, cache, admit, bad):
