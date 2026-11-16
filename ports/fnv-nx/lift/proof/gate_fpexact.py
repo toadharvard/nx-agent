@@ -86,7 +86,7 @@ Universe: per product root: `<root>:rcpcert` (per image, when it uses the table)
 build or whose recipe is invalid is the one item `<root>:inputs` (uncertified, reason in detail: never skipped). Certified: items with no finding.
 uncertified: the first 50 ids sorted. Exit 0 iff green."""
 import os as _q_os, sys as _q_sys
-_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..")) # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import hashlib
 import json
 from fractions import Fraction
@@ -106,10 +106,10 @@ sys.path.insert(0, LIFT)
 sys.path.insert(0, os.path.join(VERIFY, "..", "contract"))
 sys.path.insert(0, VERIFY)
 from proof import formgate, genout, helpercalls  # noqa: E402     (genout: the one reader of the lift/rt GEN output; helpercalls: the Form -> helper call table)
-from verify import gate_build  # noqa: E402
-from verify import gate_datamodel  # noqa: E402     (cc_docs: the reader of the CC stage documents, the one copy)
-from contract import gatefile  # noqa: E402     (ports/fnv-nx/contract)
-from verify import recipe  # noqa: E402
+from fnvnx.verify import gate_build  # noqa: E402
+from fnvnx.verify import gate_datamodel  # noqa: E402     (cc_docs: the reader of the CC stage documents, the one copy)
+from fnvnx.contract import gatefile  # noqa: E402     (ports/fnv-nx/contract)
+from fnvnx.verify import recipe  # noqa: E402
 
 NAME = "fpexact"
 FORMAT = "fnvnx-gate/1"

@@ -5,6 +5,7 @@ import os, re, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import declared_x86sys; declared_x86sys.configure()
+declared_x86sys.configure_segwrites()      # emit_form specialises the code-selector store guard on the SEGWRITES sets
 import capstone
 from fnvlift import core
 from proof import lift_dsl as f_dsl

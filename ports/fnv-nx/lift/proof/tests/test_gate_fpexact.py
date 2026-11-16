@@ -4,7 +4,7 @@ unit the plugin reports is recipe.sandbox_src(unit). Plain script: one PASS/FAIL
 root of verify/tests/test_recipe.py with the real recipe and reads the stage documents and the preprocessed text it produced."""
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import json
 import os
 import re
@@ -17,12 +17,12 @@ LIFT = os.path.normpath(os.path.join(HERE, "..", ".."))
 VERIFY = os.path.normpath(os.path.join(LIFT, "..", "verify"))
 for p in (os.path.join(LIFT, "proof"), os.path.join(VERIFY, "tests"), VERIFY, os.path.join(LIFT, ".."), os.path.join(LIFT, "..", "contract")):
     sys.path.insert(0, p)
-from verify import scratch  # noqa: E402
+from fnvnx.verify import scratch  # noqa: E402
 
 scratch.install()
-from verify import gate_build  # noqa: E402
+from fnvnx.verify import gate_build  # noqa: E402
 import gate_fpexact as G  # noqa: E402
-from verify import recipe  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
 import test_recipe as TR  # noqa: E402
 unitstage = recipe.unitstage  # the module object recipe.py itself imports (a sibling of its own root, imported bare there)
 

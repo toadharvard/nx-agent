@@ -5,11 +5,11 @@
   locked add) raises at the emitter; a plain accessor of every kind inside LK_BEGIN fails to compile. The accessor list is read from rt/fnvl.h (every `#define M..(a)` that is a guest accessor).
   Every compile is a stage of the recipe (toolchain/tests/plugbuild.py: the pinned msvcmodel compiler, the full plugin set, a lifted root), no direct compiler call.   test_lock_only.py (the inputs SDMROWS and GEN are mounted)"""
 import os as _q_os, sys as _q_sys
-_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", "..")) # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, re, shutil, sys, tempfile
 LIFT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, LIFT); sys.path.insert(0, os.path.join(LIFT, 'tools')); sys.path.insert(0, os.path.join(LIFT, '..', 'toolchain', 'tests'))
-from toolchain.tests import plugbuild as pb
+from fnvnx.toolchain.tests import plugbuild as pb
 import prelude
 import fnvlift as L
 from fnvlift.tests import _inputs

@@ -10,15 +10,15 @@
     clpod/table.tsv, the cl 15.00.30729.01 (VC 2008 SP1) measurement with its toolchain commit and cl.exe sha256; prints the mismatch count (must be 0).
 Run: python3 -I lift/tools/tests/test_defdisp.py   exit 0 on pass. Every compile is a stage of the recipe (toolchain/tests/plugbuild.py), no direct compiler call."""
 import os as _q_os, sys as _q_sys
-_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", "..")) # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, re, shutil, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, '..'))
 import test_descclass as dc
-from contract import bridgegen
-from toolchain.tests import plugbuild as pb
+from fnvnx.contract import bridgegen
+from fnvnx.toolchain.tests import plugbuild as pb
 
 UNIT = r'''
 struct VB { int v; };

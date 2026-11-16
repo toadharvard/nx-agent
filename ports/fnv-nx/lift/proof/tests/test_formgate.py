@@ -1,7 +1,7 @@
 """Tests of proof/formgate.py: the inputs contract (externals fetched by the trunk's loader from local bare repos, no network), every red reason,
 the certification rule on synthetic encodings (byte strings written here, nothing derived from game data)."""
 import os as _q_os, sys as _q_sys
-_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", "..")) # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import itertools
 import hashlib
 import json
@@ -21,7 +21,7 @@ sys.path.insert(0, LIFT)
 sys.path.insert(0, os.path.join(LIFT, "..", "verify"))     # cas, recipe: the trunk loader the gate itself uses (-I drops PYTHONPATH)
 import fakeext
 from proof import certbasis, formgate, forms, prove, shape
-from verify import recipe
+from fnvnx.verify import recipe
 
 WORK = os.environ.get('FNVNX_TEST_WORK') or __import__('tempfile').mkdtemp(prefix='fnvnx-proof-test-')     # declared input: the directory the fixtures are written below
 _SEQ = itertools.count()
@@ -331,6 +331,7 @@ class Cli(unittest.TestCase):
     def run_gate(self, td, f):
         co = os.path.join(td, 'co')
         os.makedirs(os.path.join(co, 'ports', 'fnv-nx'))
+        os.symlink('fnv-nx', os.path.join(co, 'ports', 'fnvnx'))      # the one module path: `fnvnx.<root path>` is ports/fnvnx (a link to the tree, as in the repository)
         shutil.copytree(LIFT, os.path.join(co, 'ports', 'fnv-nx', 'lift'), ignore=skip_cache, copy_function=shutil.copyfile)
         os.makedirs(os.path.join(co, 'ports', 'fnv-nx', 'verify'))      # the real verify/ except admit.json (the fixture's owner row)
         for n in os.listdir(fakeext.VERIFY):
@@ -344,7 +345,7 @@ class Cli(unittest.TestCase):
         f.write_owner(co)
         out = os.path.join(td, 'out')
         os.makedirs(out)
-        from verify import recipe
+        from fnvnx.verify import recipe
         recipe.set_artifacts(recipe.ext_dir(os.path.join(out, 'forms-cache')), f.art.url)    # the artifacts repository is a record beside the cache the gate fills (formgate.cache_dir), never an environment variable
         env = {'PATH': os.environ['PATH'], 'GATE_OUT': out, 'HOME': td, 'GIT_TERMINAL_PROMPT': '0'}
         r = subprocess.run([sys.executable, '-I', 'ports/fnv-nx/lift/proof/formgate.py'], cwd=co, env=env, capture_output=True, text=True)

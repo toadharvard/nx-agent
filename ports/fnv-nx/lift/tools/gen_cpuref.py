@@ -5,7 +5,7 @@
   cpumodel_tab.inc  the vendor, leaf 2/4, 0x80000001 and brand tables of rt/cpumodel.c
 Deterministic, standalone (reads only the two records).   gen_cpuref.py OUTDIR INROOT  (recipe stage: inputs the two records of verify/; outputs gen/<the three files>)"""
 import os as _q_os, sys as _q_sys
-_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..")) # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import json, os, sys
 ROOT = sys.argv[2]      # the mount of the stage's declared inputs (/in)
 def record(name):
@@ -25,7 +25,7 @@ def hx(v): return '0x%08xu' % v
 def w(p, t): open(p, 'w').write(t)
 EAX = eax1(ref['family'], ref['model'], ref['stepping'])
 sys.path.insert(0, os.path.join(ROOT, 'ports/fnv-nx/lift/fnvlift'))
-from lift.fnvlift import cpumodel_bits          # the one derivation of the declared machine's feature words, shared with the lifter's feature gate (proof/cpufeat.py)
+from fnvnx.lift.fnvlift import cpumodel_bits          # the one derivation of the declared machine's feature words, shared with the lifter's feature gate (proof/cpufeat.py)
 _w = cpumodel_bits.model_words(mod)
 ECX = _w['leaf1_ecx']; EDX = _w['leaf1_edx']
 E1 = [0, 0, _w['ext1_ecx'], _w['ext1_edx']]

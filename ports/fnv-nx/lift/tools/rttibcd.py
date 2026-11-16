@@ -8,10 +8,10 @@ Output rows (tab separated, one per BCD; COL rows carry the COL fields once):
   BCD  <col va> <index> <TD name> <numContainedBases> <mdisp> <pdisp> <vdisp> <attributes>
 RTTI carries neither class size nor emptiness: nothing here derives either. A structure that does not match the layout (signature, pointer out of the image, TD without a `.?A` name) is a violation and exit status 1."""
 import os as _q_os, sys as _q_sys
-_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..")) # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import sys, os, struct, collections
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'contract'))
-from contract import exefacts
+from fnvnx.contract import exefacts
 def s32(v): return v - (1 << 32) if v >> 31 else v
 def main(exe, out):
     img = exefacts.Image(exe); vft = exefacts.rtti_vftables(img)

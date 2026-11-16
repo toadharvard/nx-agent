@@ -23,3 +23,12 @@ def shape_keys():
         raise SystemExit('FNVNX_INPUT_PACK is not mounted (declare the produced input PACK of root lift/liftsrc in tests/inputs.json)')
     with open(os.path.join(p, 'shapes.tsv')) as f:
         return sorted({l.split('\t')[0] for l in f if l.strip() and not l.startswith('#')})
+
+
+def configure_segwrites():
+    """the segwrites input (the selector sets of the code-selector store guard, core.sel_set): the mounted produced input SEGWRITES of root lift/facts (tests/inputs.json; FNVNX_INPUT_SEGWRITES).  No default: an unmounted input is an error"""
+    p = os.environ.get('FNVNX_INPUT_SEGWRITES')
+    if not p:
+        raise SystemExit('FNVNX_INPUT_SEGWRITES is not mounted (declare the produced input SEGWRITES of root lift/facts in tests/inputs.json)')
+    from fnvlift import inputs
+    inputs.configure(segwrites=p)
