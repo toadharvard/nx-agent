@@ -3031,7 +3031,14 @@ class Job:
     def run_all(self, ws, only=None):
         """The `run` stages of the recipe (RECIPE.md "Run stages"), after the generators; a red one blocks its outputs like a generator. ONLY = the name of one step: that
         step and the steps its inputs come from run, no other."""
-        steps = self.rec.get("run", [])
+        try:
+            steps = expand_run(self.rec).get("run", [])
+        except ValueError as e:
+            self.red.append({"stage": "run:%s" % self.root, "exit": None, "stderr": [str(e)]})
+            for g in self.rec.get("run", []):
+                for o in step_outputs(g):
+                    self.blocked[o] = "run:%s" % self.root
+            return
         if only is not None:
             steps = self.step_closure(steps, only)
         for i, g in enumerate(steps):
