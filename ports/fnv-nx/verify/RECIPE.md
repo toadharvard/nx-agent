@@ -474,6 +474,15 @@ loader resolves it INSIDE the sandbox (paths under `at` are files of the checked
 inputs); a library that cannot be resolved is a red build naming the object and the name. `include` may name a directory inside an external:
 it is passed as `-I<that path>` (the external is a declared input of every stage, so keys stay content-addressed).
 
+## Single file of an external (a document through a tool step)
+A run step's `inputs` entry `{"external": NAME, "path": FILE}` mounts ONE file of a declared external at `/in/N`. The external is pinned as above, by
+`{commit, tree_sha256}` over its whole checkout; `resolve_input` checks that hash, then reads FILE from the checked-out tree (red: the file is not in
+the tree, the path is absolute, has `..` or leaves the tree through a link, the external is not declared, `tree_sha256` is not the checkout's). The step
+key holds the file's content, not the tree's, so a commit that changes other files of the external does not re-key the step.
+Pattern for a document turned into data (the Intel SDM): the external is `tools/intel-sdm` (a pinned PDF); the step is `exec` of `/usr/bin/pdftotext`
+from the pinned deb `poppler-utils` (with its dependency closure in `env.json` `debs.packages`), `args` `["-layout", "/in/1", "/out/sdm.txt"]`, `outputs`
+`["sdm.txt"]`; a later generator or step reads the text through its stage ref. The binary's content is in the key through `debs`. Test: `tests/test_toolext.py`.
+
 ## Result (`objects.json`, "fnvnx-objects/1")
 `objects` [{unit, object, sha256, os_layer}] (product units), `tests`, `elf` {path, sha256}|null, `constants`, `contract_names` (paths of the copies or null),
 `pp_keys` {unit: stage key of its preprocessor stage; its result `unit.ii` is in the store GATE_CACHE/store, read by objstub to derive the
