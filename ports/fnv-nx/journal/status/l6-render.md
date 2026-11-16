@@ -1581,3 +1581,7 @@ Paused: w3b, w4, farm; no other work.
 - w7: archived. Its d3d9 export records are at claude/fnv-l6-render-w7 3d93234. They wait on lift/rt (L3a); the d3d9exports stage runs when lift/rt is green.
 - w6: the CLAUDE.md merge into w6-root and objstub over the L6 roots, for cand4. Then archived until L1 names the cand4 base (after cand3b).
 - bottleneck: cand3b merge → cand4 base (L1); base3 retake (L3a); lift/rt red (L3a).
+- 06:40Z cand3b is merged; trunk at fac693694, which is the cand4 base. w6 builds w6-cand4 from it: render/, bridgefacts/d3d9, test_gl4_cursor and the L6 ids from w6-root 8faa8175d, plus DATAMODEL on the d3d9 stage. Admit rows go only to the green roots. Gates: objstub, assumptions, pure, abspath, extpaths, d3d9total.
+    - objstub on gl4 at 8faa8175d: 0 findings in render/gl4; the od:gl-shader-failure citations resolve.
+    - This branch (claude/fnv-l6-render) has a history unrelated to the trunk; it holds only the status file. The L6 code enters through w6-cand4.
+- bottleneck: w6-cand4 verdict → L1; base3 retake (L3a); lift/rt red (L3a).
