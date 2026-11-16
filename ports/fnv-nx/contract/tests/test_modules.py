@@ -100,25 +100,6 @@ check("rows: exe, b.dll, c.dll (a.dll has no directory); load_index of the exe i
       [(n, i) for n, i, _ in rows] == [(exepin.NAME, ""), ("b.dll", 0), ("c.dll", 2)], [(n, i) for n, i, _ in rows])
 check("the DLL rows equal the count of has_tls = 1 over the images of modules.tsv",
       len(rows) - 1 == sum(1 for m in order if m.pe.dirs[9][1]) == 2)
-# modules.tsv: one row for the exe and one per image, the kind of a row is the PE characteristics bit IMAGE_FILE_DLL (never the name)
-class MM(M):
-    def __init__(self, name, data, base, static, sha):
-        M.__init__(self, name, data)
-        self.sha256, self.size, self.base, self.static = sha, len(data), base, static
-
-
-_exe_raw = pe(good(), flags=0x0102)   # an exe: IMAGE_FILE_DLL clear
-_dll_raw = pe(None)                   # a DLL: flags 0x2102
-_xe = modules.PE(_exe_raw, "toy.exe")
-_txt = modules.modules_text("toy.exe", _exe_raw, _xe, [MM("a.dll", _dll_raw, 0x10000000, True, "b" * 64)], {"a.dll": 0})
-_rows = [l.split("\t") for l in _txt.splitlines() if not l.startswith("#")]
-check("a toy exe and one dll give 2 rows with 11 columns", len(_rows) == 2 and all(len(r) == 11 for r in _rows), _rows)
-check("the exe row: its sha256, size, ImageBase as preferred and assigned base, static, no load index, dll 0",
-      _rows[1][:2] == ["toy.exe", hashlib.sha256(_exe_raw).hexdigest()] and _rows[1][3] == _rows[1][4] == "%08x" % BASE and _rows[1][8:] == ["1", "", "0"], _rows)
-check("the dll row: dll 1, its own load index", _rows[0][0] == "a.dll" and _rows[0][8:] == ["1", "0", "1"], _rows)
-_swapped = modules.modules_text("a.dll", _dll_raw, modules.PE(_dll_raw, "a.dll"), [MM("toy.exe", _exe_raw, BASE, True, "c" * 64)], {})
-check("the kind follows the bit, not the name: the same names with the images swapped swap dll",
-      [r[10] for r in (l.split("\t") for l in _swapped.splitlines() if not l.startswith("#"))] == ["1", "0"])
 out = tempfile.mkdtemp(prefix="tls-")
 modules.write_tls(out, rows)
 lines = [l for l in open(os.path.join(out, "tls.tsv")).read().splitlines() if not l.startswith("#")]

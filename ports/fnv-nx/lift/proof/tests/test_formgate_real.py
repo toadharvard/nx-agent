@@ -18,7 +18,7 @@ from proof import formgate as F
 class Real(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.cache = tempfile.mkdtemp(prefix='formgate-real-')
+        cls.cache = os.path.join(tempfile.mkdtemp(prefix='formgate-real-'), 'store')
         cls.doc = F.load_inputs()
         cname, cls.crel = cls.doc['certs'].split('/', 1)
         cls.ext = F.fetch([e for e in cls.doc['external'] if e['name'] == cname], cls.cache)
@@ -26,7 +26,7 @@ class Real(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        shutil.rmtree(cls.cache, ignore_errors=True)
+        shutil.rmtree(os.path.dirname(cls.cache), ignore_errors=True)
 
     def test_inputs_are_valid_and_the_model_pin_matches(self):
         self.assertEqual(self.doc['model_sha256'], F.model_pin())

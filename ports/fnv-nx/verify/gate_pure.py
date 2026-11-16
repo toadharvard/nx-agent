@@ -29,7 +29,6 @@ import gatesdir  # noqa: E402
 from gate_admit import imports_errors  # noqa: E402
 
 ADMIT = "ports/fnv-nx/verify/admit.json"
-TREE = "ports/fnv-nx"
 HOST = gate_admit.HOST_READERS
 PURE_COVERS = set(json.load(open(os.path.join(HERE, "gates.d", "pure.json")))["covers"])   # the classes this gate judges: its own gates.d file, the one place that says so
 
@@ -48,10 +47,8 @@ def run_unit(td, n, unit, imports):
     argv = [sys.executable, "-I", os.path.join(HERE, "puregate.py"), "check"] + list(unit)
     for t in unit:  # a root is importable by its own directory name too (that is how a declaring root reaches it)
         argv += ["--base", os.path.dirname(t) or "."]
-    for i in imports:   # a declared root is importable under the one module path of gate_admit.import_roots: its path below the project tree
-        argv += ["--lib", i]
-    if imports:
-        argv += ["--base", TREE]
+    for i in imports:
+        argv += ["--lib", i, "--base", os.path.dirname(os.path.normpath(i)) or "."]
     p = subprocess.run(argv + ["--json", js], capture_output=True, text=True)
     if p.returncode not in (0, 2) or not os.path.isfile(js):
         return set(), {}, "puregate failed on %s (exit %d): %s" % (" ".join(unit), p.returncode, p.stderr.strip()[-200:])

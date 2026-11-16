@@ -7,7 +7,7 @@ KINDS_TXT = "gcc/as/ld/ar/objcopy/readelf/python"
 KINDS = ("gcc", "as", "ld", "ar", "objcopy", "readelf", "python")
 GNU = ("gcc", "as", "ld", "ar", "objcopy", "readelf")
 FIXED = (("TZ", "UTC"), ("LC_ALL", "C"), ("PYTHONHASHSEED", "0"))
-FORBID_ENV = ("LANG", "LANGUAGE", "HOME", "USER", "LOGNAME", "HOSTNAME", "PWD", "DISPLAY", "GCC_EXEC_PREFIX",
+FORBID_ENV = ("LANG", "LANGUAGE", "PYTHONPATH", "HOME", "USER", "LOGNAME", "HOSTNAME", "PWD", "DISPLAY", "GCC_EXEC_PREFIX",
               "COMPILER_PATH", "LIBRARY_PATH", "CPATH", "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH", "DEPENDENCIES_OUTPUT",
               "SUNPRO_DEPENDENCIES", "MAKEFLAGS", "MFLAGS", "MAKELEVEL")
 PYENV_OK = ("PYTHONHASHSEED", "PYTHONDONTWRITEBYTECODE")
@@ -17,7 +17,7 @@ POLICY = {
     "env.fixed": ("all", "env TZ=UTC LC_ALL=C PYTHONHASHSEED=0 SOURCE_DATE_EPOCH=<integer> COLUMNS=<integer> present",
                   RB + ", Standard Environment Variables (SOURCE_DATE_EPOCH, TZ, LC_ALL); Python docs, PYTHONHASHSEED"),
     "env.forbidden": ("all", "env has no LANG LANGUAGE LC_*(except LC_ALL) PYTHON*(except PYTHONHASHSEED, "
-                      "PYTHONDONTWRITEBYTECODE, and PYTHONPATH when every component is under a declared input) HOME USER LOGNAME HOSTNAME PWD DISPLAY CCACHE_* DISTCC_* MAKEFLAGS MFLAGS "
+                      "PYTHONDONTWRITEBYTECODE) HOME USER LOGNAME HOSTNAME PWD DISPLAY CCACHE_* DISTCC_* MAKEFLAGS MFLAGS "
                       "MAKELEVEL; GCC input variables " + FORBID_ENV_GCC,
                   RB + ", Standard Environment Variables / Locales; " + GCCENV + "; Python docs, Using Python, Environment"),
     "env.path": ("all", "PATH present, every component under a declared input", RB + ", Deterministic build systems (PATH)"),

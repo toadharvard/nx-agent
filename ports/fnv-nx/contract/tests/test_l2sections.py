@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/toolchain/names/sympair_kinds.inc
 """Synthetic check of l2sections.py: every parser branch and error, and the ELF read when the cross tools exist."""
 import os, shutil, subprocess, sys, tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import l2sections as L
 INC = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'toolchain', 'names', 'sympair_kinds.inc')
-KINDS = L.load_kinds(INC)
-psk = lambda d, w: L.parse_sympair(d, w, KINDS)  # noqa: E731
+L.set_kinds(INC)
 
 fails = []
 
@@ -27,20 +27,20 @@ def err(what, fn, data, part):
 
 
 SP = b'_Z1fv\t?f@@YAXXZ\tfunc\tdef\n_ZTV1A\t\tvtable\tdef\n_ZN1AC1Ev\t??0A@@QAE@XZ\tctor.c1\tref\n_Z3gccv\t\tnodecor:localscope\tdef\n'
-check('sympair', L.parse_sympair(SP, 'o.o', KINDS), [('_Z1fv', '?f@@YAXXZ', 'func', 'def'), ('_ZTV1A', '', 'vtable', 'def'),
+check('sympair', L.parse_sympair(SP, 'o.o'), [('_Z1fv', '?f@@YAXXZ', 'func', 'def'), ('_ZTV1A', '', 'vtable', 'def'),
                                               ('_ZN1AC1Ev', '??0A@@QAE@XZ', 'ctor.c1', 'ref'), ('_Z3gccv', '', 'nodecor:localscope', 'def')])
-check('sympair empty', L.parse_sympair(b'', 'o.o', KINDS), [])
-err('sympair 3 fields', psk, SP + b'a\tb\tfunc\n', 'line 5')
-check('sympair noemit', L.parse_sympair(b'_Z1gv\t?g@@YAXXZ\tnoemit\tref\n', 'o.o', KINDS), [('_Z1gv', '?g@@YAXXZ', 'noemit', 'ref')])
-err('sympair noemit no name', psk, b'_Z1gv\t\tnoemit\tref\n', 'without an MSVC name')
-err('sympair kind', psk, b'a\tb\tfunx\tdef\n', 'unknown kind')
-err('sympair unnamed no reason', psk, b'a\t\tnodecor:\tdef\n', 'unknown kind')
-err('sympair defref', psk, b'a\tb\tfunc\tdefx\n', 'neither def nor ref')
-err('sympair no name', psk, b'a\t\tfunc\tdef\n', 'without an MSVC name')
-err('sympair no symbol', psk, b'\tb\tfunc\tdef\n', 'symbol')
-err('sympair no LF', psk, b'a\tb\tfunc\tdef', 'no final LF')
-err('sympair blank line', psk, b'a\tb\tfunc\tdef\n\n', 'line 2')
-err('sympair utf8', psk, b'\xff\n', 'UTF-8')
+check('sympair empty', L.parse_sympair(b'', 'o.o'), [])
+err('sympair 3 fields', L.parse_sympair, SP + b'a\tb\tfunc\n', 'line 5')
+check('sympair noemit', L.parse_sympair(b'_Z1gv\t?g@@YAXXZ\tnoemit\tref\n', 'o.o'), [('_Z1gv', '?g@@YAXXZ', 'noemit', 'ref')])
+err('sympair noemit no name', L.parse_sympair, b'_Z1gv\t\tnoemit\tref\n', 'without an MSVC name')
+err('sympair kind', L.parse_sympair, b'a\tb\tfunx\tdef\n', 'unknown kind')
+err('sympair unnamed no reason', L.parse_sympair, b'a\t\tnodecor:\tdef\n', 'unknown kind')
+err('sympair defref', L.parse_sympair, b'a\tb\tfunc\tdefx\n', 'neither def nor ref')
+err('sympair no name', L.parse_sympair, b'a\t\tfunc\tdef\n', 'without an MSVC name')
+err('sympair no symbol', L.parse_sympair, b'\tb\tfunc\tdef\n', 'symbol')
+err('sympair no LF', L.parse_sympair, b'a\tb\tfunc\tdef', 'no final LF')
+err('sympair blank line', L.parse_sympair, b'a\tb\tfunc\tdef\n\n', 'line 2')
+err('sympair utf8', L.parse_sympair, b'\xff\n', 'UTF-8')
 
 VT = b'_ZTV2D1\t8\t??_7D1@@6BB1@@@\t0\n_ZTV2D1\t24\tnodecor:why\t-4\n_ZTV1X\t8\t\t4\n'
 check('vtpair', L.parse_vtpair(VT, 'o.o'), [('_ZTV2D1', 8, '??_7D1@@6BB1@@@', 0), ('_ZTV2D1', 24, 'nodecor:why', -4), ('_ZTV1X', 8, '', 4)])
@@ -71,29 +71,41 @@ if gcc and oc:
         c, o, o2 = (os.path.join(td, x) for x in ('t.c', 't.o', 't2.o'))
         open(c, 'w').write('int f(void){return 1;}\n')
         subprocess.run([gcc, '-c', '-o', o, c], check=True)
-        check('read, no sections', L.read(o, KINDS), dict(sympair=[], vtpair=[], n3=[]))
+        check('read, no sections', L.read(o), dict(sympair=[], vtpair=[], n3=[]))
         cmd = [oc]
         for name, data in (('sympair', SP), ('vtpair', VT), ('n3', N3)):
             p = os.path.join(td, name)
             open(p, 'wb').write(data)
             cmd.append('--add-section=.fnvnx.%s=%s' % (name, p))
         subprocess.run(cmd + [o, o2], check=True)
-        check('read', L.read(o2, KINDS), dict(sympair=L.parse_sympair(SP, '', KINDS), vtpair=L.parse_vtpair(VT, ''), n3=L.parse_n3(N3, '')))
+        check('read', L.read(o2), dict(sympair=L.parse_sympair(SP, ''), vtpair=L.parse_vtpair(VT, ''), n3=L.parse_n3(N3, '')))
         p = os.path.join(td, 'bad')
         open(p, 'wb').write(b'x\n')
         subprocess.run([oc, '--add-section=.fnvnx.vtpair=' + p, o, os.path.join(td, 't3.o')], check=True)
         try:
-            L.read(os.path.join(td, 't3.o'), KINDS)
+            L.read(os.path.join(td, 't3.o'))
             fails.append('read of a malformed section: no error')
         except ValueError as e:
             check('read error names object and section', str(e).startswith('t3.o:.fnvnx.vtpair: line 1'), True)
 
 import re as _re
-_inc = open(INC).read()
+_inc = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'toolchain', 'names', 'sympair_kinds.inc')).read()
 check('the kind set is the plugin definition (one X(name, "meaning") per kind of sympair_kinds.inc), noemit among them',
-      (KINDS == frozenset(_re.findall(r'^\s*(?:#define FNVNX_SYMPAIR_KINDS\(X\)\s*\\\n\s*)?X\(([^,()\s]+),', _inc, _re.M)) and 'noemit' in KINDS and len(KINDS) == _inc.count('X(') - 1), True)
-check('sympair noemit row', L.parse_sympair(b'_Z1fv\t?f@@YAXXZ\tnoemit\tref\n', 'o.o', KINDS), [('_Z1fv', '?f@@YAXXZ', 'noemit', 'ref')])
-err('sympair noemit needs the cl name', psk, b'_Z1fv\t\tnoemit\tref\n', 'without an MSVC name')
+      (L.KINDS == frozenset(_re.findall(r'^\s*(?:#define FNVNX_SYMPAIR_KINDS\(X\)\s*\\\n\s*)?X\(([^,()\s]+),', _inc, _re.M)) and 'noemit' in L.KINDS and len(L.KINDS) == _inc.count('X(') - 1), True)
+_t = tempfile.mkdtemp(prefix='kinds-')
+_x = os.path.join(_t, 'k.inc')
+open(_x, 'w').write(open(INC).read().rstrip('\n') + '\n  X(zz_newkind, "a kind added to the table")\n')
+L.set_kinds(_x)
+check('a kind added to the table is accepted (the table is the only source of the set)', L.parse_sympair(b'_Z1fv\t?f@@YAXXZ\tzz_newkind\tref\n', 'o.o') == [('_Z1fv', '?f@@YAXXZ', 'zz_newkind', 'ref')], True)
+L.set_kinds(INC)
+shutil.rmtree(_t, ignore_errors=True)
+try:
+    L.parse_sympair(b'_Z1fv\t?f@@YAXXZ\tzz_newkind\tref\n', 'o.o')
+    fails.append('a kind of no table is accepted')
+except ValueError:
+    pass
+check('sympair noemit row', L.parse_sympair(b'_Z1fv\t?f@@YAXXZ\tnoemit\tref\n', 'o.o'), [('_Z1fv', '?f@@YAXXZ', 'noemit', 'ref')])
+err('sympair noemit needs the cl name', L.parse_sympair, b'_Z1fv\t\tnoemit\tref\n', 'without an MSVC name')
 
 for f in fails:
     print('FAIL', f)

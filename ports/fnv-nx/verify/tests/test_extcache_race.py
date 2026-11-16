@@ -58,8 +58,8 @@ def main():
         os.makedirs(co)
         git("--work-tree", co, "checkout", "-f", "HEAD", "--", ".", cwd=src)
         tree = cas.ingest(co, os.path.join(base, "probe-store"))
+        os.environ["ARTIFACTS_URL"] = src
         store, cache = os.path.join(base, "store"), os.path.join(base, "cache")
-        recipe.set_artifacts(cache, src)   # the children read the run's repository from the cache they share
         start = os.path.join(base, "go")
         n = 8
         ps = [subprocess.Popen([sys.executable, "-I", "-c", CHILD % os.path.dirname(HERE), start, commit, tree, store, cache, os.path.join(base, "ws%d" % i)],

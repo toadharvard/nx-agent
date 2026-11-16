@@ -116,35 +116,21 @@ def prog(p):
     resolved on the host PATH the way the compiler would exec it (a cross compiler answers its absolute path)."""
     return p if os.path.isabs(p) else (shutil.which(p) or p)
 
-def progress(stage, key, what, sec=None):
-    """One flushed line on stderr per stage start and end: `stage ID KEY start` / `stage ID KEY hit|built|failed SECONDS`. A line is in no key and changes no
-    output: a long build shows where it is."""
-    sys.stderr.write("stage %s %s %s%s\n" % (stage, key, what, "" if sec is None else " %.2fs" % sec))
-    sys.stderr.flush()
-
-
 def run_stage(store, doc, cold):
     sandbox.check_doc(doc)
     key = sandbox.key_of(doc)
     cas._put(store, "stage-docs", key + ".json", cas.canon(doc) + b"\n")
     old = sandbox._load(store, key)
-    progress(doc["stage"], key, "start")
     if old is not None and not cold:
-        progress(doc["stage"], key, "hit" if not old.get("rc") else "failed", 0.0)
         return key, old, "hit", 0.0
     t0 = time.time()
     try:
         res, tm = sandbox.execute_timed(store, doc, key)
     except OSError as e:   # EMLINK, ENOSPC, EXDEV ... of the store or the sandbox set-up: a red stage naming the stage, never a crash
-        progress(doc["stage"], key, "failed", time.time() - t0)
         x = sandbox.SbxError("stage %s: %s (errno %s)" % (doc["stage"], e.strerror or e, e.errno))
         x.stage = doc["stage"]
         raise x
-    except BaseException:
-        progress(doc["stage"], key, "failed", time.time() - t0)
-        raise
     sec = time.time() - t0
-    progress(doc["stage"], key, "built" if not res.get("rc") else "failed", sec)
     sandbox.write_time(store, key, tm)    # the timing sidecar of an execution (a miss); a hit wrote none
     if old is None:
         sandbox._store_result(store, key, res)

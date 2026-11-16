@@ -50,9 +50,9 @@ extern char **environ;   /* newlib's */
 const FnvnxHostApi *fnvnx_host;
 extern char *fake_heap_start, *fake_heap_end;
 
-/* The process entry of the product image: __fnvnx_guest_entry (below) is the product root's `link.entry` (verify/RECIPE.md, Link), crt0 reaches it as
- * __fnvnx_image_entry. It calls `main` of rt/guest_main/main.c (the loader's start sequence, then the exe). A test image declares its own entry and links none of this. */
-int main(int argc, char **argv, char **envp);
+/* The image's entry: the symbol its root declares as `link.entry` (verify/RECIPE.md, Link); the link assigns it to this name (--defsym), so the runtime
+ * names no entry of any image. The product ELF's entry is `main` of rt/guest_main/main.c (the loader's start sequence, then the exe); a test image declares its own. */
+int __fnvnx_image_entry(int argc, char **argv, char **envp);
 void fnvnx_guest_fs_init(void);
 void __libc_init_array(void);
 
@@ -255,7 +255,7 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     __libc_init_array();
     static char arg0[] = "fnvnx-guest";
     static char *argv[] = { arg0, NULL };
-    int rc = main(1, argv, environ);
+    int rc = __fnvnx_image_entry(1, argv, environ);
     fflush(stdout);
 
     __asm__ volatile("msr tpidr_el0, %0" :: "r"(saved_tp) : "memory");

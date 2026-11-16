@@ -45,11 +45,7 @@ MODECALLS = "gzip.open gzip.GzipFile gzip.compress zipfile.ZipFile tarfile.open 
 PURE = set(("ast json hashlib re struct collections itertools functools dataclasses typing enum abc math bisect heapq "
             "array binascii base64 zlib io string textwrap shlex fnmatch posixpath copy contextlib types argparse errno "
             "stat csv difflib bz2 lzma codecs unicodedata decimal fractions traceback warnings keyword "
-            "tokenize token __future__ ntpath genericpath "
-            # xml.etree.ElementTree (and its own imports xml.etree.ElementPath, xml.etree.cElementTree is gone in 3.9+): its documented behaviour is a function of the bytes it
-            # parses or the tree it serialises; the expat backend fetches no external entity or DTD and reads no environment, clock or file beyond the file object or path
-            # handed to it. NOT listed, so still red: xml.etree.ElementInclude (its loader opens files and URLs), xml.dom.*, xml.sax.*, xml.parsers.* (ASM-032).
-            "xml.etree.ElementTree xml.etree.ElementPath").split())
+            "tokenize token __future__ ntpath genericpath").split())
 # (b) RESTRICTED: module -> allowed members ("*" all, "P_*" prefix, dotted "a.b" entries); rules above apply first
 RESTRICTED = {
     "os": "path sep linesep pathsep environ getenv makedirs mkdir remove unlink rename replace rmdir link symlink readlink "

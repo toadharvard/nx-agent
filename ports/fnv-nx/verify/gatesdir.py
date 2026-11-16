@@ -22,7 +22,7 @@ DIR = TREE + "/verify/gates.d"
 ADMIT = TREE + "/verify/admit.json"
 FILE_FORMAT = "fnvnx-gatefile/1"
 FORMAT = "fnvnx-gates/1"
-ROOT_CLASSES = ("doc", "tool", "ref", "test", "header", "product-guest", "product-guest-exe", "lifted", "host-product", "linked", "import-provider", "registry-reader")
+ROOT_CLASSES = ("doc", "tool", "ref", "test", "header", "product-guest", "product-guest-exe", "lifted", "host-product", "linked", "import-provider", "registry-reader", "compiled")
 
 
 class Bad(ValueError):
@@ -49,6 +49,25 @@ def has_link(repo, path):
             return bool(json.load(fh).get("link"))
     except (OSError, ValueError, AttributeError):
         return False
+
+
+UNIT_EXT = (".c", ".cc", ".cpp", ".cxx", ".s", ".S")   # recipe.CC_EXT + CXX_EXT + ASM_EXT: the unit kinds of the recipe (one rule over the tree)
+
+
+def has_units(repo, path):
+    """The root fact `compiled`: the root has at least one unit the recipe compiles: a tracked-or-present source file of a unit kind under the root, or a generated output of
+    a unit kind in its build.json. A recipe root with no unit (a header root, a generator-only root) has no object, so a gate whose universe is objects has nothing to read there."""
+    base = os.path.join(repo, path)
+    for d, ds, fs in os.walk(base):
+        ds[:] = sorted(x for x in ds if x not in ("__pycache__", ".git"))
+        if any(f.endswith(UNIT_EXT) for f in fs):
+            return True
+    try:
+        with open(os.path.join(base, "build.json"), encoding="utf-8") as fh:
+            gen = json.load(fh).get("generated") or []
+    except (OSError, ValueError, AttributeError):
+        return False
+    return any(isinstance(o, str) and o.endswith(UNIT_EXT) for g in gen if isinstance(g, dict) for o in g.get("outputs", []))
 
 
 def declares(repo, path, name):
@@ -88,6 +107,8 @@ def root_classes(admit, repo=None):
                     s.add("import-provider")
                 if declares(repo, r["path"], "registry.in.json"):
                     s.add("registry-reader")
+            if c in ("product-guest", "lifted", "host-product") and repo is not None and has_units(repo, r["path"]):
+                s.add("compiled")
             if c == "product-guest" and repo is not None and has_exe_twin(repo, r):
                 s.add("product-guest-exe")
             out[r["path"]] = s

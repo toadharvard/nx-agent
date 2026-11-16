@@ -144,6 +144,7 @@ def roots_of(path):
         except OSError:
             continue
         out |= set(TEST_ROOT.findall(text))
+        out |= {r for r in reads_of(f) if r != ADMITTED and not os.path.exists(os.path.join(root, r))}   # a declared input (`# reads:`) this tree does not hold: the root it names was cut
         for m in ROOT_LIT.findall(text):
             for q in (m, os.path.dirname(m)):   # `<root>/build.json`, `<root>/inc`: the root is the nearest ancestor with a recipe
                 if is_recipe(os.path.join(root, q, "build.json")):
@@ -156,6 +157,7 @@ def cut_of(path, admitted):
     `cut:test:<file> (root <r>)` and never run: a test is certified against the roots it builds, and a root that is not admitted is not built."""
     return [r for r in roots_of(path) if r not in admitted]
 
+ADMITTED = "@admitted-recipes"   # a `# reads:` token: every recipe file of every admitted root
 READS = re.compile(r"^#[ \t]*reads:[ \t]*(.*)$", re.M)
 
 def reads_of(path):
@@ -175,7 +177,20 @@ def mount_files(path):
         a = os.path.realpath(f)
         if a.startswith(root + os.sep):
             out[a[len(root) + 1:]] = a
-    for r in reads_of(path):
+    want = {x for f in closure_of(path)[1] for x in reads_of(f)} | set(reads_of(path))   # the `# reads:` of the test and of every file of its import closure (a module declares its own data)
+    if ADMITTED in want:   # the recipes of the admitted roots (verify/admit.json: the loader of recipes reads them all), one rule over the tree, never a list of roots
+        want.discard(ADMITTED)
+        import gate_admit
+        try:
+            adm = json.load(open(os.path.join(root, "ports/fnv-nx/verify/admit.json")))["roots"]
+        except (OSError, ValueError, KeyError):
+            adm = []
+        for ent in adm:
+            for rp in gate_admit.recipe_paths(ent):
+                want.add(rp)
+                d = os.path.dirname(rp)
+                want.update(os.path.join(d, n) for n in os.listdir(os.path.join(root, d)) if n.startswith("build") and n.endswith(".json")) if os.path.isdir(os.path.join(root, d)) else None
+    for r in sorted(want):
         base = os.path.join(root, r)
         if os.path.isfile(base):
             out[r] = base
@@ -191,7 +206,8 @@ def mount_digest(files, st):
     return hashlib.sha256(cas.canon(sorted((rel, st.of(rel)) for rel in files))).hexdigest()
 
 def mount_make(files, dest):
-    """The mount directory DEST: each file hard-linked (copied across devices) at its repo-relative path."""
+    """The mount directory DEST: each file hard-linked (copied across devices) at its repo-relative path, and the directory is a git checkout of exactly those files (one commit), so a
+    test that lists the tracked files or clones the checkout sees the mount's files and nothing else."""
     for rel, a in files.items():
         t = os.path.join(dest, rel)
         os.makedirs(os.path.dirname(t), exist_ok=True)
@@ -199,6 +215,10 @@ def mount_make(files, dest):
             os.link(a, t)
         except OSError:
             shutil.copy2(a, t)
+    g = ["git", "-C", dest, "-c", "user.name=mount", "-c", "user.email=mount@invalid", "-c", "commit.gpgsign=false"]
+    subprocess.run(g + ["init", "-q"], check=True, capture_output=True)
+    subprocess.run(g + ["add", "-A", "-f"], check=True, capture_output=True)
+    subprocess.run(g + ["commit", "-q", "-m", "mount", "--no-verify"], check=True, capture_output=True)
 
 def fetch_inputs(names, cache, ws):
     """{FNVNX_INPUT_<NAME>: host dir} of the pinned externals NAMES (recipe.fetch_externals, commit + tree_sha256 checked), or a string: why not."""
@@ -206,7 +226,7 @@ def fetch_inputs(names, cache, ws):
     try:
         pins = {e["name"]: e for e in json.load(open(PINS))["external"]}
         ext = [pins[n] for n in names]
-        got = recipe.fetch_externals(ext, os.path.join(cache or ws, "store"), recipe.ext_dir(cache or ws), ws)
+        got = recipe.fetch_externals(ext, os.path.join(cache or ws, "store"), os.path.join(cache or ws, "external"), ws)
     except recipe.BuildRed as x:
         return "%s: %s" % (x.args[0].get("stage"), "; ".join(x.args[0].get("stderr", [])[-3:]))
     except (OSError, ValueError, KeyError) as x:
@@ -235,7 +255,7 @@ def fetch_guest(cache, ws):
     exts = guest_externals()
     if not exts:
         return {}
-    ec = recipe.ext_dir(cache or ws)
+    ec = os.path.join(cache or ws, "external")
     try:
         got = recipe.fetch_externals(exts, os.path.join(cache or ws, "store"), ec, ws)
     except recipe.BuildRed as x:
@@ -251,7 +271,7 @@ def run_one(path, timeout, base, idx, extra=None, trace=None, cwd=None):
     t0 = time.time()
     tdir, logp = os.path.join(base, "t%d" % idx), os.path.join(base, "t%d.log" % idx)
     os.mkdir(tdir)
-    # a test file is not a gate: it does not see GATE_OUT / GATE_CACHE (a test that runs gates of its own
+    # a test file is not a gate: it does not see GATE_OUT / GATE_COMMIT / GATE_CACHE (a test that runs gates of its own
     # would otherwise share this gate's result cache and outputs)
     env = {k: v for k, v in os.environ.items() if not k.startswith("GATE_")}
     env["TMPDIR"] = tdir
@@ -266,7 +286,9 @@ def run_one(path, timeout, base, idx, extra=None, trace=None, cwd=None):
                                  start_new_session=True, env=env, cwd=cwd)
             try:
                 rc = p.wait(timeout=timeout)
-                if rc:
+                if rc < 0:
+                    why.append("killed by signal %d (%s)" % (-rc, signal.Signals(-rc).name if -rc in {int(x) for x in signal.Signals} else "?"))
+                elif rc:
                     why.append("exit %d" % rc)
             except subprocess.TimeoutExpired:
                 why.append("timeout %gs" % timeout)

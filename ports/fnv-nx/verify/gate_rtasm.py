@@ -586,7 +586,7 @@ def jmpbuf_facts(repo, cache):
     objs = [o["object"] for o in res["objects"] if o["unit"].endswith("jmpbuf.c")]
     if len(objs) != 1:
         raise ValueError("jmp_buf probe root: %d objects of jmpbuf.c" % len(objs))
-    ext = recipe.exttree(recipe.load_pin(repo)["external"], cache)   # the checkout, through the recipe's own accessor (never a path built by hand)
+    ext = os.path.join(cache, "external", recipe.load_pin(repo)["external"]["commit"])
     hdr = [os.path.join(d, "setjmp.h") for d, _n, fs in os.walk(ext) if "setjmp.h" in fs and os.path.basename(d) == "include"]
     if len(hdr) != 1:
         raise ValueError("the pinned runtime external holds %d include/setjmp.h (want exactly 1)" % len(hdr))
@@ -628,18 +628,21 @@ def gate_main():
     repo, tmp = ".", None
     cache = os.environ.get("GATE_CACHE")
     if not cache:
-        cache = tmp = tempfile.mkdtemp(prefix="gate-rtasm-")
+        tmp = tempfile.mkdtemp(prefix="gate-rtasm-")
+        cache = os.path.join(tmp, "store")   # the pool is the store's sibling: both inside tmp, removed together
     try:
         u = c = 0
         ids, why = [], []
         adm = recipe.load_admit(repo)
-        roots = [r for r in gate_build.product_roots(repo) if recipe.entry_of(adm, r).get("target") == "guest"]
-        try:
-            jb = jmpbuf_facts(repo, cache)
-        except (ValueError, recipe.RecipeError) as e:
-            jb, why = ((), 0), ["jmp_buf facts: %s" % str(e)[:200]]
-            u += 1
-            ids.append("jmpbuf:probe")
+        roots = [r for r in gate_build.product_roots(repo) if recipe.entry_of(adm, r).get("target") == "guest" and not gate_build.unitless(r, cache, repo)]   # a header-only root has no object to judge (by construction)
+        jb = ((), 0)
+        if roots:   # the jmp_buf facts are the judge of the guest roots' routines: without a guest root there is nothing to judge, and the facts are not asked for
+            try:
+                jb = jmpbuf_facts(repo, cache)
+            except (ValueError, recipe.RecipeError) as e:
+                jb, why = ((), 0), ["jmp_buf facts: %s" % str(e)[:200]]
+                u += 1
+                ids.append("jmpbuf:probe")
         for r in roots:
             rep, w = judge_root_objects(repo, cache, r, jb)
             if rep is None:

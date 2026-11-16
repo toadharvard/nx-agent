@@ -16,7 +16,7 @@
 	.type   __fnvnx_guest_start, %function
 	.align  2
 __fnvnx_guest_start:
-	b       __fnvnx_image_entry                 // +0  the image's entry: the link assigns it from link.entry (the product image: __fnvnx_guest_entry of runtime.c)
+	b       __fnvnx_guest_entry                 // +0  entry, C (runtime.c)
 	.size   __fnvnx_guest_start, . - __fnvnx_guest_start
 
 	.section .crt0.hdr, "a", %progbits

@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/contract ports/fnv-nx/lib/sha256/build.host.json ports/fnv-nx/lift/descs/build.json ports/fnv-nx/link
-# reads: ports/fnv-nx/render/gl4/build.json ports/fnv-nx/render/nxgpu/build.json ports/fnv-nx/render/pair/build.host.json
-# reads: ports/fnv-nx/render/shaders/translator/build.host.json ports/fnv-nx/render/smscan/build.host.json
+# reads: ports/fnv-nx/bridgefacts ports/fnv-nx/contract ports/fnv-nx/link
 # reads: ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for the two objstub rules on top of the V class (objstub.py (T-B) and (H)):
   (T-B) a trap-shaped body: every path ends in a call of the root's failure function (recipe `error_abi`) and the body has no output effect
@@ -268,7 +266,7 @@ for what, cover, syn, hdr in (("a class outside a|b|c|own|none", GOOD_C.replace(
 import json  # noqa: E402
 import recipe  # noqa: E402
 REPO = os.path.abspath(os.path.join(HERE, "..", "..", "..", ".."))
-D = "ports/fnv-nx/lift/descs"
+D = "ports/fnv-nx/bridgefacts"
 adm, files = recipe.load_admit(REPO), recipe.tracked(REPO)
 base = json.load(open(os.path.join(REPO, D, "build.json")))
 cov = "ports/fnv-nx/verify/tests/test_objstub.py"   # any tracked file stands for a record path

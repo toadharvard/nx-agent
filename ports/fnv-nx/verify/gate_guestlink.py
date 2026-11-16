@@ -2,7 +2,7 @@
 """Gate "guestlink" (fnvnx-gate/1, class A of VERDICT.md): the guest link's libraries are what the pinned guest runtime's own driver derives, and nothing
 is stored: link/guest.json holds the script only (a stored copy of the derivation is a second declaration), and the link derives the libraries itself
 (recipe.Job.guest_libs, keyed stages). This gate recomputes the same derivation and reds when it does not hold.
-    python3 -I gate_guestlink.py    cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/guestlink.json
+    python3 -I gate_guestlink.py    cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/guestlink.json
 Derivation (RECIPE.md, Link): the C++ driver of the pinned runtime external (the cxx driver of the triplet of verify/targets.json, in the compiler tree of verify/guest_compiler.json) is run, as the hermetic recipe
 stage `drv:<root>`, with the guest semantic flags (flags.semantics.common, filtered for C++ by the pinned compiler) and `-pie -###` on a one-line C++
 file; its last line is the link command: recipe.parse_driver_link reads startfiles, dirs, names and endfiles. An object of startfiles/endfiles is
@@ -40,7 +40,7 @@ def derive(repo, cache):
         if res["status"] == "red":
             raise ValueError("%s: build red at stage %s" % (r, res["failure"]["stage"]))
         rootdef |= {d["symbol"] for d in res["defined"]}
-    j = recipe.Job(repo, guests[0], os.path.join(cache, "store"), 1, recipe.ext_dir(cache))
+    j = recipe.Job(repo, guests[0], os.path.join(cache, "store"), 1, os.path.join(cache, "external"))
     prof = recipe.load_guest_link(repo)
     with tempfile.TemporaryDirectory(prefix="guestlink-") as ws:
         derived, gone = j.guest_libs(ws, rootdef, open(os.path.join(repo, recipe.TREE, prof["script"])).read())

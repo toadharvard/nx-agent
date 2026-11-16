@@ -52,7 +52,8 @@ def main():
     except recipe.BuildRed as x:
         check("the pinned external is fetched", False, x.args)
         return
-    pre = got[ext["name"]]["host"] + "/bin/aarch64-linux-gnu-"
+    cc_, cxx_ = recipe.pin_drivers()     # the drivers derive from the one triplet (targets.drivers), never spelled here
+    pre = got[ext["name"]]["host"] + "/" + cc_[:-3]
     gcc, gxx = pre + "gcc", pre + "g++"
     ex = {"c": P.expected(gcc, "c"), "cxx": P.expected(gxx, "cxx")}
     check("expected set: the semantic flags the compiler records, no -g/-O/-W/-D/-std", {"-fsigned-char", "-ffp-contract=off", "-mabi=ilp32", "-mno-outline-atomics", "-fPIC"} <= ex["c"]
