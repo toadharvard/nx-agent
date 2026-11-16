@@ -1754,3 +1754,8 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - P2' is agreed with L3b. A suspension is delivered only at S = transfer sites ∪ back-edge targets (loop headers), which keeps suspension live.
   - Doing (w13): back-edge esc in flaglive, plus FNVL_POLL at loop headers. The new head is claude/fnv-l3a-lift-w13-r123p.
   - Blocked (L5): the poll ABI (field and function), plus SuspendThread/ResumeThread and Get/SetThreadContext over S.
+- Done (w7): seg shapes, claude/fnv-l3a-lift-w7-seg @d3a0411c6.
+  - All 46 seg/CR/DR shapes were already path=form. Deleted: h_segshapes and its dead helpers in f_int/f_sys.
+  - Token diff of all 46: 0. x86sys pinned at L5 4ec8cd2c1.
+  - gs over 6 of 7 images: 10 read keys / 15 sites, 0 accesses, 0 writes.
+  - fnvl_seg_ok stays: h_lxs and seh.cc use it; checking that gen_sys derives it from x86sys. h_lxs waits on L3b's les-family Forms.
