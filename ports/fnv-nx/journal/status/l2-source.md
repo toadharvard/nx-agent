@@ -682,3 +682,14 @@ After the first frame:
 - 2026-11-16 04:28Z: L1 w28 c8938b24c: the 3 old-rule test_plugins tests are rewritten or deleted, and a host root loads plugins only when it has a C/C++ unit, so the toolchain root goes green. w3 and w2 merge it into cand4b.
 - 2026-11-16 04:30Z: w3 cand4b 3f1036631 merges L1 c8938b24c: the host-root plugin red is fixed, and ext_checkout replaces ext_of_store. Recipe-path (a) was queued behind the cand3b verdict, so it moves to the L2 farm as its first job: toolchain-stage1, then toolchain, at 3f1036631. w3 readies (b) and the deletion of the old path.
 - bottleneck: the L2 farm's run (a) of recipe-path gcc1/rt at 3f1036631. It blocks the pin, so lift/rt and the ELF.
+- 2026-11-16 04:45Z: w2 cand4b 4e40b5970 (measured on the d1a92e26 scratch).
+  - Done:
+    - 35d0394e9: the named decltype diagnostic.
+    - 67164ec5e: ENTRY1-ATOMIC in C.
+    - NAMES-INTN: nodecor per root 852 -> 500 (real16 494, extern-in-internal 6; int8/16/64 = 0), over 101 objects.
+    - test_plugins 88/88.
+  - lift/rt: 11 objects clean, with no decltype or ENTRY1 errors. Next red: cpumodel.c:59 `fnvl_msvcrt_adjust_fdiv` undeclared.
+  - Platform roots: red at crt/iob.c:95/115 (`__pioinfo`, `__badioinfo`). Both are the L1 w28 `&symbol` FNVNX_EXPORT needing a prior declaration; went to L1 as a class.
+  - Next for w2:
+    - test_dispatch_entry 49/54: the platform header tests must take their flags from the owning root;
+    - the NAMES type-code table generated from a pinned MSVC doc (rule 1).
