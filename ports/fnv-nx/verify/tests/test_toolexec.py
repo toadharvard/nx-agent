@@ -70,4 +70,11 @@ check("timeout_s is red", any("timeout_s" in e for e in errs({"exec": "/usr/bin/
 check("env with PATH is red", any("env must" in e for e in errs({"exec": "/usr/bin/x", "env": {"PATH": "/x"}})))
 check("env with a path outside scratch is red", any("scratch" in e for e in errs({"exec": "/usr/bin/x", "env": {"CARGO_HOME": "/home/x"}})))
 check("env constants and a scratch path are green", errs({"exec": "/usr/bin/x", "env": {"CARGO_HOME": "/scratch/cargo", "RUST_BACKTRACE": "0"}}) == [], errs({"exec": "/usr/bin/x", "env": {"CARGO_HOME": "/scratch/cargo"}}))
+prof = recipe.deb_profiles().get("compiler-build")
+check("debs profile: the tops of env.json debs.profiles, same as the written closure form", prof and recipe.step_debs({"debs": {"profile": "compiler-build"}}, closure=False) == recipe.step_debs({"debs": {"closure": prof}}, closure=False), prof)
+try:
+    recipe.step_debs({"debs": {"profile": "nope"}}, closure=False)
+    check("debs profile: an unknown profile is red", False)
+except ValueError as e:
+    check("debs profile: an unknown profile is red", "debs.profile" in str(e), str(e))
 sys.exit(1 if fails else 0)
