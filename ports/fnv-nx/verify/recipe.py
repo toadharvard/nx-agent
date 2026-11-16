@@ -1409,7 +1409,7 @@ def run_errors(rec, root, files, roots, mine, seen, repo):
         else:
             for p in ins:
                 if isinstance(p, str):
-                    if not (rel_ok(p) and any(f == p or under(f, p) for f in files) and any(under(p, r) for r in roots)):
+                    if not (rel_ok(p) and any(f == p or under(f, p) for f in files) and tree_of(roots, p)):
                         err.append("run[%d].inputs: %s is not a tracked file or directory of an admitted root" % (i, p))
                 elif isinstance(p, dict) and set(p) == {"external", "path"}:
                     if p["external"] not in [e.get("name") for e in rec.get("external", []) if isinstance(e, dict)]:
@@ -1481,6 +1481,14 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
     err += missing_recipes(roots, files)
     mine = {f[len(root) + 1:] for f in files if under(f, root)}
     gen = generated_outputs(rec)
+    if gonly:   # `compiler` and `plugins` of a root with no unit are used only by its run steps: a plugin is a step's {"plugin": NAME} input, the compiler builds the plugins
+        # (or is a step's {"external": NAME} input); an unused one is red, as gen:unused-import is
+        rins = [p for g in (rec.get("run") if isinstance(rec.get("run"), list) else []) if isinstance(g, dict) and isinstance(g.get("inputs"), list) for p in g["inputs"] if isinstance(p, dict)]
+        pl = [x.get("name") for x in (rec.get("plugins") if isinstance(rec.get("plugins"), list) else []) if isinstance(x, dict)]
+        err += ["gonly:unused-plugin:%s (a root with no unit declares a plugin only when a run step takes it as its {\"plugin\": NAME} input)" % n for n in pl if {"plugin": n} not in rins]
+        cp = rec.get("compiler")
+        if cp is not None and not (pl or any(set(p) == {"external"} and isinstance(cp, dict) and p["external"] in (cp.get("external"), cp.get("name")) for p in rins)):
+            err.append("gonly:unused-compiler (a root with no unit names a compiler only to build its plugins or as a run step's {\"external\": NAME} input)")
     if gonly:   # no compiler and no flags are written: the root compiles nothing; a source that is no run step's declared input is neither a unit nor an input: red
         err += ["generated-only root: %s is a translation unit (a root with units writes compiler, flags, include and units); a source file is a declared input of a `run` step or a unit" % u
                 for u in sorted((mine - run_input_sources(rec, root, files)) | set(gen)) if u.endswith(CC_EXT + CXX_EXT + ASM_EXT)]

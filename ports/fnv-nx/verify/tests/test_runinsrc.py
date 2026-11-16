@@ -42,6 +42,24 @@ def main():
     check("generated-only: `compiler` and `plugins` may be written (the compiler stage)", recipe.generated_only(dict(g, compiler={"name": "s", "root": "r", "output": "O", "at": "/ext/s"}, plugins=[{"name": "p"}])), "")
     check("not generated-only: any unit key (flags, include, units, link, profile, variants)", not any(recipe.generated_only(dict(g, **{k: 1})) for k in ("flags", "include", "units", "link", "profile", "variants")), "")
     check("fill keeps the root's own compiler", recipe.fill_generated_only(dict(g, compiler="X"))["compiler"] == "X", "")
+    # run inputs may lie in a tree of an admitted root (link/ is a tree of the contract root), not only under a root path
+    rts = {"ports/fnv-nx/contract": {"path": "ports/fnv-nx/contract", "trees": ["ports/fnv-nx/contract", "ports/fnv-nx/link"], "class": "tool"}}
+    ee = recipe.run_errors(rec(["ports/fnv-nx/link/guest.ld"]), ROOT, {"ports/fnv-nx/link/guest.ld"}, rts, set(), set(), ".")
+    check("a run input in a tree of an admitted root (link of contract) is accepted", not [x for x in ee if "inputs:" in x], ee)
+    ee = recipe.run_errors(rec(["ports/fnv-nx/elsewhere/x"]), ROOT, {"ports/fnv-nx/elsewhere/x"}, rts, set(), set(), ".")
+    check("a run input in no admitted tree is red", any("not a tracked file or directory of an admitted root" in x for x in ee), ee)
+    # unused compiler / plugins of a generated-only root
+    def gu(rc, ins):
+        r = dict(rec(ins), **rc)
+        repo = TL.mk("gu" + str(abs(hash(str(rc) + str(ins)))), r, {"toy/b.c": None})
+        return [x for x in recipe.check(r, ROOT, recipe.tracked(repo), recipe.load_admit(repo), None, repo) if x.startswith("gonly:")]
+    cmp_ = {"name": "s", "root": "r", "output": "O", "at": "/ext/s"}
+    e = gu({"compiler": cmp_, "plugins": [{"name": "p"}]}, [{"plugin": "p"}])
+    check("compiler + a plugin that a run step takes: no gonly error", e == [], e)
+    e = gu({"compiler": cmp_, "plugins": [{"name": "p"}, {"name": "q"}]}, [{"plugin": "p"}])
+    check("a plugin no run step takes is red (gonly:unused-plugin)", len(e) == 1 and "unused-plugin:q" in e[0], e)
+    e = gu({"compiler": cmp_}, [])
+    check("a compiler with no plugin and no step using it is red (gonly:unused-compiler)", len(e) == 1 and "unused-compiler" in e[0], e)
     print("%d FAILED" % len(TR.FAILED) if TR.FAILED else "all passed")
     return 1 if TR.FAILED else 0
 
