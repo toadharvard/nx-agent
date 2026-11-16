@@ -16,11 +16,10 @@ _CONF = [False]
 
 
 def configure():
+    """the lifter's inputs, as the byte-buffer tests configure them (fnvlift/tests/_inputs.py): the SDM opcode-row table is the produced input SDMROWS (FNVNX_INPUT_SDMROWS)"""
     if _CONF[0]: return
-    import fnvnx.lift.proof.tests.declared_cpufeat as declared_cpufeat, fnvnx.lift.fnvlift.tests._inputs as _inputs
-    cp, why = declared_cpufeat.path()
-    if not cp: raise SystemExit(why)
-    _inputs.configure(cpufeat=cp); _CONF[0] = True
+    import fnvnx.lift.fnvlift.tests._inputs as _inputs
+    _inputs.configure(); _CONF[0] = True
 
 
 def emitted(raw):
