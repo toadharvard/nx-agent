@@ -27,12 +27,5 @@
    "-fPIC"
   ],
   "asm": []
- },
- "include": [
-  "ports/fnv-nx/lib/sha256/include"
- ],
- "units": "all",
- "outputs": {
-  "INCLUDE": "include"
  }
 }

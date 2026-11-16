@@ -40,6 +40,25 @@ Target: Microsoft Visual C++ 2008 (cl 15.00), x86, /Zc:wchar_t, /J off, /Zp8. Pi
 | S32 | sig_atomic_t is `int` (SIGNAL.H of Visual C++ 2008) | int (__SIG_ATOMIC_TYPE__ = int) | equal by default (SIG_ATOMIC_TYPE is unset in aarch64, the language default is int) | closed | exe: cpp-docs documents sig_atomic_t only as "integer" (c-runtime-library/standard-types.md); its type int is the declaration of cl 15.00's signal.h and is checked per record by the R7 layout gate |
 | S33 | Visual C++ 2008 has no <stdint.h>: the exe has no such typedef, so there is no MS value | each alias denotes a fundamental type with an S-row: int8 signed char, int16 short, int32 int, int64 long long, intmax long long, intptr int; least/fast any fundamental integer type of at least N bits | rule, checked: each alias resolves to a fundamental type fixed by S03-S06 and S10, so a field of such a type has the layout of that type | closed | exe: none: native-only typedefs; the rule is the check (a field of such a type has the layout of its fundamental type) |
 
+## Types (14)
+
+| type | size | align | signed | row |
+|---|---|---|---|---|
+| char | 1 | 1 | yes | S01 |
+| signed char | 1 | 1 | yes | S03 |
+| unsigned char | 1 | 1 | no | S03 |
+| bool | 1 | 1 | no | S03 |
+| short | 2 | 2 | yes | S04 |
+| int | 4 | 4 | yes | S05 |
+| long | 4 | 4 | yes | S05 |
+| long long | 8 | 8 | yes | S06 |
+| float | 4 | 4 | - | S07 |
+| double | 8 | 8 | - | S08 |
+| long double | 8 | 8 | - | S09 |
+| pointer | 4 | 4 | - | S10 |
+| enum | 4 | 4 | yes | S14 |
+| wchar_t | 2 | 2 | no | S02 |
+
 ## tm.texi entries (135)
 
 | entry | fact or reason |

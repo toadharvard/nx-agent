@@ -3,8 +3,7 @@
     GATE_OUT=<dir> GATE_CACHE=<dir> python3 -I ports/fnv-nx/render/total/gate_sm_link.py
 Run in the checkout root (verify/verdict.py does). Writes GATE_OUT/sm_link.json; exit 0 iff green, 2 red.
 The rule is render/shaders/total/SM_LINK_RULE.md. This gate computes nothing itself: the certificates are the outputs of the hermetic run
-stages of the product roots render/shaders/sm_link_stage (stage certificates), sm_link_prog (link certificates) and sm_link_sum (their
-completeness-checked summary), built by verify/recipe.py in GATE_CACHE; the summary is read through recipe.resolve_input
+stages of the product root render/shaders/sm_link_sum (stage certificates `stage` x8, link certificates `link` x8 and the completeness-checked `summary`; the shard count 8 is written once, as `foreach range`), built by verify/recipe.py in GATE_CACHE; the summary is read through recipe.resolve_input
 {"stage": "ports/fnv-nx/render/shaders/sm_link_sum:run:summary", "path": "summary.json"}, the one reader of a stage output.
 Universe = the stage certificates (entry x translator flag set) plus the link certificates (program set); red = the summary's `red`
 (refusals, not-ok stages, signature disagreements, link failures, missing or unexpected certificates). Green iff universe > 0 and red = 0."""

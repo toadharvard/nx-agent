@@ -63,6 +63,8 @@ def root_check(root, repo, cache, jobs, built=None):
                                 "root %s stage %s: %s" % (root, f["stage"], " ".join(f.get("stderr") or [])[:160])[:300])], None, None, {}, {}
     if built is not None:
         built[root] = res
+    if recipe.entry_of(roots, root).get("target") != "guest":   # the analysis plugin is bound to the guest compiler (RECIPE.md "Plugins"): host roots are not product code, no stub-gate judgment
+        return {}, {}, set(), [], None, None, {}, {}
     base = root + "/"
     objs = [(base + o["unit"], o["object"]) for o in res["objects"]]
     objs += [("%s%s(%s)" % (base, m["archive"].lstrip("/"), m["member"]), m["object"]) for m in res.get("link_archives", [])]   # pulled archive members

@@ -23,6 +23,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 REAL = os.path.normpath(os.path.join(HERE, '..', '..', '..', '..'))    # checkout root
 sys.path.insert(0, os.path.join(HERE, '..', '..', 'link'))
+from verify import scratch  # noqa: E402
 import elfobj  # noqa: E402
 from verify import recipe  # noqa: E402
 from verify import sandbox  # noqa: E402
@@ -32,11 +33,7 @@ import glob  # noqa: E402
 T = 'ports/fnv-nx/'
 ROOT = T + 'toy'
 TOOLCHAIN = os.path.normpath(os.path.join(HERE, '..'))
-STORE = os.environ.get('GATE_CACHE') or tempfile.mkdtemp(prefix='fnvnx-toolchain-tests-')  # a scratch store of this run only, removed at exit
-if not os.environ.get('GATE_CACHE'):
-    import atexit
-    import shutil
-    atexit.register(shutil.rmtree, STORE, ignore_errors=True)
+STORE = os.environ.get('GATE_CACHE') or scratch.store('fnvnx-toolchain-tests-')   # a scratch store of this run only: store and pool removed at exit
 STATS = {'run': 0, 'hit': 0}
 # The toy root states nothing that a record already holds (RECIPE.md): the compiler, the runtime, the semantic flags and the plugins come from
 # env.json, guest_compiler.json and recipe.PLUGIN_SOURCES as for a product root. What the recipe requires of a root's own flags are its constants:

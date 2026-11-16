@@ -20,7 +20,7 @@
  ],
  "uses": [
   {
-   "root": "ports/fnv-nx/bridgefacts",
+   "root": "ports/fnv-nx/bridgefacts/com",
    "output": "COM_ROWS"
   },
   {
@@ -43,7 +43,7 @@
     "--va",
     "/in/ports/fnv-nx/bridgefacts/crt/msvcrt_va.tsv",
     "--extra",
-    "/uses/ports/fnv-nx/bridgefacts/COM_ROWS",
+    "/uses/ports/fnv-nx/bridgefacts/com/COM_ROWS",
     "--extra",
     "/uses/ports/fnv-nx/bridgefacts/D9_ROWS",
     "--exports",

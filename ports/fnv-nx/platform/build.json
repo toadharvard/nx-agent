@@ -231,9 +231,9 @@
   {
    "tool": "ports/fnv-nx/platform/com/gen_combridge.py",
    "args": [
-    "/uses/ports/fnv-nx/bridgefacts/COM_SPEC",
-    "/uses/ports/fnv-nx/bridgefacts/COM_ROWS",
-    "/uses/ports/fnv-nx/bridgefacts/COM_WORDS",
+    "/uses/ports/fnv-nx/bridgefacts/com/COM_SPEC",
+    "/uses/ports/fnv-nx/bridgefacts/com/COM_ROWS",
+    "/uses/ports/fnv-nx/bridgefacts/com/COM_WORDS",
     "/out/com",
     "/in/ports/fnv-nx/platform/crt/cxx_types.tsv",
     "/in/ports/fnv-nx/contract"
@@ -542,15 +542,15 @@
    "output": "INCLUDE"
   },
   {
-   "root": "ports/fnv-nx/bridgefacts",
+   "root": "ports/fnv-nx/bridgefacts/com",
    "output": "COM_SPEC"
   },
   {
-   "root": "ports/fnv-nx/bridgefacts",
+   "root": "ports/fnv-nx/bridgefacts/com",
    "output": "COM_ROWS"
   },
   {
-   "root": "ports/fnv-nx/bridgefacts",
+   "root": "ports/fnv-nx/bridgefacts/com",
    "output": "COM_WORDS"
   },
   {

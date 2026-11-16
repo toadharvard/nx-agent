@@ -2,8 +2,8 @@
 """L4 verdict: gate certificates, merge gate, build/verification separation, rule-defect queue. stdlib only.
 Run as `python3 -I verdict.py CMD ...`. Exit codes: 0 ok, 1 usage/format error, 2 red/blocked, 3 merge conflict.
   run         --repo R --commit C --gates GATES.json --out V.json [--budget-s 300] [--env-id H] [--cache DIR]
-              Runs each gate (argv, cwd = clean git worktree of C, env + GATE_OUT + GATE_DETAIL (OUT.detail/<gate>, kept) + GATE_COMMIT [+ GATE_CACHE]), in file order.
-              Gate contract for the environment: GATE_OUT (result directory), GATE_COMMIT (commit under test) and, when --cache is
+              Runs each gate (argv, cwd = clean git worktree of C, env + GATE_OUT + GATE_DETAIL (OUT.detail/<gate>, kept) [+ GATE_CACHE]), in file order.
+              Gate contract for the environment: GATE_OUT (result directory; the commit under test is the HEAD of the gate's worktree, never an environment value) and, when --cache is
               given, GATE_CACHE (absolute path of a caller-owned directory that outlives the run). A gate may store results in
               GATE_CACHE only under a key that covers everything it reads (its inputs' content, the declared environment, its own
               arguments); it must work, and give the same verdict, without GATE_CACHE. A gate writes
@@ -117,13 +117,14 @@ def _gate_result(g, out_dir, rc):
     return "green", u, c, ""
 
 def _stderr_tail(path, n=1200):
-    """The last N characters of the gate's stderr file ("(empty)" when there is none)."""
+    """The last N characters of the gate's stderr file, newlines shown as ' | ' (the reason is one line); '(empty)' when the gate wrote nothing."""
     try:
-        with open(path, errors="replace") as fh:
-            t = fh.read()[-n:].strip()
-    except OSError:
-        t = ""
-    return t or "(empty)"
+        with open(path, "rb") as f:
+            t = f.read()[-4 * n:].decode("utf-8", "replace").strip()
+    except OSError as e:
+        return "(unreadable: %s)" % e
+    return t[-n:].replace("\n", " | ") if t else "(empty)"
+
 
 def _present_classes(wt):
     """The set of root classes of the admitted roots of the tree under test (gatesdir.root_classes); empty when admit.json is absent."""
@@ -163,7 +164,7 @@ def cmd_run(a):
     work = tempfile.mkdtemp(prefix="verdict-")
     wt = os.path.join(work, "wt")
     _git_ok(o["--repo"], "worktree", "add", "--detach", wt, commit)
-    genv = dict(os.environ, GATE_COMMIT=commit)
+    genv = dict(os.environ)
     genv.pop("GATE_CACHE", None)
     if "--cache" in o:
         genv["GATE_CACHE"] = os.path.abspath(o["--cache"])
@@ -180,7 +181,7 @@ def cmd_run(a):
             os.makedirs(tmp)
             t0 = time.time()
             try:
-                errf = os.path.join(work, "gate-%d.stderr" % len(res))
+                errf = os.path.join(work, "stderr-%d" % len(res))   # outside the gate's TMPDIR and the worktree: the runner's own file
                 with open(errf, "wb") as ef:
                     rc = subprocess.run(g["argv"], cwd=wt, env=dict(genv, GATE_OUT=out, TMPDIR=tmp, GATE_DETAIL=os.path.join(detail, g["name"])),
                                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=ef).returncode
@@ -192,8 +193,8 @@ def cmd_run(a):
                     tail = _stderr_tail(errf)
                     if tail != "(empty)" or not os.path.isfile(os.path.join(out, g["result"])):
                         why = (why + "; " if why else "") + "stderr tail: " + tail
-                    os.makedirs(detail, exist_ok=True)
-                    shutil.copyfile(errf, os.path.join(detail, g["name"] + ".stderr"))
+                    os.makedirs(os.path.dirname(detail + "/" + g["name"]), exist_ok=True)
+                    shutil.copyfile(errf, detail + "/" + g["name"] + ".stderr")
             except OSError as e:
                 st, u, c, why = "red", 0, 0, "cannot run: %s" % e
             left = sorted(os.listdir(tmp))

@@ -11,7 +11,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [os.path.join(HERE, '..'), os.path.join(HERE, '..', '..', 'link'), os.path.join(HERE, '..', '..', 'contract')]
 import gate_abi  # noqa: E402
 import l2sections  # noqa: E402
-l2sections.set_kinds(os.path.join(HERE, "..", "..", "toolchain", "names", "sympair_kinds.inc"))
 
 tmp = tempfile.mkdtemp(prefix='abilink-')
 __import__('atexit').register(__import__('shutil').rmtree, tmp, True)   # a test leaves no scratch behind

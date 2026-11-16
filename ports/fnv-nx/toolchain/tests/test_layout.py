@@ -313,7 +313,7 @@ def decltype_cxx(td, so):
               '_ZN2ZZC1ERK2TTIiE' not in got and why.get('_ZN2ZZC1ERK2TTIiE') == 'mangled' and 'r1' in got)
         check('DECLTYPE-COMPLETE: C++ names with the Itanium mangling have the reason mangled, a C++ name with an assembler label (not `_Z`) the reason cxx, a plain extern "C" one a type',
               why.get('_Z5cxxfni') == 'mangled' and why.get('_Z6cxxusev') == 'mangled' and why.get('plain_cxx') == 'cxx' and 'r4' in got, why)
-        check('every reason of the section is in the closed set of the plugin (FNVNX_DECLTYPE_REASONS), read by ctypes_compat', set(why.values()) <= cc._decltype_reasons(), why)
+        check('every reason of the section is in the closed set of the plugin (FNVNX_DECLTYPE_REASONS), read by ctypes_compat', set(why.values()) <= REASONS, why)
         check('every C++ row parses with ctypes_compat', all(cc.parse(t) for t in got.values()))
     # DECLTYPE-SPEC: a class template specialization (or a class nested in one) is written by its Itanium type mangling, `_ZTS...`
     src = os.path.join(td, 'tspec.cpp')

@@ -264,12 +264,10 @@ from objfacts_merge import summary   # one definition; the merge stage must not 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--link', required=True)
-    ap.add_argument('--kinds', required=True, help='the sympair kind table (toolchain/names/sympair_kinds.inc)')
     ap.add_argument('--facts', required=True)
     ap.add_argument('--out', required=True)
     ap.add_argument('--jobs', type=int, default=4)
     a = ap.parse_args()
-    l2sections.set_kinds(a.kinds)
     F = store.load(a.facts, 'facts')
     out = build(a.link, set(F['vft']), a.jobs)
     store.save(a.out, 'obj', out)

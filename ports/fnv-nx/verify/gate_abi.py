@@ -194,7 +194,6 @@ def judge_root(repo, cache, root):
 
 
 def main():
-    l2sections.set_kinds(l2sections.REPO_KINDS_INC)   # cwd = the checkout root: the table is a tracked file of it
     repo, tmp = ".", None
     cache = os.environ.get("GATE_CACHE")
     if not cache:
