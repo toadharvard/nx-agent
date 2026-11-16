@@ -38,7 +38,7 @@ def shards(size_of_image):
 
 def lift_inputs():
     """the declared inputs of a shard stage: the lifter package, the runtime headers, the (empty) certificate directory"""
-    return [LIFT + '/fnvlift', LIFT + '/proof/__init__.py', LIFT + '/proof/shape.py', LIFT + '/proof/sdmfeat.py', 'ports/fnv-nx/verify/cpuid_model.json'] + sorted(os.path.relpath(f, REPO) for f in glob.glob(os.path.join(REPO, LIFT, 'rt', '*.h'))) + [ROOT + '/certs']
+    return [LIFT + '/fnvlift', LIFT + '/proof/__init__.py', LIFT + '/proof/shape.py', LIFT + '/proof/sdmfeat.py', 'ports/fnv-nx/verify/cpuid_model.json', LIFT + '/rt/rcptab.c', LIFT + '/rt/rcptab.cert.json'] + sorted(os.path.relpath(f, REPO) for f in glob.glob(os.path.join(REPO, LIFT, 'rt', '*.h'))) + [ROOT + '/certs']
 
 
 def images(modules):
@@ -58,7 +58,7 @@ def image_shards(name, n, where, common):
 
 
 def recipe(modules, exts=EXTERNALS):
-    common = ['--lift', '/in/' + LIFT, '--fpstate', '/uses/ports/fnv-nx/lift/fpfacts/FPSTATE', '--fpdepth', '/uses/ports/fnv-nx/lift/fpfacts/FPDEPTH', '--x86sys', '/uses/ports/fnv-nx/platform/X86SYS', '--sdmrows', '/stage/sdmrows/sdmrows.json', '--cpumodel', '/in/ports/fnv-nx/verify/cpuid_model.json', '--segwrites', '/uses/ports/fnv-nx/lift/facts/SEGWRITES', '--certs', '/in/' + ROOT + '/certs', '--jobs', '4']
+    common = ['--lift', '/in/' + LIFT, '--fpstate', '/uses/ports/fnv-nx/lift/fpfacts/FPSTATE', '--fpdepth', '/uses/ports/fnv-nx/lift/fpfacts/FPDEPTH', '--x86sys', '/uses/ports/fnv-nx/platform/X86SYS', '--sdmrows', '/stage/sdmrows/sdmrows.json', '--cpumodel', '/in/ports/fnv-nx/verify/cpuid_model.json', '--rcptab', '/in/'+LIFT+'/rt/rcptab.c', '--rcpcert', '/in/'+LIFT+'/rt/rcptab.cert.json', '--segwrites', '/uses/ports/fnv-nx/lift/facts/SEGWRITES', '--certs', '/in/' + ROOT + '/certs', '--jobs', '4']
     gen, imgargs = [{'tool': SDMTOOL, 'args': ['--sdm', '/uses/ports/fnv-nx/lift/sdm/SDM_TEXT', '--out', '/out'], 'inputs': [LIFT + '/proof/sdmfeat.py', LIFT + '/proof/__init__.py'], 'outputs': ['sdmrows/sdmrows.json']}], []
     for name, mod, size in images(modules):
         n = shards(size)
