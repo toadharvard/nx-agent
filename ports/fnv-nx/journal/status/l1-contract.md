@@ -2520,3 +2520,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 ## 2026-11-16 04:41
 - L2 (cand4b 4e40b5970): the only reds left in lift/rt and platform are 3 records placed before their declarations; all decltype and ENTRY1 reds are gone. The ruling stays (C declare-before-use, so the compiler enforces it). cpumodel.c is fixed at base3 330e873c7; L5 extends the move to every platform unit (iob.c __pioinfo/__badioinfo). A placement-free plugin attribute waits until after the first frame.
 - bottleneck: the cand3b head with the pool, walk and budget fixes.
+
+## 2026-11-16 04:42
+- L6 needs named row inputs ("as" plus "@rows:NAME") for the sm_link summary (two row groups). w28, ahead of the dynamic table. Meanwhile w6 folds sm_link into one root (stage range 8, link range 8), deleting the 8 copies and count_stage_evals.py.
+- bottleneck: the cand3b head with the pool, walk and budget fixes.
