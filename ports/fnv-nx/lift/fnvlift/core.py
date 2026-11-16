@@ -540,7 +540,6 @@ def _lift2(img, lo, hi, start, owns, strict, explore_owns, x87, drop, poll):
     fl = 'SYNC_X_IN;' if 'sse' in kinds else ''
     body = body.replace('SYNC_OUT;', 'SYNC_OUT;' + ('SYNC_X_OUT;' if 'sse' in kinds else ''))
     body = body.replace('SYNC_IN;', 'SYNC_IN;' + fl)
-    body = PLAIN_FORM.sub(lambda m: (m[1] or m[2] or m[3]) + 'P(', body)      # a transfer form whose hooks stayed the plain ones is emitted by its short name (rt/fnvl.h FNVL_*P): the same expansion
     decl = ''.join('extern "C" void L_%08x(void);\n' % t for t in sorted(cx.calls | cx.tails))
     txt = '%sextern "C" void L_%08x(void)\n{ DECL; SYNC_IN;%s%s%s u32 E=esp; %s\n%s\n}\n' % (
         decl, start, xc.decl(cx), fl, ' u32 fsb=c->fs;' if cx.usesfs else '', '', body)
@@ -551,9 +550,6 @@ def _lift2(img, lo, hi, start, owns, strict, explore_owns, x87, drop, poll):
     meta = dict(addr=start, size=size, selfcalls=cx.selfcalls, callrets=cx.callrets, kinds=sorted(kinds), n=len(order), tables=len(tables),
                 calls=sorted(cx.calls), tails=sorted(cx.tails), noentry=sorted(cx.noentry), tabtails=tab_tails(img, insns, lo, hi), paths=dict(cx.paths))
     return txt, meta, cx
-
-
-PLAIN_FORM = re.compile(r'\b(FNVL_(?:CALLX|CALLD|TAILX|POLL))\(SYNC_OUT;,SYNC_IN;,|\b(FNVL_RET)\(SYNC_OUT;,|\b(FNVL_JMPN)\(goto nonlocal;,')
 
 
 def tables_all(tables):

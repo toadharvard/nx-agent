@@ -13,16 +13,6 @@ def is_import(cx, o):
     return o.type == X.X86_OP_MEM and not o.mem.base and not o.mem.index and not o.mem.segment
 
 
-def arg(t):
-    """a C text passed as a macro argument of the transfer forms (rt/fnvl.h FNVL_CALLX ...): a top-level comma would split the argument"""
-    d = 0
-    for ch in t:
-        d += (ch in '([{') - (ch in ')]}')
-        if ch == ',' and d == 0:
-            raise SystemExit('f_flow: top-level comma in a transfer-form argument: %r' % t)
-    return t
-
-
 def jump_stmt(cx, t):
     """C statement of a direct transfer to address t outside the function's range. t is an entry of the universe: the C call of its body, then the
     tail rule. t is not an entry (the universe is closed under direct targets inside executable sections, so t lies in no executable section): the
@@ -31,10 +21,10 @@ def jump_stmt(cx, t):
     if t in cx.uent:
         cx.tails.add(t)
         cx.kinds.add('tailjmp')
-        return 'FNVL_TAILX(SYNC_OUT;,SYNC_IN;,%s)' % hexs(t)
+        return '{ SYNC_OUT; REGS(); CALLX(%s); REGS(); SYNC_IN; goto after_tail; }' % hexs(t)
     cx.kinds.add('jmp-direct-noentry')
     cx.noentry.add(t)
-    return 'FNVL_JMPN(goto nonlocal;,0x%xu)' % t
+    return '{ c->ra=0x%xu; goto nonlocal; }' % t
 
 
 def jump_out(cx, t, cond=None):
@@ -64,12 +54,12 @@ def call_xfer(cx, o, t):
             cx.kinds.add('selfcall')
         if t in cx.uent:
             cx.calls.add(t)
-            return 'FNVL_CALLX(SYNC_OUT;,SYNC_IN;,%s,0x%xu)' % (hexs(t), cx.nxt)
+            return 'SYNC_OUT; REGS(); CALLX(%s); REGS(); SYNC_IN; if(c->ra!=0x%xu) goto nonlocal;' % (hexs(t), cx.nxt)
         cx.kinds.add('call-direct-noentry')     # not an entry (see jump_stmt): through the dispatcher
         cx.noentry.add(t)
-        return 'FNVL_CALLD(SYNC_OUT;,SYNC_IN;,0x%xu,0x%xu)' % (t, cx.nxt)
+        return 'SYNC_OUT; REGS(); fnvl_dispatch(0x%xu)(); REGS(); SYNC_IN; if(c->ra!=0x%xu) goto nonlocal;' % (t, cx.nxt)
     cx.kinds.add('import' if is_import(cx, o) else 'indcall')
-    return 'FNVL_CALLD(SYNC_OUT;,SYNC_IN;,%s,0x%xu)' % (arg(t), cx.nxt)
+    return 'SYNC_OUT; REGS(); fnvl_dispatch(%s)(); REGS(); SYNC_IN; if(c->ra!=0x%xu) goto nonlocal;' % (t, cx.nxt)
 
 
 def jmp_indirect(cx, o, t):
@@ -79,7 +69,7 @@ def jmp_indirect(cx, o, t):
     cands = cx.tables.get(cx.a)
     if cands is None:
         cx.kinds.add('import' if is_import(cx, o) else 'jmp-indirect-untabled')
-        return ['FNVL_JMPN(goto nonlocal;,%s)' % arg(t)]
+        return ['{ c->ra=%s; goto nonlocal; }' % t]
     cx.kinds.add('jumptable')
     for x in set(cands): cx.edge(x)
     return (['{ u32 t=%s; switch(t){' % t] + ['case 0x%xu: goto %s;' % (x, cx.lab(x)) for x in sorted(set(cands))] +
@@ -91,7 +81,7 @@ def ret_xfer(cx, ra):
     cx.xfer = True
     if cx.ops and cx.ops[0].imm:
         cx.kinds.add('retn')
-    return 'FNVL_RET(SYNC_OUT;,%s)' % arg(ra)
+    return 'c->ra=%s; SYNC_OUT; return;' % ra
 
 
 def raise_site(cx, code, trap=True, at=None, av=False):

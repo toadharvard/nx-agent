@@ -207,28 +207,6 @@ template<u32 PC, class T> static inline __attribute__((always_inline)) bool lk_c
 #define SYNC_OUT do{ FL_OUT; }while(0)   /* the general registers need no sync; flags (the retired one-instruction harness), x87 (per site, f_x87_ctl.py) and xmm state are appended by the lifter */
 #define SYNC_X_IN do{ x0=c->x[0];x1=c->x[1];x2=c->x[2];x3=c->x[3];x4=c->x[4];x5=c->x[5];x6=c->x[6];x7=c->x[7]; }while(0)
 #define SYNC_X_OUT do{ c->x[0]=x0;c->x[1]=x1;c->x[2]=x2;c->x[3]=x3;c->x[4]=x4;c->x[5]=x5;c->x[6]=x6;c->x[7]=x7; }while(0)
-/* The control-transfer forms of lifted code (fnvlift/f_flow.py emits only these calls; the text each expands to is the transfer sequence, defined once here). SO, SI and G are the
-   sync hooks of the site, passed as text: `SYNC_OUT;`, `SYNC_IN;`, `goto nonlocal;`, which the lifter extends per function (SYNC_X_*) and per site (x87 stack traffic) before the
-   preprocessor runs. A site with no extension is emitted by its plain name (FNVL_*P), which passes the unextended hooks. h: the entry address (hex digits, CALLX pastes L_), t, nx: C u32 texts.
-   They contain `goto nonlocal` / `goto after_tail` and `return`, so they are macros of the lifted function's loop core and are expanded only in the units of the pack (FNVL_PRELUDE_H). */
-#define FNVL_CALLX(SO,SI,h,nx) SO REGS(); CALLX(h); REGS(); SI if(c->ra!=nx) goto nonlocal;
-#define FNVL_CALLD(SO,SI,t,nx) SO REGS(); fnvl_dispatch(t)(); REGS(); SI if(c->ra!=nx) goto nonlocal;
-#define FNVL_TAILX(SO,SI,h) { SO REGS(); CALLX(h); REGS(); SI goto after_tail; }
-#define FNVL_JMPN(G,t) { c->ra=t; G }
-#define FNVL_RET(SO,r) c->ra=r; SO return;
-#define FNVL_CALLXP(h,nx) FNVL_CALLX(SYNC_OUT;,SYNC_IN;,h,nx)
-#define FNVL_CALLDP(t,nx) FNVL_CALLD(SYNC_OUT;,SYNC_IN;,t,nx)
-#define FNVL_TAILXP(h) FNVL_TAILX(SYNC_OUT;,SYNC_IN;,h)
-#define FNVL_JMPNP(t) FNVL_JMPN(goto nonlocal;,t)
-#define FNVL_RETP(r) FNVL_RET(SYNC_OUT;,r)
-/* The suspension poll (the lifter's safepoint rule, fnvlift/flaglive.py poll_set): at every back-edge target and every function entry, first thing at the label. c->susp is written only by the platform and
-   read here with a relaxed atomic load (a plain load of a loop without stores may be hoisted out of the loop); non-zero: the guest state is flushed, fnvnx_safepoint (L5, C linkage) returns the eip to
-   continue at and stores it in c->ra; the same pc continues in line; another one leaves as every transfer does (FNVL_RET: c->ra = the target, SYNC_OUT done, return) and the caller's `c->ra != next` test or fnvnx_lift_enter's loop dispatches it. So a poll needs no non-local block, switch case or label. SO/SI are the visible hooks of the other transfer forms (the static x87 path extends them). */
-extern "C" u32 fnvnx_safepoint(void *c, u32 pc);
-extern "C" void fnvnx_susp_attach(void *cpu, volatile u32 *susp, u32 *ra);   /* platform/win32/thread.cpp: the thread's suspension word and ra, for the life of its frame */
-extern "C" void fnvnx_susp_detach(void *cpu);
-#define FNVL_POLL(SO,SI,h) if(__builtin_expect(__atomic_load_n(&c->susp,__ATOMIC_RELAXED),0)){ SO REGS(); if(fnvnx_safepoint(c,h)!=h){ REGS(); return; } REGS(); SI }
-#define FNVL_POLLP(h) FNVL_POLL(SYNC_OUT;,SYNC_IN;,h)
 /* `.fnvl.fsw` (the same 12-byte layout), an x87 status instruction (FSTSW, FNSTENV, FNSAVE): the range is the store of the status word, one instruction, and nothing else. FSW_ST16 / FSW_ST32 store it as `dmb ishst; str`
    (a status-word store needs no more than TSO: every earlier guest load is an acquire, so it is ordered before the store, and `dmb ishst` orders the earlier stores; a plain str also takes an unaligned
    address): one asm statement holds the dmb, the labels and the record, so they bracket exactly that str (ASM-001), and one instruction yields one record. FSW_AX is the write of AX, the one
