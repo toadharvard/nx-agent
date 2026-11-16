@@ -86,11 +86,11 @@ def export_files(drop=(), extra=""):
 
 def tree_files():
     """the real files of the tree that the toy exports root needs, and its recipe: the tree's own contract/exports/build.json with the objects selector of the toy's host target"""
-    out = {T + f: open(os.path.join(REAL, f)).read() for f in EXPORT_FILES}
+    out = {f: open(os.path.join(REAL, f)).read() for f in EXPORT_FILES}
     rec = json.load(open(os.path.join(REAL, "contract/exports/build.json")))
     for g in rec["generated"]:
         g["objects_of"]["target"] = "host"
-    out[T + "contract/exports/build.json"] = json.dumps(rec)
+    out["contract/exports/build.json"] = json.dumps(rec)
     return out
 
 
