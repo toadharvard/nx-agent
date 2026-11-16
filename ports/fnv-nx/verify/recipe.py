@@ -2773,6 +2773,7 @@ class Job:
             try:
                 p.externals(pws)
                 p.generate(pws)
+                p.run_all(pws)   # a directory output may be a run step's (`dirs`)
                 if p.red:   # the output this root uses is not produced
                     raise BuildRed({"stage": "uses:" + u["root"], "exit": None, "stderr": ["producer %s is red: %s" % (u["root"], p.red[0]["stage"])] + list(p.red[0]["stderr"])[-18:]})
                 path = os.path.join(pws, "root", p.rec["outputs"][u["output"]])
