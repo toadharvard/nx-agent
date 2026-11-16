@@ -16,10 +16,10 @@
  * files <dir>/frame_%06u.rgba (the whole swapchain image, RGBA8, top row first) and <dir>/frame_%06u.txt
  * ("width height") are written; a file that cannot be written makes the call BAD_CALL and no hook runs).
  *
- * The software cursor (NxPresent.cursor, rule P2 of nxgpu4.h, Wine 9.0 cs.c wined3d_cs_exec_present) is stamped into the SOURCE image before the present blit (gl4_scale.c gl4_cursor_stamp): the
+ * The software cursor (NxPresent.cursor, rule P2 of nxgpu4.h, Wine 9.0 cs.c wined3d_cs_exec_present; the citation is ASM-619 of verify/ASSUMPTIONS.json) is stamped into the SOURCE image before the present blit (gl4_scale.c gl4_cursor_stamp): the
  * cursor texels whose alpha is not 0 replace the image's texels, so the gamma ramp of the blit applies to them and the image keeps the cursor. A cursor entirely outside the image changes nothing.
  *
- * NXGPU_FN_WAIT_VBLANK: GL on a surfaceless context has no display. The host reference models the output as a 60 Hz
+ * NXGPU_FN_WAIT_VBLANK (ASM-617, verify/ASSUMPTIONS.json): GL on a surfaceless context has no display. The host reference models the output as a 60 Hz
  * panel whose vertical blanks are the instants k * 10^9 / 60 ns (k integer) of CLOCK_MONOTONIC; the call returns at the
  * first blank strictly after the instant of the call. */
 #define _GNU_SOURCE
