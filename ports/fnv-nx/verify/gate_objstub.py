@@ -15,8 +15,8 @@ holds "wine_fixme": {id: call sites} so growth of the simplified bodies is visib
 Declared-machine rows: `<root>/declared_machine.tsv` of every admitted root of the tree under test (objstub.read_root_tables),
 judged by the same rule as the Wine rows through `fnvnx_declared_machine(id)`; the result holds "declared_machine": {id: call sites}. Seven fields per row (the
 7th is the last error); the `std:` citations and the lasterror values are checked against the pinned documents of verify/declared_sources.json (declared_pins).
-Reach facts: GATE_CACHE/reach/<git tree>/reach.facts.tsv (rows fact_id<TAB>sha256, written by the gate `reach`, which does not exist yet).
-While the file is absent, every call of fnvnx_reach_violation is the finding `reach-uncertified`.
+Reach facts: GATE_CACHE/reach/<git tree>/reach.facts.tsv (rows fact_id<TAB>sha256, written by the gate `reach`, which runs before this gate: gates.d/objstub.json `needs` it).
+While the file is absent (reach red) the one finding `reach-facts-missing` stands for every call of fnvnx_reach_violation.
 Universe: every function of every object of every product root, every uncovered gap, and a root whose recipe is invalid or whose build is
 red (one item `root`, uncertified). Certified: items with no finding. uncertified: every `unit path:symbol`, sorted. Per object results
 are cached by (object sha256, os_layer flag, analysis version, the terminators the object mentions) under GATE_CACHE/objstub/<key>.json;

@@ -1,6 +1,6 @@
 """verify/gates.d: one file per gate (L1 CONTRACT).
     gates.d/<name>.json   {"format": "fnvnx-gatefile/1", "name": NAME, "argv": [...], "result": "NAME.json", "covers": [ROOT_CLASS...]}
-The gates of a tree are the files of this directory, sorted by name; there is no shared list, so adding a gate touches only its own file
+The gates of a tree are the files of this directory, sorted by name, a gate after the gates its optional `needs` names (a gate that reads another gate's output of the same run says so); there is no shared list, so adding a gate touches only its own file
 and two branches that add different gates never conflict. The verdict (l1.py) assembles the sorted entries into the canonical gates
 document (format fnvnx-gates/1) of the commit under test; that document is a value in memory and in the verdict's temporary directory,
 never a tracked file.
@@ -110,12 +110,34 @@ def parse_entry(name, text):
     out = {"name": name, "argv": d["argv"], "result": d["result"]}
     if "covers" in d:
         out["covers"] = d["covers"]
+    if "needs" in d:
+        if not (isinstance(d["needs"], list) and all(isinstance(n, str) and n for n in d["needs"]) and len(set(d["needs"])) == len(d["needs"])):
+            raise Bad("gates.d/%s.json: needs is not a list of distinct gate names" % name)
+        out["needs"] = d["needs"]
+    return out
+
+
+def order(entries):
+    """ENTRIES in run order: topological over `needs` (a gate runs after every gate it needs), ties by name. Bad on an unknown name or a cycle."""
+    by = {g["name"]: g for g in entries}
+    for g in entries:
+        for n in g.get("needs", ()):
+            if n not in by:
+                raise Bad("gate %s needs %s, which is no gate" % (g["name"], n))
+    out, done, left = [], set(), sorted(by)
+    while left:
+        ready = [n for n in left if all(m in done for m in by[n].get("needs", ()))]
+        if not ready:
+            raise Bad("gates.d: a cycle in `needs` among %s" % ", ".join(left))
+        out.append(by[ready[0]])
+        done.add(ready[0])
+        left.remove(ready[0])
     return out
 
 
 def document(entries):
-    """The gates document of a list of entries, sorted by name."""
-    return {"format": FORMAT, "gates": sorted(entries, key=lambda g: g["name"])}
+    """The gates document of a list of entries in run order (order): by name, a gate after the gates it `needs`."""
+    return {"format": FORMAT, "gates": order(entries)}
 
 
 def load_dir(path=DIR):

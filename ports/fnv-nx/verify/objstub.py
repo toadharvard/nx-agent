@@ -115,8 +115,7 @@ a constant or vacuous result of the returning paths is V, needs a `.fnvnx.const`
 (R) REACH. A call (BL, or B as a tail call, with a CALL26/JUMP26 relocation) of the symbol `fnvnx_reach_violation` is not a T2 and not a
 T2-noreturn-tail; it is judged by the reach rule: w0 at the call must be a constant of objstub's own forward constant propagation (the
 V dataflow over a CFG where a call returns and clobbers the AAPCS64 caller-saved registers), else `reach-nonconstant`; the constant must be a
-fact of GATE_CACHE/reach/<git tree>/reach.facts.tsv (`fact_id<TAB>sha256`, written by the gate `reach`), else `reach-uncertified` (also
-when the file does not exist); a fact with no call site in the universe is `reach-stale`; any other reference to the symbol (address
+fact of GATE_CACHE/reach/<git tree>/reach.facts.tsv (`fact_id<TAB>sha256`, written by the gate `reach`), else `reach-uncertified`; when the file does not exist (the gate `reach` is red) the one finding `reach-facts-missing`; a fact with no call site in the universe is `reach-stale`; any other reference to the symbol (address
 taken, in code or in data) is `reach-address-taken`. Assumption: the decoder's write sets (LLVM defs) name every register an instruction (ASM-045)
 writes (a missed write of x0 would make a constant wrong).
 
@@ -1838,7 +1837,7 @@ def judge(results, facts, wine=None, declared=None, fails=None, handlers=None, s
     iff it lies in an object of a unit that a generator stage of the root's recipe outputs (else `assume-direct-call`) and its first argument
     is a literal id whose record is OWNER (`assume-id-nonliteral`, `assume-id-not-owner`); see (A) above and `assume_verdict`."""
     registry, gen, external = *(assume if assume else ({}, set())), set(external or ())
-    items, out, vflag, exited, used, out_od = [], [], set(), set(), set(), []
+    items, out, vflag, exited, used, out_od, no_facts = [], [], set(), set(), set(), [], False
     wine, fails, handlers, stats = wine or {}, fails or {}, handlers or {}, stats if stats is not None else {}
     allv = {(oid, n) for oid, r in results.items() for n, k, _, _ in r["finds"] if k == "V"}
     root_of = {}   # records object -> the object ids that share it (one root)
@@ -2004,7 +2003,7 @@ def judge(results, facts, wine=None, declared=None, fails=None, handlers=None, s
                 if c is None:
                     out.append((oid, name, "reach-nonconstant", "w0 is not a constant at the call of %s at +0x%x" % (REACH, off)))
                 elif facts is None:
-                    out.append((oid, name, "reach-uncertified", "fact %d: no reach facts file of this verdict" % c))
+                    no_facts = True   # one finding for the missing file (below), not one per call site
                 elif c not in facts:
                     out.append((oid, name, "reach-uncertified", "fact %d is not in the reach facts" % c))
             if c is not None and facts is not None and c in facts:
@@ -2013,6 +2012,8 @@ def judge(results, facts, wine=None, declared=None, fails=None, handlers=None, s
         out += [(oid, name, "const-mismatch", "a `.fnvnx.const` record on a body that is not V") for name in sorted(r.get("const", {})) if (oid, name) not in vflag]
     if results:   # rule C: a row of the declared-machine table that no record cites
         out += [("-", "dm:%d" % i, "declared-machine-uncited", "row %d (%s) is cited by no record" % (i, declared[i][0])) for i in sorted(declared) if "dm:%d" % i not in cited_ids]
+    if no_facts:   # the facts file is written by the gate `reach` of the same run (gates.d needs): its absence is reach's red, one finding
+        out.append(("-", "reach", "reach-facts-missing", "no reach facts file of this verdict (reach red): the calls of %s cannot be judged" % REACH))
     out += [("-", "fact:%d" % c, "reach-stale", "fact in the reach facts with no call site of %s" % REACH) for c in sorted((facts or set()) - used)]
     out = [f for f in out if (f[0], f[1]) not in od_ok]   # rule O: every finding of a body cited by a valid owner decision is accepted
     return items, sorted(set(out) | set(out_od))

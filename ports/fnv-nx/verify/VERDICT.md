@@ -139,8 +139,8 @@ every merge pays today; with such a root and universe 0 it is red (`covers`, no 
     noreturn function that is not nothrow (`__cxa_throw`) are unwinders, so a landing pad or a `throw` is no class 1 finding
     (rule and limits: `objstub.py`). Objects are ELF32 (ILP32) or ELF64; both ABIs are tested.
   - Constants table keyed (unit, symbol), kinds void/u32/u64/addr and `exit` (the owner's process-exit imports). A call of
-    `fnvnx_reach_violation` is accepted only with a constant argument that is a fact of `GATE_CACHE/reach/<tree>/reach.facts.tsv`; until the
-    gate `reach` writes that file every such call is `reach-uncertified`. An indirect call ending a function is `indirect-noreturn-tail`
+    `fnvnx_reach_violation` is accepted only with a constant argument that is a fact of `GATE_CACHE/reach/<tree>/reach.facts.tsv`; when the
+    file is missing (the gate `reach`, which objstub `needs` in gates.d, is red) the one finding `reach-facts-missing` stands for them. An indirect call ending a function is `indirect-noreturn-tail`
     unless `fnvnx_reach_violation` or an `exit` row, and then on every path.
   - Class 2 flags a function unless the analysis proves a call, an access outside its own frame, or an input register live at entry.
     Its register read and write sets come from LLVM 18's instruction descriptions (`a64access.cc`, built against the LLVM libraries);

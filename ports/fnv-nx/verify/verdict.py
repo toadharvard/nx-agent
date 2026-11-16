@@ -161,6 +161,10 @@ def cmd_run(a):
         raise Err("malformed gates file")
     if len({g["name"] for g in gates}) != len(gates):
         raise Err("duplicate gate names")
+    try:
+        gates = gatesdir.order(gates)   # a gate runs after the gates it needs
+    except gatesdir.Bad as e:
+        raise Err(str(e))
     commit = _git_ok(o["--repo"], "rev-parse", "--verify", o["--commit"] + "^{commit}")
     tree = _git_ok(o["--repo"], "rev-parse", commit + "^{tree}")
     work = tempfile.mkdtemp(prefix="verdict-")

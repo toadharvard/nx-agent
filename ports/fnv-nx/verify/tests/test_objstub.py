@@ -265,8 +265,8 @@ rsrc = ("void %s(unsigned) __attribute__((noreturn));\nvoid f(int a){ if(a) %s(7
         "void h(int a){ if(a>3) %s(0x10001); %s(9); }\nvoid (*ptr)(unsigned) = %s;\n" % ((REACH,) * 6))
 o = build(rsrc, "lp64")
 k, _, f = kinds(o, terms=[REACH, "abort"], facts=None)
-check("reach: constant argument without a facts file -> reach-uncertified; no T2, no T2-noreturn-tail for the reach call",
-      {("f", "reach-uncertified"), ("h", "reach-uncertified")} <= k and not any(kd in ("T2", "T2-noreturn-tail") for _, kd in k), (k, f))
+check("reach: constant argument without a facts file -> the one finding reach-facts-missing (no per-site reach-uncertified); no T2, no T2-noreturn-tail for the reach call",
+      ("reach", "reach-facts-missing") in k and not any(kd in ("reach-uncertified", "T2", "T2-noreturn-tail") for _, kd in k), (k, f))
 check("reach: non-constant argument -> reach-nonconstant (also as a tail call)", ("g", "reach-nonconstant") in k, k)
 check("reach: function pointer to the symbol -> reach-address-taken", any(kd == "reach-address-taken" for _, kd in k), k)
 k, _, f = kinds(o, terms=[REACH], facts={7, 0x10001, 9})
@@ -819,8 +819,8 @@ for tag, extra, want in (("a LEN 0 record", rec_c("f_b", "void"), "green"), ("no
           (rc == 2 and g["uncertified"] == [TR.ROOT + "/b.c:f_b"]), (g, txt))
 repo3 = TR.make_guest_repo("os-reach", files={"toy/b.c": BC, "toy/c.c": RV, "toy/os.S": OS})
 rc, g, _, txt, st = gate(repo3, ROOT + "/g4", GC)
-check("reach call in the toy root with no reach facts file: red reach-uncertified, REACH's own definition and the terminator exemption accepted",
-      rc == 2 and g["uncertified"] == [TR.ROOT + "/c.c:f_c"] and "reach-uncertified 1" in g["detail"], (g, txt))
+check("reach call in the toy root with no reach facts file: red, the one finding reach-facts-missing, REACH's own definition and the terminator exemption accepted",
+      rc == 2 and "reach-facts-missing 1" in g["detail"] and "reach-uncertified" not in g["detail"], (g, txt))
 facts = "%s/reach/%s/reach.facts.tsv" % (GC, tree_of(repo3))
 os.makedirs(os.path.dirname(facts))
 open(facts, "w").write("42\t" + "a" * 64 + "\n")
@@ -854,7 +854,7 @@ rc, g, secs, txt, st = gate(r32, ROOT + "/g32b", GC)
 print("INFO ILP32 toy gate warm %.1f s" % secs)
 r32r = TR.make_guest_repo("os-reach32", rec=TR.abi_rec("ilp32"), files={"toy/b.c": BC, "toy/c.c": RV, "toy/os.S": OS.replace("ldr x1, [x1, :lo12:hostslot]", "ldr w1, [x1, :lo12:hostslot]").replace("blr x1", "blr x1").replace(".quad 0", ".word 0")})
 rc, g, _, txt, st = gate(r32r, ROOT + "/g32r", GC)
-check("ILP32 reach call (P32 CALL26 relocation) is judged by the reach rule: reach-uncertified, nothing else red", rc == 2 and g["uncertified"] == [TR.ROOT + "/c.c:f_c"] and "reach-uncertified 1" in g["detail"], (g, txt))
+check("ILP32 reach call (P32 CALL26 relocation) is judged by the reach rule: reach-facts-missing, nothing else red", rc == 2 and "reach-facts-missing 1" in g["detail"] and "reach-uncertified" not in g["detail"], (g, txt))
 
 # a failing unit is a red finding of that unit, never a gate crash (exit 2 from an exception)
 rb = TR.make_guest_repo("os-buildred", rec=TR.mut(link=None), files={"toy/b.c": BC, "toy/c.c": "int f_c(int x) { return x +; }\n"})
