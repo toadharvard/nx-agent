@@ -710,3 +710,4 @@ After the first frame:
   - w2 has no open path item and waits; the NAMES table is held until after the first frame.
 - bottleneck: the L2 farm's recipe-path gcc1/rt (a) at 3f1036631 -> w3's pin commit. It blocks lift/rt on base3 and the ELF.
 - 2026-11-16 05:45Z: L1 cand4 needs DATAMODEL `types` (L6 w6-dm depends on it). Sent to L1 w15: cherry-pick f7b5d9b3b + badb397be (DATAMODEL.json/.md, datamodel/facts.json, gen.py, test_ldbl). They pick cleanly onto cand4, the result is identical to cand4b, and the only new key is `types`.
+- 2026-11-16 05:50Z: L1 reports NAMES-FNPARM (ae8d87972, 72af9ba51) red on base3 be2f01990: the 84f0883e pin predates the patch attribute. Rule: the recipe runs the build of the tree's msvcmodel, which is the recipe-path toolchain stage (a), so there is no interim MANIFEST path. L3a reverts the two commits on base3 until the recipe-path pin lands, then takes them back together with the pin.
