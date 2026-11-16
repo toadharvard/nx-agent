@@ -2577,3 +2577,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 ## 2026-11-16 05:05
 - Orchestrator: the cold pack build runs on up to 32 farms. recipe.py MAX_SHARDS = 16 rejects N=32 (store-merge has no limit). w28 removes the cap (N >= 1, partition assertion kept, tests for N=32 and N > units) on top of cand3b 02f26b3de; it goes in the next candidate. Farms use N <= 16 until then.
 - bottleneck: cand3b verdict at 02f26b3de.
+
+## 2026-11-16 05:06
+- w28 e9c42d060 (claude/fnv-l1-contract-w28-shard, on cand3b 02f26b3de): MAX_SHARDS removed, any N >= 1; test_shard covers N=1..16, 32, 41, 100 (empty shards). Accepted; it goes into the next cand3b/cand4 head after the 02f26b3de verdict.
+- bottleneck: cand3b verdict at 02f26b3de.
