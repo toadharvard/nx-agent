@@ -406,6 +406,8 @@ def merge_inputs(base, extra, store, ws):
             out.append(dict(e))
             continue
         n += 1
+        while os.path.lexists(os.path.join(ws, "merge%d" % n)) or os.path.lexists(os.path.join(ws, "overlay%d" % n)):
+            n += 1      # one workspace serves several calls (the member selection, the link, the check): scratch names never collide
         d = os.path.join(ws, "merge%d" % n)
         cas.materialize(host["tree"], store, d)
         sub = os.path.join(d, e["at"][len(host["at"]) + 1:])   # (the input's own root when the paths are equal)
@@ -3604,6 +3606,7 @@ def build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True, shard=N
               lk = j.rec["link"]
               name = lk["output"]
               groups = [("00-own", [(u, o["object"]) for u, o in zip(units, res["objects"])])]
+              loader_defs = None    # set once the link's loader is read; the red path below reads it whichever stage failed
               res["link_roots"], defs = [], {}
               built_in = {}     # every candidate root, built objects-only through the stage cache: the symbol index of the definer closure
               for d in link_candidates(j.roots, root, entry_of(j.roots, spec).get("target"), repo):
