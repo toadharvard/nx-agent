@@ -1823,3 +1823,10 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - Orchestrator: -frounding-math is ruled (integ d4397e9a3), so it is not a blocker. Priority 1 stays the bytes before/after.
 - Moved the density run off farm 2's queue onto a new farm 3 (session_01KmtZKUSRn7hAupzBX9N5mD): B/R1/R12/R123P (ae2d9438b), all images.
   - Farm 2 keeps the path census and the exe modlift.
+- Relift head claude/fnv-l3a-lift-relift @44db19d02 (w13) = r123p + flagcheck + crmath + w13-clean 36d3a8948. Full lift test set: 78 green, 9 red.
+  - Upstream reds: defdisp, descclass, gate_lift (the plugin, fixed by base3's revert).
+  - 5 tests need recipe inputs.
+  - Defect closed by rule: the liftsrc shard mounts were a hand list missing proof modules.
+    - liftsrcgen.proof_closure() now derives them from liftgen's import closure.
+    - Before, a shard failed in its sandbox; base3 has the same defect.
+  - Missing from the relift: base3's facts2 and the revert. w13 merges base3 when w8 reports.
