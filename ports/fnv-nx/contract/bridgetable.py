@@ -117,8 +117,11 @@ def native(dll, name):
     return name
 
 
-def derive(names, spec_text, syms, name_table, extra, va=None):
-    """-> (rows sorted by (dll lower, name), errors [str], extra_of {(dll, name): index into `extra`})"""
+def derive(names, spec_text, syms, name_table, extra, va=None, exports=None):
+    """-> (rows sorted by (dll lower, name), errors [str], extra_of {(dll, name): index into `extra`})
+    exports: {(dll, name): (symbol, kind)} of exports.tsv (contract/exportgen.py: the `.fnvnx.export` records of the product objects).  Given, a row's native
+    symbol comes from it alone (the constants of `native` are not read); an export the table lacks keeps its own name as the symbol, so the gate `imports`
+    judges it against the objects.  None = the constructed path (`native`), kept as the measurement until every root carries its records."""
     rows, errors, extra_of, cache = [], [], {}, {}
     va = va or {}
     has = (lambda sym: True) if syms is None else (lambda sym: sym in syms)
@@ -137,11 +140,26 @@ def derive(names, spec_text, syms, name_table, extra, va=None):
         except (KeyError, ValueError, OSError) as e:
             errors.append("%s!%s: %s" % (dll, name, e))
             continue
-        ret, sym = RET.get((dll, real), "i"), native(dll, real)
-        if sym.startswith("fnvl_"):
+        ret = RET.get((dll, real), "i")
+        if exports is not None:
+            ent = exports.get((dll, real))
+            sym = ent[0] if ent else real
+            if ent and ent[1] == "data" and conv != "data":
+                errors.append("%s!%s: exports.tsv says data, the reference spec says %s" % (dll, name, conv))
+                continue
+        else:
+            sym = native(dll, real)
+        if exports is None and sym.startswith("fnvl_"):
             bind = "l3"
+        elif exports is not None and (dll, real) in exports and conv != "data":
+            bind = "sym" if has(sym) else "none"
         elif conv == "data":
-            if dll == "msvcrt.dll":
+            if exports is not None and (dll, real) in exports:
+                if exports[(dll, real)][1] != "data":
+                    errors.append("%s!%s: the reference spec says data, exports.tsv says %s" % (dll, name, exports[(dll, real)][1]))
+                    continue
+                dsym = exports[(dll, real)][0]
+            elif dll == "msvcrt.dll":
                 ent = name_table.get(real)
                 if ent is None or ent[1] != "data":
                     errors.append("%s!%s: a data export of the reference spec has no `data` row in the name table" % (dll, name))
