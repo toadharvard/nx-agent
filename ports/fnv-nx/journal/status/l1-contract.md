@@ -2921,3 +2921,5 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - Next for w28: the own-root mount, then reached.tsv.
 - w28-c5 e5685a6bf: done. The own-root closure, tool file included, is mounted at /imp/fnvnx; sent to L6.
   - Ruling: a bare sibling import through /tool is a second module path. Tools run as `python -m fnvnx.<rel>.<tool>` and /tool is deleted (w28, doing, before item C). Owners rewrite their own trees from w28's global list.
+- w28-c5 25acf9aac: done. contract/reached.py writes reached.tsv (dll, name, iat|gpa, site) from the IAT and gpa_names.analyse, using Wine specs instead of bridge.tsv rows. test_reached is green and admit is 1064 of 1064.
+  - Next: modules.py classifies bridged versus module dlls from declared_dlls.tsv and the may-load closure, with no bridge.tsv. Then reached becomes a hermetic stage pinned to fnv-nx-build externals. The python -m commit is pending.
