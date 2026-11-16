@@ -183,19 +183,6 @@
    "outputs": [
     "gen/fnvl_entry.h"
    ]
-  },
-  {
-   "tool": "ports/fnv-nx/lift/tools/gen_copy.py",
-   "args": [
-    "/in/ports/fnv-nx/platform/include/fnvl_host.h",
-    "/out/gen/fnvl_host.h"
-   ],
-   "inputs": [
-    "ports/fnv-nx/platform/include/fnvl_host.h"
-   ],
-   "outputs": [
-    "gen/fnvl_host.h"
-   ]
   }
  ],
  "uses": [
