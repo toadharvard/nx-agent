@@ -2569,3 +2569,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 ## 2026-11-16 04:55
 - L5 w33 7eafe53b5: 510 platform records already placed correctly (iob.c fine since w32); platform, platform@time and platform@vclock are 112/112 green. platform/exptable is blocked only by lift/rt dispatch.c ENTRY1-CONT (L2 w2 fix (c), pending).
 - bottleneck: cand3b verdict at 02f26b3de; ELF path: L2's ENTRY1 front-end fix.
+
+## 2026-11-16 04:57
+- L3a base3 30030c1e8: assumptions gate green (148/148 mentions, 0 findings).
+- bottleneck: cand3b verdict at 02f26b3de; L2's ENTRY1 fix for lift/rt dispatch.c.
