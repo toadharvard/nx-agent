@@ -1794,3 +1794,8 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Red from L2 NAMES-FNPARM: defdisp, descclass, gate_lift toy; w8 is reverting.
 - w13 queue: r123p return redirect plus attach/detach → the two reds → compose the relift head.
 - Doing (w7): (D) for L5, whether the context/APC/alertable-wait imports are reached, plus the unresolved GetProcAddress sites.
+- Done (w13): r123p @ae2d9438b.
+  - The poll redirect uses the return protocol. The 52 buffers are token-equal apart from the polls: 27,110→29,604 B (+9.2 %, all poll lines).
+  - L5 attach/detach in enter.cc. dsl_int_classes and dsl_lock are configured and green.
+- Relift head in progress: claude/fnv-l3a-lift-relift (local 499a81e24 = r123p + flagcheck; flagcheck now recomputes with P).
+  - Waiting: w14 crmath, w13 clean (2 reds), the full test run.
