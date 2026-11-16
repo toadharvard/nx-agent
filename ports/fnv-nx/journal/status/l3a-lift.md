@@ -1917,3 +1917,11 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Next red on that line: imptest x86sys, which needs base3's lift/tools (6d67261e on top of f3a30208).
   - Ruled for cand5 (sent to L1): L3a's lift/ and toolchain/dispatch are taken as whole trees from base3.
 - base3 @686f1d3cb (w8): L5 w39 platform trees. Platform builds green with 112 objects. Doing: 687182c85.
+
+## 2026-11-16 10:50Z: base3 is the one lift/ copy for cand5
+- base3 `claude/fnv-l3a-lift-base3` c791be82c (w8): 687182c85; the canonicity fix and the x87 forms line (L3b a2b3c2544 whole); the file-location class closed (261 stages checked statically, 0 hits); fnvl_host.h through include edges, no copies; no tracked include of an absolute path (6 refs -> 0); admit: 0 uncertified files under lift/ (40 -> 0; 26 left tree-wide, other layers').
+- Declared-CPU ruling: the group rule stands (relift 694a54f02, w13). MPX NOP and FISTTP are rows of verify/cpuid_model.json (exec_as_nop, ud_encodings), with SDM citations. The completeness of ud_encodings over capstone-ungrouped encodings waits on udcensus at the facts build.
+- doing (w8): base3 takes 694a54f02's group-rule files; fix the 3 local reds (test_formgate, test_symbranch, test_codestore_universe) by rule; farm 2 builds the guest roots, natives, rt, the five tests and liftsrc at that head; then the head goes to L1 for cand5.
+- doing (w13, farm 3): density bytes on one commit with four --density configurations (694a54f02). The baseline waits on w28's repo_signature stall fix.
+- doing (L3b): the default-ds store code-selector variant: rule or count asked.
+- toolchain/ comes to cand5 from L2's line (dispatch byte-identical with base3).
