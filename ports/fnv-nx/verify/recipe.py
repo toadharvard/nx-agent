@@ -3362,21 +3362,6 @@ class Job:
         objs = sorted(r["objects"], key=lambda o: o["unit"])
         with open(os.path.join(d, "lib%s.a" % os.path.basename(owner)), "wb") as f:
             f.write(ar_bytes([("%05d.o" % i, open(o["object"], "rb").read()) for i, o in enumerate(objs)]))
-        # the root's declared directory outputs (its generated headers, the trees `include_uses` carries) beside the archive, as <NAME>/...: the library and the headers it is used with
-        p = Job(self.repo, owner, self.store, self.jobs, self.extcache)
-        pws = tempfile.mkdtemp(dir=ws)
-        try:
-            p.externals(pws)
-            p.generate(pws)
-            p.run_all(pws)
-        finally:
-            self.run, self.hit = self.run + p.run, self.hit + p.hit
-        if p.red:
-            raise BuildRed({"stage": "archive:" + owner, "exit": None, "stderr": ["archive input %s: stage %s is red" % (owner, p.red[0]["stage"])] + list(p.red[0]["stderr"])[-18:]})
-        gen = generated_outputs(p.rec)
-        for name, rel in sorted((p.rec.get("outputs") or {}).items()):
-            if rel in generated_dirs(p.rec) or output_kind(rel, owner, gen, p.files) == "gendir":
-                shutil.copytree(os.path.join(pws, "root", rel), os.path.join(d, name))
         return cas.ingest(d, self.store)
 
     def run_one(self, ws, i, g):
@@ -3433,6 +3418,9 @@ class Job:
             else:   # {external, path} or {stage, path}: resolve_input is the one reader
                 host, _ = resolve_input(self.root, ref, self.repo, os.path.dirname(self.store), self.rec, self.extcache)
                 ins.append({"at": at, "tree": cas.ingest(host, self.store)})
+        iu = {"/uses/%s/%s" % (u["root"], u["output"]) for u in self.rec.get("include_uses", [])}
+        if iu:   # the include_uses trees, mounted as a CC stage mounts them (the one resolver, use_inputs): a step reads the generated headers of another root there
+            ins += [t for t in self.use_inputs(ws) if t["at"] in iu]
         pk = deb_pins()
         if not tool:
             for d in g["debs"]:
