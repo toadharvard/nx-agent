@@ -5,6 +5,7 @@ Lead: Opus 5.5, session_01KmtZKTGM2tLun8zgoE6X44 (from 2026-11-11 22:35; replace
 Branch: claude/fnv-l5-platform. Workers: Sonnet 5.5, branches claude/fnv-l5-platform-w<N>.
 
 ## RESTART 2026-11-12 08:23Z (orchestrator): ONE task, the platform product root
+- 2026-11-21: L3a w8: of 27 L5 files in the L3a candcheck section, 26 are stale and 1 is real (platform/com/test_gen_cxx.py bare imports). Its fix 48fad17a1 is reviewed and queued for c6 on w40. Workers 2 (w40, w43).
 - 2026-11-21: L1 rule: a lead edits only its own trees. cand5 candcheck lists 275 out-of-tree files on a3d039bf0 (L3a 181, L1 75, L2 18, orch 1), replaced by the owners in cand5. w43 (session_01KmtZKTj67EgsGFbmMCbxDY) is sorting real (first-parent non-merge L5 commits that differ from the owner) from stale, and is making a branch per owner for cand6. Bottleneck: the c5 verdict (w40). Workers 2 (w40, w43).
 - 2026-11-21: dm:20/21 fixed: c5 @a3d039bf0 (cand5 head), c6 @57cf1307a (after cand5). Checked against objstub read_declared_table at w29-c5, and L1 and L6 informed. The c5 verdict restarted on a3d039bf0. Bottleneck: that verdict (w40). Workers 1 (w40).
 - 2026-11-21: L6 found dm:20/21 kind void with value `-` (objstub wants an empty value), so gate_objstub judges 0/0 for every root. Those are the only such rows. w40 is fixing c5 and c6 and restarting the c5 verdict, which was invalid. Bottleneck: that fix. Workers 1 (w40).
