@@ -20,16 +20,14 @@ _S = {}
 def _model():
     path = inputs.get('cpumodel')
     if _S.get('path') != path:
-        from fnvnx.lift.fnvlift.cpumodel_bits import model_words, I
-        m = json.load(open(path)); w = model_words(m)
-        cpu = {(0, 'EAX'): I(m['max_basic']), (0x80000000, 'EAX'): I(m['max_ext']), (1, 'EDX'): w['leaf1_edx'], (1, 'ECX'): w['leaf1_ecx'], (0x80000001, 'EDX'): w['ext1_edx'], (0x80000001, 'ECX'): w['ext1_ecx']}
-        from fnvnx.lift.fnvlift.cpumodel_bits import I as _I
-        _S.clear(); _S.update(path=path, cpu=cpu, groups=_groups(m), ud={k: (_I(v[0]), v[1], v[2], v[3], v[4]) for k, v in m['ud_encodings'].items()}, nop={k: (_I(v[0]), v[1], v[2], v[3], v[4]) for k, v in m['exec_as_nop'].items()}, memo={})
+        from fnvnx.lift.fnvlift import cpumodel_bits as B
+        m = json.load(open(path))
+        _S.clear(); _S.update(path=path, cpu=B.declared_cpu(m), groups=_groups(m), ud={k: (B.I(v[0]), v[1], v[2], v[3], v[4]) for k, v in m['ud_encodings'].items()}, exec_as=B.exec_as(m), memo={})
     return _S
 
 
 def _cpu():
-    """{(leaf, reg): value, (0,'EAX'): max basic leaf, (0x80000000,'EAX'): max extended leaf}: the declared CPU's words, derived from the `cpumodel` input (verify/cpuid_model.json; cpumodel_bits.model_words)"""
+    """{(leaf, reg): value, (0,'EAX'): max basic leaf, (0x80000000,'EAX'): max extended leaf}: the declared CPU's words, derived from the `cpumodel` input (verify/cpuid_model.json; cpumodel_bits.declared_cpu)"""
     return _model()['cpu']
 
 
@@ -47,8 +45,8 @@ def _groups(m):
 
 def _bit(S, leaf, reg, bit):
     """the declared value (0/1) of CPUID bit LEAF.REG[BIT]"""
-    top = S['cpu'][(0, 'EAX')] if leaf < 0x80000000 else S['cpu'][(0x80000000, 'EAX')]
-    return (S['cpu'].get((leaf, reg), 0) >> bit) & 1 if leaf <= top else 0
+    from fnvnx.lift.fnvlift import cpumodel_bits as B
+    return B.bit(S['cpu'], leaf, reg, bit)
 
 
 def gates(ins):
@@ -57,17 +55,36 @@ def gates(ins):
     return sorted((n, leaf, reg, bit, _bit(S, leaf, reg, bit)) for n, leaf, reg, bit in (S['groups'][g] for g in ins.groups if g in S['groups']))
 
 
+PREFIXES = (0x66, 0xf2, 0xf3, 0x2e, 0x36, 0x3e, 0x26, 0x64, 0x65, 0x67, 0xf0)
+
+
+def _prefix_end(raw):
+    """index of the opcode byte after the legacy prefixes of RAW"""
+    i = 0
+    while i < len(raw) and raw[i] in PREFIXES: i += 1
+    return i
+
+
 def _enc(raw):
     """the opcode byte after the legacy prefixes, and the ModRM byte (None at the end of the bytes)"""
-    i = 0
-    while i < len(raw) and raw[i] in (0x66, 0xf2, 0xf3, 0x2e, 0x36, 0x3e, 0x26, 0x64, 0x65, 0x67, 0xf0): i += 1
+    i = _prefix_end(raw)
     return (raw[i] if i < len(raw) else None), (raw[i + 1] if i + 1 < len(raw) else None)
 
 
+def _alias(raw, i, only_nop=None):
+    """[(name, row)] of the record's `exec_as` rows whose encoding RAW is (I = the index of its opcode byte after the legacy prefixes; the row's mandatory prefix, when it has one, is among the prefixes) and whose CPUID bit is 0 on the declared CPU"""
+    S = _model(); pre = bytes(raw[:i])
+    return [(n, r) for n, r in S['exec_as'].items() if (only_nop is None or (r['as'] == 'nop') == only_nop) and not _bit(S, r['leaf'], r['reg'], r['bit'])
+            and raw[i:i + len(r['op'][0]) // 2].hex() in r['op'] and (not r['prefix'] or bytes.fromhex(r['prefix']) in [pre[k:k + 1] for k in range(len(pre))])]
+
+
 def missing(ins):
-    """the features of the instruction that the declared CPU's CPUID denies (non-empty = #UD): its capstone groups with a clear bit, and the `ud_encodings` rows of the record that match its bytes"""
-    out = [n for n, leaf, reg, bit, v in gates(ins) if v == 0]
-    S = _model(); op, modrm = _enc(bytes(ins.bytes))
+    """the features of the instruction that the declared CPU's CPUID denies (non-empty = #UD): its capstone groups with a clear bit, and the `ud_encodings` rows of the record that match its bytes.  An encoding of a feature whose
+    CPUID bit is clear that the record's `exec_as` says executes as another instruction (TZCNT as BSF, MPX as NOP) is not denied by that feature's bit: it is no #UD"""
+    raw = bytes(ins.bytes); i = _prefix_end(raw)
+    ex = {(r['leaf'], r['reg'], r['bit']) for _n, r in _alias(raw, i)}
+    out = [n for n, leaf, reg, bit, v in gates(ins) if v == 0 and (leaf, reg, bit) not in ex]
+    S = _model(); op, modrm = _enc(raw)
     for name, (leaf, reg, bit, encs, cite) in S['ud'].items():
         if modrm is not None and not _bit(S, leaf, reg, bit) and any(e['op'] == '%02x' % op and e['reg'] == (modrm >> 3) & 7 and (not e['mem'] or modrm >> 6 != 3) for e in encs):
             out.append(name)
@@ -75,9 +92,6 @@ def missing(ins):
 
 
 def nop(raw, i):
-    """the feature (a key of the record's `exec_as_nop`) whose encoding RAW (the instruction's bytes, I = the index of its opcode byte after the legacy prefixes) is and whose CPUID bit is 0 on the declared CPU: such an instruction executes as NOP (the SDM's statement, cited in the record); None otherwise"""
-    S = _model()
-    for name, (leaf, reg, bit, ops, cite) in S['nop'].items():
-        if raw[i:i + 2].hex() in ops and not _bit(S, leaf, reg, bit):
-            return name
-    return None
+    """the feature (a key of the record's `exec_as`, `as` = 'nop') whose encoding RAW (the instruction's bytes, I = the index of its opcode byte after the legacy prefixes) is and whose CPUID bit is 0 on the declared CPU: such an instruction executes as NOP (the SDM's statement, cited in the record); None otherwise"""
+    a = _alias(raw, i, True)
+    return a[0][0] if a else None

@@ -3,29 +3,26 @@
 (sail_pins.txt row acl2) inst-listing.lisp:10314-10317 (`(INST "BSF" (OP :OP #xFBC :PFX :NO-PREFIX) ... '(X86-BSF) '((:UD (UD-LOCK-USED))))`) and :10322-10325 (BSR, 0F BD, X86-BSR, same UD rule).
 The pinned translation has, in two_byte_opcode_execute, no arm for 188 (its last lines are the `Translation error: two-byte opcode 188 not translated` arm of the fall-through list) and, for 189, the arm
 `mandatory_prefix == 0x00 -> x86_model_error("Opcode Unimplemented in x86isa!")` (the 0xf3 arm, LZCNT, is decided by the declared CPU, below).
-F3 0F BC / F3 0F BD (TZCNT / LZCNT): Intel SDM Vol. 2B TZCNT and LZCNT pages: on a processor without BMI1 (CPUID.07H.0:EBX[3]) resp. LZCNT (CPUID.80000001H:ECX[5], ABM) the F3 form executes as BSF resp. BSR ("executed as BSF/BSR", F3 being ignored as REP).  Both bits are READ from the declared CPU (verify/cpuid_model.json via sdmfeat.declared_cpu; a leaf above the declared max leaf is absent): clear -> the arm goes to x86_bsf / x86_bsr, set -> it stays unimplemented (the model then has no semantics for it and the shape is a model-gap).  The script replaces exactly these two texts, each of which must occur exactly once in two_byte_opcode_execute."""
+F3 0F BC / F3 0F BD (TZCNT / LZCNT): Intel SDM Vol. 2B TZCNT and LZCNT pages: on a processor without BMI1 (CPUID.07H.0:EBX[3]) resp. LZCNT (CPUID.80000001H:ECX[5], ABM) the F3 form executes as BSF resp. BSR ("executed as BSF/BSR", F3 being ignored as REP).  Both bits are READ from the declared CPU (verify/cpuid_model.json: the record's `exec_as` rows TZCNT and LZCNT give the bit, cpumodel_bits.exec_as; a leaf above the declared max leaf is absent): clear -> the arm goes to x86_bsf / x86_bsr, set -> it stays unimplemented (the model then has no semantics for it and the shape is a model-gap).  The script replaces exactly these two texts, each of which must occur exactly once in two_byte_opcode_execute."""
 import importlib.machinery
 import importlib.util
 import os
 import sys
 
-# argv: IN OUT SDMFEAT_PY BITS_PY CPUID_MODEL_JSON; the three files are named by apply.py (no sys.path, no location arithmetic: the module is loaded from the given file)
-_spec = importlib.util.spec_from_loader('sdmfeat', importlib.machinery.SourceFileLoader('sdmfeat', sys.argv[3]))   # explicit loader: the mounted file is /in/N, no .py suffix
-sdmfeat = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(sdmfeat)
-_bspec = importlib.util.spec_from_loader('cpumodel_bits', importlib.machinery.SourceFileLoader('cpumodel_bits', sys.argv[4]))
+# argv: IN OUT BITS_PY CPUID_MODEL_JSON; the two files are named by apply.py (no sys.path, no location arithmetic: the module is loaded from the given file)
+_bspec = importlib.util.spec_from_loader('cpumodel_bits', importlib.machinery.SourceFileLoader('cpumodel_bits', sys.argv[3]))   # explicit loader: the mounted file is /in/N, no .py suffix
 cpumodel_bits = importlib.util.module_from_spec(_bspec)
 _bspec.loader.exec_module(cpumodel_bits)
 
 
-def declared_bit(cpu, leaf, reg, bit):
-    mx = cpu[(0, 'EAX')] if leaf < 0x80000000 else cpu[(0x80000000, 'EAX')]
-    return leaf <= mx and (cpu.get((leaf, reg), 0) >> bit) & 1 == 1
-
-
-CPU = sdmfeat.declared_cpu(cpumodel_bits, sys.argv[5])
-BMI1 = declared_bit(CPU, 7, 'EBX', 3)
-LZCNT = declared_bit(CPU, 0x80000001, 'ECX', 5)
+import json
+_MOD = json.load(open(sys.argv[4]))
+CPU = cpumodel_bits.declared_cpu(_MOD)
+EXEC_AS = cpumodel_bits.exec_as(_MOD)      # the one record of the encodings that a CPU without the feature executes as another instruction: TZCNT (F3 0F BC) as BSF, LZCNT (F3 0F BD) as BSR
+for _n, _as, _pfx, _op in (('TZCNT', 'BSF', 'f3', '0fbc'), ('LZCNT', 'BSR', 'f3', '0fbd')):
+    assert EXEC_AS[_n]['as'] == _as and EXEC_AS[_n]['prefix'] == _pfx and EXEC_AS[_n]['op'] == [_op], 'exec_as row %s of the record is not the F3 %s alias this splice implements' % (_n, _op)
+BMI1 = cpumodel_bits.bit(CPU, EXEC_AS['TZCNT']['leaf'], EXEC_AS['TZCNT']['reg'], EXEC_AS['TZCNT']['bit']) == 1
+LZCNT = cpumodel_bits.bit(CPU, EXEC_AS['LZCNT']['leaf'], EXEC_AS['LZCNT']['reg'], EXEC_AS['LZCNT']['bit']) == 1
 
 OLD188 = '          188 => throw(Emsg("Translation error: two-byte opcode 188 not translated")),\n'
 NEW188 = """          188 => {
