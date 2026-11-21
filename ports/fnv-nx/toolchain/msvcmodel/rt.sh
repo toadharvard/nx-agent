@@ -255,8 +255,9 @@ EOF
 # FTOI/: the fnvnx_ftoi report of every object of every installed runtime archive. Each member is paired with the build-tree object whose bytes it is (sha256); the report is the
 # one next to that object. The files are FTOI/<archive path below the prefix>/<member>.f2i.json (a member that occurs more than once in its archive gets .<its position> after
 # its name) and FTOI/index.json [{archive, member, report}] sorted by (archive, member); report is null when the object has no report beside it (cc1 did not run with the plugin
-# loaded, as for an assembler unit). A member that matches no build object, or whose candidate objects carry reports that differ in any field but `unit` (the source path
-# relative to the compile's directory, no fact of the object), is an error.
+# loaded, as for an assembler unit). The facts belong to the object's bytes: the written report's `unit` is the sorted list of the units (the source path relative to the compile's
+# directory) of every candidate object with those bytes. A member that matches no build object, or whose candidates carry reports that differ in any field but `unit`, or of which
+# only some candidates have a report, is an error.
 mkdir -p "$OUT_DIR/FTOI"
 "$PY" -I - "$P" "$W" "$OUT_DIR/FTOI" <<'EOF3'
 import hashlib, json, os, sys
@@ -317,6 +318,8 @@ for a in archives:
         if not cands:
             bad.append("%s(%s): no build object has these bytes" % (arel, n)); continue
         reps = [r for r in map(report_of, cands) if r is not None]
+        if reps and len(reps) != len(cands):
+            bad.append("%s(%s): some objects with these bytes have a report and some have none: %s" % (arel, n, ", ".join(cands))); continue
         if any(facts(r) != facts(reps[0]) for r in reps):
             bad.append("%s(%s): the objects with these bytes carry different reports: %s" % (arel, n, ", ".join(cands))); continue
         k = seen.get(n, 0); seen[n] = k + 1
@@ -325,7 +328,7 @@ for a in archives:
         if reps:
             rel = os.path.join(arel, mname + ".f2i.json")
             os.makedirs(os.path.join(OUT, arel), exist_ok=True)
-            json.dump(reps[0], open(os.path.join(OUT, rel), "w"), indent=1, sort_keys=True); open(os.path.join(OUT, rel), "a").write("\n")
+            json.dump(dict(facts(reps[0]), unit=sorted({r["unit"] for r in reps})), open(os.path.join(OUT, rel), "w"), indent=1, sort_keys=True); open(os.path.join(OUT, rel), "a").write("\n")
         index.append({"archive": arel, "member": mname, "report": rel})
 if bad:
     sys.stderr.write("rt.sh: FTOI pairing:\n  " + "\n  ".join(bad[:30]) + "\n"); sys.exit(6)
