@@ -1672,6 +1672,95 @@ def fyl2x(s):
     return o
 
 
+def _msb52(f):
+    """index (0..51) of the highest set bit of the 52-bit fraction f (f != 0), as a 64-bit vector"""
+    r = K(0, 64)
+    for i in range(52):
+        r = If(z3.Extract(i, i, f) == K(1, 1), K(i, 64), r)
+    return r
+
+
+def fxtract(s):
+    """SDM 2A:FXTRACT Op 'TEMP := Significand(ST(0)); ST(0) := Exponent(ST(0)); TOP := TOP - 1; ST(0) := TEMP' (D9 F4).
+    Description: the new ST(0) has the source's sign and significand with biased exponent 3FFFH (true exponent 0); ST(1) is the true
+    (unbiased) exponent as a floating-point value; of a source +-0: ST(1) = -inf and ST(0) = 0 with the source sign, #Z (masked);
+    of a denormal source the significand is normalized (SDM 3B:25.18.7.12: the 32-bit x87 FPUs normalize and raise #D; the exponent is
+    then that of the normalized value).  #IA: SNaN or unsupported format (SDM 2A:FXTRACT Exc); masked responses: SNaN/QNaN
+    operand -> the QNaN of the operand in both (SDM 1:T4-8), unsupported -> the indefinite in both (SDM 1:T8-10).  An infinite source
+    raises nothing (SDM 3B:25.18.7.12 '+inf, no exception reported'; -inf: no #IA/#Z/#D in the Exc list); the SDM gives no value for
+    the two results of an infinity: the free images nd.fxtract.inf1 / nd.fxtract.inf0.  Stack overflow (push onto a non-empty register,
+    SDM 1:8.5.1.1) or underflow: IE, SF and the indefinite in both registers pushed; both at once is not specified (precondition)."""
+    b = st(s, 0)
+    rm = rm_of(s.fcw)
+    u = is_unsup80(st80(s, 0))
+    nanb, inf_in, zero_in, sub = And(is_nan(b), Not(u)), is_inf(b), is_zero(b), is_sub(b)
+    f = fr(b)
+    m = _msb52(f)
+    k = If(sub, m - K(1074, 64), z3.ZeroExt(53, ex(b)) - K(1023, 64))
+    fsig = If(sub, z3.Extract(51, 0, z3.ZeroExt(12, f) << (K(52, 64) - m)), f)
+    sig = Concat(sgn(b), K(0x3FF, 11), fsig)
+    eb, _, _, _, _ = _tr_flags(rm, z3.ToReal(z3.BV2Int(k, True)))      # an integer of at most 11 bits: exact, no flags
+    neginf = bits(z3.fpMinusInfinity(F64))
+    nd1, nd0 = z3.BitVec("nd.fxtract.inf1", 80), z3.BitVec("nd.fxtract.inf0", 80)
+    qb, indef = quieten(b), K(QNAN_INDEF, 64)
+    r1 = If(u, indef, If(nanb, qb, If(zero_in, neginf, eb)))
+    r0 = If(u, indef, If(nanb, qb, If(zero_in, b, sig)))
+    ie = Or(is_snan(b), u)
+    de = And(Not(ie), sub)
+    ze = And(Not(ie), zero_in)
+    uf = is_empty(s, 0)
+    ov = push_target_nonempty(s)
+    fault = Or(uf, ov)
+    s1 = write_reg(s, 0, r1)
+    s1 = St.ite(inf_in, write_img(s, 0, nd1), s1)
+    s_ok = do_push(s1, r0)
+    s_ok = St.ite(inf_in, do_push_img(s1, nd0), s_ok)
+    s_ok = _c1(s_ok, FALSE)
+    s_f = do_push(write_reg(stack_fault_state(s, ov), 0, indef), indef)
+    o = finish(s, St.ite(fault, s_f, s_ok), If(fault, fl(IE), fv(ie=ie, de=de, ze=ze)), ou_pre=True, extra_pre=Not(And(uf, ov)))
+    o.undef = UNDEF_C023
+    o.nd = [nd1, nd0]
+    return o
+
+
+def fyl2xp1(s):
+    """SDM 2A:FYL2XP1 Op 'ST(1) := ST(1) * log2(ST(0) + 1.0); PopRegisterStack' (D9 F9), SDM 2A:FYL2XP1 Table 1-45.
+    ST(0) must lie in -(1 - sqrt(2)/2) .. 1 - sqrt(2)/2 (Description); outside, 'the result is undefined' (the free image nd.fyl2xp1.out,
+    no exception relied on).  Inside: ST(0) = +-0 (Table 1-45 columns -0, +0): the zero of sign sgn(ST(1)) xor sgn(ST(0)) for a finite
+    ST(1), #IA (the indefinite) for ST(1) = +-inf; ST(0) non-zero in range: the product, correctly rounded (OWNER 8): +-inf
+    for ST(1) = +-inf with the sign flipped when ST(0) < 0 (log2(ST(0)+1) < 0), a zero of that sign for ST(1) = +-0.  NaN: SDM 1:T4-8,
+    unsupported or SNaN: IE (SDM 2A:FYL2XP1 Exc via the shared table)."""
+    x, y = st(s, 0), st(s, 1)
+    rm = rm_of(s.fcw)
+    u = Or(is_unsup80(st80(s, 0)), is_unsup80(st80(s, 1)))
+    nan_any = And(Or(is_nan(x), is_nan(y)), Not(u))
+    nres, _ = nan_result2(x, y)
+    xr, yr = real(x), real(y)
+    xneg = sgn(x) == K(1, 1)
+    inr = And(_finite(x), Not(is_zero(x)), abs_real(1 - abs_real(xr)) * abs_real(1 - abs_real(xr)) > z3.RealVal(1) / 2, 1 - abs_real(xr) > 0)
+    outr = And(Not(nan_any), Not(u), Not(is_zero(x)), Not(inr))
+    xz_y_inf = And(is_zero(x), is_inf(y), Not(nan_any), Not(u))
+    zsign = Concat(sgn(x) ^ sgn(y), K(0, 63))
+    exact = yr * LOG2(xr + 1)
+    gb, goe, gue, gpe, gup = _tr_flags(rm, exact)
+    yinf, yzero = is_inf(y), is_zero(y)
+    ginf = Concat(sgn(y) ^ sgn(x), K(0x7FF, 11), K(0, 52))
+    gres = If(yzero, zsign, If(yinf, ginf, gb))
+    nd_out = z3.BitVec("nd.fyl2xp1.out", 80)
+    res = If(u, K(QNAN_INDEF, 64), If(nan_any, nres, If(xz_y_inf, K(QNAN_INDEF, 64), If(is_zero(x), zsign, gres))))
+    ie = Or(is_snan(x), is_snan(y), u, xz_y_inf)
+    de = de_rule(Or(is_sub(x), is_sub(y)), ie, Or(is_nan(x), is_nan(y)))
+    gen_nz = And(inr, Not(nan_any), Not(u), Not(yzero), Not(yinf))
+    uf = Or(is_empty(s, 0), is_empty(s, 1))
+    s_ok = do_pop(_c1(write_img(s, 1, If(outr, nd_out, to_m80(res))), And(gen_nz, gup)))
+    s_f = do_pop(_uf_state(s, 1, False))
+    o = finish(s, St.ite(uf, s_f, s_ok),
+               If(uf, fl(IE), fv(ie=ie, de=de, oe=And(gen_nz, goe), ue=And(gen_nz, gue), pe=And(gen_nz, gpe))), ou_pre=True)
+    o.undef = UNDEF_C023
+    o.nd = [nd_out]
+    return o
+
+
 def fpatan(s):
     """SDM 2A:FPATAN Op 'ST(1) := arctan(ST(1) / ST(0))', 'PopRegisterStack' (D9 F3), special values SDM 2A:FPATAN
     Table 1-26: the angle of the point (X = ST(0), Y = ST(1)), i.e. atan2(Y, X): +-0 or +-pi on the X axis by the
@@ -1914,6 +2003,8 @@ def _mk():
     add("d9", "reg", 6, 0, "f2xm1", None, lambda s, m, i, ef: f2xm1(s))
     add("d9", "reg", 6, 1, "fyl2x", None, lambda s, m, i, ef: fyl2x(s))
     add("d9", "reg", 6, 2, "fptan", None, lambda s, m, i, ef: fptan(s))
+    add("d9", "reg", 6, 4, "fxtract", None, lambda s, m, i, ef: fxtract(s))
+    add("d9", "reg", 7, 1, "fyl2xp1", None, lambda s, m, i, ef: fyl2xp1(s))
     add("d9", "reg", 6, 3, "fpatan", None, lambda s, m, i, ef: fpatan(s))
     add("d9", "reg", 6, 5, "fprem1", None, lambda s, m, i, ef: fprem1(s))
     add("d9", "reg", 7, 0, "fprem", None, lambda s, m, i, ef: fprem(s))

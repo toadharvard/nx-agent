@@ -12,7 +12,7 @@ import os, re, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SPECS = ('x87spec.py', 'simdsdm.py', 'simdsdm_cites.txt')      # the one list of the files whose citation keys the table holds; the table is generated from them and never extended by hand (test_x87spec reads this list)
-KEY = r'SDM (1|2A|2B|2C|2D|3A):(T\d+-\d+|\d+(?:\.\d+)*|[A-Za-z][A-Za-z0-9]*)'
+KEY = r'SDM (1|2A|2B|2C|2D|3A|3B):(T\d+-\d+|\d+(?:\.\d+)*|[A-Za-z][A-Za-z0-9]*)'
 
 def pages(txt): return txt.split('\f')
 

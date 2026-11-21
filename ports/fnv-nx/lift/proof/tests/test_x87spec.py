@@ -68,6 +68,7 @@ def ccs(fsw):
     v = val(fsw); return [(v >> X.C3) & 1, (v >> X.C2) & 1, (v >> X.C0) & 1]
 
 NAN = 0x7FF8000000000000
+QNAN_INDEF_BITS = 0xFFF8000000000000
 class Layout(unittest.TestCase):
     def test_fsw_fcw_bits(self):
         pos = {'IE': X.IE, 'DE': X.DE, 'ZE': X.ZE, 'OE': X.OE, 'UE': X.UE, 'PE': X.PE, 'SF': X.SF, 'ES': X.ES, 'C0': X.C0, 'C1': X.C1, 'C2': X.C2, 'TOP': X.TOP_LO, 'C3': X.C3, 'B': X.BBIT}
@@ -288,6 +289,34 @@ class SpecialTables(unittest.TestCase):
                 else: self.assertEqual(self.cls(b), want, (r[0], cn)); self.assertEqual(fl, 0, (r[0], cn))
                 n += 1
         self.assertEqual(n, 7 * 9 - 4)                                                     # 63 runs, 4 of them symbolic finite results (ST(1) finite, ST(0) < 1 or > 1)
+
+class FxtractFyl2xp1(unittest.TestCase):
+    """SDM 2A:FXTRACT (Description: significand with exponent 0, ST(1) the true exponent; +-0 -> -inf and a signed zero with #Z; denormal normalized, #D) and SDM 2A:FYL2XP1 Table 1-45 (the concrete cells)"""
+    def regs(self, o, n):
+        top = val(X.top(o.s)); return [rd(o.s, (top + i) & 7) for i in range(n)]
+    def test_fxtract_values(self):
+        D = 1 << 52
+        for x, sig, ex_, fl in [(8.0, 1.0, 3.0, 0), (0.75, 1.5, -1.0, 0), (-12.0, -1.5, 3.0, 0), (5e-324, 1.0, -1074.0, 2), (struct.unpack('<d', struct.pack('<Q', 3))[0], 1.5, -1073.0, 2)]:
+            o = run(('d9', 'reg', 6, 4), state([x])); a = self.regs(o, 2)
+            self.assertEqual(a, [f2b(sig), f2b(ex_)], x); self.assertEqual(val(z3.simplify(o.raised)), fl, x)
+    def test_fxtract_zero_and_nan(self):
+        for z in (0.0, -0.0):
+            o = run(('d9', 'reg', 6, 4), state([z])); self.assertEqual(self.regs(o, 2), [f2b(z), f2b(float('-inf'))]); self.assertEqual(val(z3.simplify(o.raised)), 4)
+        o = run(('d9', 'reg', 6, 4), state([NAN])); self.assertEqual(self.regs(o, 2), [NAN, NAN]); self.assertEqual(val(z3.simplify(o.raised)), 0)
+    def test_fxtract_overflow(self):
+        o = run(('d9', 'reg', 6, 4), state([1.0] * 8)); self.assertEqual(val(z3.simplify(o.raised)) & 1, 1)
+    def test_fyl2xp1_table_1_45_concrete(self):
+        INF = float('inf')
+        for x, y, want in [(0.0, 3.0, 0.0), (-0.0, 3.0, -0.0), (0.0, -3.0, -0.0), (-0.0, -3.0, 0.0), (0.0, 0.0, 0.0), (-0.0, 0.0, -0.0), (0.0, -0.0, -0.0), (-0.0, -0.0, 0.0)]:
+            o = run(('d9', 'reg', 7, 1), state([x, y])); b = self.regs(o, 1)[0]
+            self.assertEqual(b, f2b(want), (x, y)); self.assertEqual(val(z3.simplify(o.raised)), 0, (x, y))
+        for x in (0.0, -0.0):
+            for y in (INF, -INF):
+                o = run(('d9', 'reg', 7, 1), state([x, y])); self.assertEqual(self.regs(o, 1)[0], QNAN_INDEF_BITS); self.assertEqual(val(z3.simplify(o.raised)) & 1, 1)
+        for x, y, want in [(0.1, INF, INF), (0.1, -INF, -INF), (-0.1, INF, -INF), (-0.1, -INF, INF), (0.1, 0.0, 0.0), (-0.1, 0.0, -0.0), (0.1, -0.0, -0.0), (-0.1, -0.0, 0.0)]:
+            o = run(('d9', 'reg', 7, 1), state([x, y])); self.assertEqual(self.regs(o, 1)[0], f2b(want), (x, y))
+        o = run(('d9', 'reg', 7, 1), state([NAN, 2.0])); self.assertEqual(self.regs(o, 1)[0], NAN)
+        o = run(('d9', 'reg', 7, 1), state([0.1, NAN])); self.assertEqual(self.regs(o, 1)[0], NAN)
 
 class MmxAlias(unittest.TestCase):
     """MMX aliasing, SDM 1:9.5.1 / 1:9.6.2 / 1:9.4.8: one copy of the effect, on the DSL names"""
