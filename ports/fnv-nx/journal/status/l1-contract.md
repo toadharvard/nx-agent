@@ -3106,3 +3106,8 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - Probe with g++ 13.3.0-6ubuntu2~24.04.1, gnu++20: it compiles the (void *)(fn) records only through GCC's leniency; standard C++ forbids reinterpret_cast in a constant initializer.
   - objstub's "exactly one record per accepted body" already makes a dynamically initialized record red.
   - L5 puts the w29 items on claude/fnv-l5-platform-c6 (c5 + 568d0049 + const.h + gen_env_const on the macros), as the candidate after cand5. cand5 keeps L5 563e1273f.
+- Ruling (objstub, rule 8): every IPA clone is judged by its origin, through L2's names-plugin fact (clone_of plus the param map from ipa_param_adjustments).
+  - A clone without the fact is red: reach-facts-missing.
+  - dk_cfg.isra.0 (translator) is red until L2 lands the fact. L6 writes no record for it.
+  - Blocked: by L2, the clone fact, requested 18:15.
+- The farm lost its queue in the container reset. RUN re-sent: cand4 dcc88df77, then cand5 eaeb17ffd with overlay 2ba233f20, after L2's toolchain job.
