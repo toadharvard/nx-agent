@@ -367,7 +367,7 @@ def check(doc, repo=None):
         if not (isinstance(f, str) and f.endswith(".whl") and "/" not in f):
             bad.append("env: python module %s: no wheel file name in python.wheel_files (setup installs from the mirror)" % m)
     bad += deb_pins(doc)
-    pinned, owners = pinned_set(doc["packages"]), file_owners()
+    pinned, owners = set(declared_debs(doc)), file_owners()
     for t, dg in sorted(doc["trees"].items()):
         cmp("tree " + t, dg[:12], (tree_digest(t, pinned, owners) if os.path.isdir(t) else "missing")[:12])
     own = None
@@ -386,7 +386,7 @@ def check(doc, repo=None):
         files = HOST_GCC_PLUGIN_DIRS(shutil.which(drv) or drv)
         miss = sorted({p for f in files for p in [sorted(own.get(os.path.realpath(f), {"no package"}))[0]] if p not in doc["packages"]})
         cmp("plugin headers of " + drv, "owned by listed packages", "no plugin headers" if not files else ("owned by %s" % miss if miss else "owned by listed packages"))
-    pinned, own = pinned_set(doc["packages"]), own
+    pinned, own = set(declared_debs(doc)), own
     for name, cwd, hs, err in read_roots(repo or os.path.dirname(os.path.dirname(os.path.dirname(HERE)))):
         if err:
             bad.append("env: read root %s: %s" % (name, err))
@@ -398,6 +398,19 @@ def check(doc, repo=None):
     return bad
 
 HEX64 = "0123456789abcdef"
+
+def profile_tops(debs):
+    """The tops of every named closure profile of a `debs` record (env.json debs.profiles): a set of package names; empty when there is none."""
+    pr = debs.get("profiles") if isinstance(debs, dict) and isinstance(debs.get("profiles"), dict) else {}
+    return {t for ts in pr.values() if isinstance(ts, list) for t in ts if isinstance(t, str)}
+
+
+def declared_debs(doc):
+    """THE declared package set of an environment record: {name: version} of the declared packages (doc["packages"]) and the dependency closure (dep_closure, on this
+    machine: what `dpkg -i` needs to be complete) of them and of the tops of every profile of debs.profiles. The one function: the deb pins of this file (deb_pins), the
+    mirror (farm/mirror_debs.py) and the pinned set of the tree digests all take the set from here, so a package that a profile adds is in every one of them."""
+    return dict(dep_closure(set(doc["packages"]) | profile_tops(doc.get("debs"))), **doc["packages"])
+
 
 def deb_pins(doc):
     """Mismatch lines of doc["debs"], the mirror pin of the packages (installed by farm/install_mirror.py, no package index): the
@@ -414,9 +427,7 @@ def deb_pins(doc):
     if not (isinstance(m.get("repo"), str) and hx(m.get("commit"), 40) and hx(m.get("tree_sha256"), 64)
             and hx(m.get("wheels_tree_sha256"), 64)):
         out.append("env: debs.mirror: needs repo, a 40-hex commit, a 64-hex tree_sha256 (debs/) and wheels_tree_sha256 (wheels/)")
-    profiles = dp.get("profiles") if isinstance(dp.get("profiles"), dict) else {}
-    tops = set(doc["packages"]) | {t for ts in profiles.values() if isinstance(ts, list) for t in ts if isinstance(t, str)}   # the roots of the set: the declared packages and the tops of every named profile
-    want = dict(dep_closure(tops), **doc["packages"])
+    want = declared_debs(doc)
     for p in sorted(set(want) ^ set(dp["packages"])):
         out.append("env: debs.packages: %s %s" % (p, "has no deb pin" if p in want else "is not in the packages or their dependency closure"))
     for p, e in sorted(dp["packages"].items()):
@@ -511,7 +522,7 @@ def snapshot(prev=None):
         raise SystemExit("envcheck: %s is not installed" % RUN_LAYOUT_DEB)
     pk.add(RUN_LAYOUT_DEB)
     return {"format": FORMAT, "os": _os(), "arch": platform.machine(),
-            "uid": os.geteuid(), "trees": {t: tree_digest(t, pinned_set(pk), file_owners()) for t in trees}, "packages": {p: _dpkg(p) for p in sorted(pk)},
+            "uid": os.geteuid(), "trees": {t: tree_digest(t, pinned_set(pk | profile_tops((prev or {}).get("debs"))), file_owners()) for t in trees}, "packages": {p: _dpkg(p) for p in sorted(pk)},
             "python": {"version": platform.python_version(), "modules": {m: metadata.version(m) for m in sorted(PY_MODULES)},
                        "installed_files_sha256": {m: wheel_digest(m) for m in sorted(PY_MODULES)},
                        "wheel_sha256": wheel_pins(prev)[0], "wheel_files": wheel_pins(prev)[1]},

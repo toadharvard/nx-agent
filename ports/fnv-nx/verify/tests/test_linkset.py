@@ -58,16 +58,57 @@ with tempfile.TemporaryDirectory() as td:
         check("a library no pinned deb owns is red host-lib-unpinned", "host-lib-unpinned" in str(e), str(e))
     check("a recipe with no link has no system definers", linkset.host_system_defs(R, root_with(None), td, owners) == {})
 
+TD = tempfile.mkdtemp(prefix="linkset-")
+
+
+def tobj(name, src):
+    c = os.path.join(TD, name + ".c")
+    open(c, "w").write(src)
+    subprocess.run(["aarch64-linux-gnu-gcc-13", "-O1", "-ffreestanding", "-fPIC", "-c", c, "-o", os.path.join(TD, name + ".o")], check=True)
+    return os.path.join(TD, name + ".o")
+
+
+UOBJ = tobj("u", "int u_fn(void){return 1;}\n")
 calls = []
 recipe.synth_names = lambda repo, root, cache, kinds, script=None, objs=(): calls.append((root, tuple(kinds), script, tuple(objs))) or {k: {"_GLOBAL_OFFSET_TABLE_", "__toy"} for k in kinds}
 adm = {"g": {"target": "guest"}, "h": {"target": "host"}}
 recipe.load_guest_link = lambda repo=".": {"script": "link/guest.ld"}
 recipe.link_candidates = lambda admit, spec, target, repo: []
-linkset.gate_build.ensure = lambda m, cache, repo=".": ({"status": "green", "objects": [{"unit": "u", "object": "/o/u.o"}]}, "")
+linkset.gate_build.ensure = lambda m, cache, repo=".": ({"status": "green", "objects": [{"unit": "u", "object": UOBJ}]}, "")
 recipe.load_recipe = lambda repo, admit, m: {"link": {"kind": "shared"}} if m == "h" else {}
 dg, dh = linkset.synth_defs("g", adm, ".", "c"), linkset.synth_defs("h", adm, ".", "c")
-check("a guest root: kind pie with the guest script and its own objects, source ld:<member>:pie", calls[0] == ("g", ("pie",), recipe.TREE + "/link/guest.ld", (("u", "/o/u.o"),)) and set(dg["__toy"]) == {"ld:g:pie"}, calls)
-check("a host root: the kind its recipe declares, no script", calls[1] == ("h", ("shared",), None, (("u", "/o/u.o"),)) and set(dh["_GLOBAL_OFFSET_TABLE_"]) == {"ld:h:shared"}, calls)
+check("a guest root: kind pie with the guest script and its own objects, source ld:<member>:pie", calls[0] == ("g", ("pie",), recipe.TREE + "/link/guest.ld", (("u", UOBJ),)) and set(dg["__toy"]) == {"ld:g:pie"}, calls)
+check("a host root: the kind its recipe declares, no script", calls[1] == ("h", ("shared",), None, (("u", UOBJ),)) and set(dh["_GLOBAL_OFFSET_TABLE_"]) == {"ld:h:shared"}, calls)
+
+# thread-local definers (ld 2.42 asserts on an undefined TLS symbol under ignore-all): the product objects that define it join the synthesis link
+A = tobj("tls_a", "extern __thread int tv __attribute__((tls_model(\"initial-exec\")));\nint get(void){return tv;}\n")
+B = tobj("tls_b", "__thread int tv __attribute__((tls_model(\"initial-exec\")));\n")
+B2 = tobj("tls_b2", "__thread int tv __attribute__((tls_model(\"initial-exec\")));\n")
+C = tobj("tls_c", "extern __thread int tw;\n__thread int tv;\nint h(void){return tw;}\n")
+D = tobj("tls_d", "__thread int tw;\n")
+SELF = tobj("tls_self", "__thread int tv;\nint s(void){return tv;}\n")
+check("an object with an undefined TLS symbol: tls_undefined names it; one without does not", linkset.tls_undefined(open(A, "rb").read()) == {"tv"} and linkset.tls_undefined(open(UOBJ, "rb").read()) == set())
+check("A uses TLS, B defines it: the closure is B's object", linkset.tls_closure([("a", A)], {"tv": [B]}) == [("tls:tv", B)])
+check("a TLS symbol the objects define themselves needs no definer", linkset.tls_closure([("s", SELF)], {}) == [])
+check("the defining object's own undefined TLS symbols are in the closure", linkset.tls_closure([("a", A)], {"tv": [C], "tw": [D]}) == sorted([("tls:tv", C), ("tls:tw", D)]))
+for what, objs, dd, want in (("no definer", [("a", A)], {}, "tls-undefined tv"), ("two definers", [("a", A)], {"tv": [B, B2]}, "tls-duplicate tv")):
+    try:
+        linkset.tls_closure(objs, dd)
+        check("%s is red" % what, False)
+    except ValueError as e:
+        check("%s is red %s" % (what, want), str(e).startswith(want), str(e))
+calls.clear()
+adm2 = {"ports/fnv-nx/ta": {"target": "guest", "class": "product"}, "ports/fnv-nx/tb": {"target": "guest", "class": "product"}, "ports/fnv-nx/th": {"target": "host", "class": "product"}}
+res2 = {"ports/fnv-nx/ta": {"status": "green", "objects": [{"unit": "a", "object": A}], "defined": []},
+        "ports/fnv-nx/tb": {"status": "green", "objects": [{"unit": "b", "object": B}], "defined": [{"symbol": "tv", "bind": "GLOBAL", "type": "TLS", "object": "b"}]},
+        "ports/fnv-nx/th": {"status": "green", "objects": [{"unit": "b", "object": B2}], "defined": [{"symbol": "tv", "bind": "GLOBAL", "type": "TLS", "object": "b"}]}}
+linkset.gate_build.ensure = lambda m, cache, repo=".": (res2[m], "")
+linkset.gate_build.product_roots = lambda repo=".": sorted(res2)
+recipe.load_recipe = lambda repo, admit, m: {}
+recipe.load_admit = lambda repo=".": adm2
+linkset.synth_defs("ports/fnv-nx/ta", adm2, ".", "c")
+check("synth_defs: the stage's objects are A's own plus the guest root's definer of its TLS symbol (the host root's definer is not offered)", calls and calls[0][3] == (("a", A), ("tls:tv", B)), calls)
+shutil.rmtree(TD, ignore_errors=True)
 
 # the derivation itself, with the host ld on toy x86_64 objects (cross case: the farm)
 if shutil.which("ld") and shutil.which("gcc"):

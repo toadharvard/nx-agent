@@ -30,12 +30,26 @@ def build(src, isa, opt="-O2"):
     s, o = os.path.join(ROOT, "s%d.c" % N[0]), os.path.join(ROOT, "o%d.o" % N[0])
     open(s, "w").write(src)
     subprocess.run(CC[isa] + [opt, "-c", s, "-o", o], check=True, capture_output=True)
+    BUILT[o] = (src, isa, opt)
     return o
 
 
+BUILT = {}   # object path -> the arguments of build(): with_consts rebuilds the source plus `.fnvnx.const` records
+
+
+def with_consts(o, recs):
+    """The object O rebuilt from its source plus the records RECS [(symbol, kind, value)] as assembler (contract/l2consts.py layout, 8-byte pointer, LEN 4 or 0)."""
+    src, isa, opt = BUILT[o]
+    sec = "@progbits" if isa == "x64" else "%progbits"
+    tail = "".join("\t.pushsection .fnvnx.const,\"\",%s\n\t.balign 4\n\t.8byte %s\n\t.4byte %d\n%s\t.balign 4\n\t.popsection\n" % (sec, f, {"void": 0, "u32": 4}.get(k, 8), "" if k == "void" else "\t.%dbyte %s\n" % ({"u32": 4}.get(k, 8), v))
+                   for f, k, v in recs)
+    return build(src + "\n__asm__(%s);\n" % __import__("json").dumps(tail), isa, opt)
+
+
 def kinds(path, terms=(), rows=None, osl=(), machine=None):
-    rows = {(path, k): v for k, v in (rows or {}).items()}
-    items, finds = objstub.run_check([(path, path)], set(terms), rows, set(osl), None, machine=machine)
+    if rows:
+        path = with_consts(path, [(k, v[0], v[1]) for k, v in sorted(rows.items())])
+    items, finds = objstub.run_check([(path, path)], set(terms), set(osl), None, machine=machine)
     return {(n, k) for _, n, k, _ in finds}, items, finds
 
 
@@ -52,11 +66,11 @@ for isa, m in (("a64", 183), ("x64", 62)):
         continue
     for opt in ("-O0", "-O2"):
         k, _, _ = kinds(build(STUB, isa, opt), machine=m)
-        check("%s %s: a stub body (constant 0, no row) is red: V without a row" % (isa, opt), ("stub", "V") in k, k)
+        check("%s %s: a stub body (constant 0, no row) is red: V without a row" % (isa, opt), ("stub", "const-missing") in k, k)
         k, _, _ = kinds(build(STUB, isa, opt), rows={"stub": ("u32", "0", "r")}, machine=m)
         check("%s %s: the same body with its row is green" % (isa, opt), not k, k)
         k, _, _ = kinds(build(STUB, isa, opt), rows={"stub": ("u32", "1", "r")}, machine=m)
-        check("%s %s: a row that differs from the body's constant is red" % (isa, opt), ("stub", "constants-mismatch") in k, k)
+        check("%s %s: a row that differs from the body's constant is red" % (isa, opt), ("stub", "const-mismatch") in k, k)
         k, _, _ = kinds(build(REAL, isa, opt), machine=m)
         check("%s %s: a real body (a store to a global, a call, an input read) is green with no row" % (isa, opt), not k, k)
 for isa, m, other in (("a64", 183, 62), ("x64", 62, 183)):
@@ -79,7 +93,7 @@ for what, (src, rows) in V.items():
     for opt in ("-O0", "-O2"):
         p = build(src, "x64", opt)
         k, _, f = kinds(p)
-        check("x64 %s: %s is V, red without a row" % (opt, what), ("f", "V") in k, f)
+        check("x64 %s: %s is V, red without a record" % (opt, what), ("f", "const-missing") in k, f)
         k, _, f = kinds(p, rows=rows)
         check("x64 %s: %s with its row is green" % (opt, what), not k, f)
 NOTV = {
@@ -93,7 +107,7 @@ NOTV = {
 for what, src in NOTV.items():
     for opt in ("-O0", "-O2"):
         k, _, f = kinds(build(src, "x64", opt))
-        check("x64 %s: %s is not V (green, no row needed)" % (opt, what), ("f", "V") not in k and not any(x[2] == "V" for x in f), f)
+        check("x64 %s: %s is not V (green, no row needed)" % (opt, what), ("f", "const-missing") not in k and not any(x[2] == "const-missing" for x in f), f)
 
 # T classes
 k, _, f = kinds(build("void f(void) { __builtin_trap(); }\n", "x64"))

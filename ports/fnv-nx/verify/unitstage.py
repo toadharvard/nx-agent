@@ -63,7 +63,6 @@ def sandbox_src(rel):
     `unit`) reports exactly sandbox_src(unit)."""
     return "/src/" + rel
 FORMAT = "fnvnx-unitstage/2"
-PROBE_ENV = {"LC_ALL": "C", "LANGUAGE": "C", "PATH": "/usr/bin:/bin"}   # the environment of every compiler probe run on the host (-print-*, -E, -dM, -fsyntax-only): no variable of the caller reaches the compiler (GCC_EXEC_PREFIX, COMPILER_PATH, CPATH, ...)
 ENV = {"TZ": "UTC", "LC_ALL": "C", "PYTHONHASHSEED": "0", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80"}
 # language options by the unit's suffix (what the driver itself does by suffix, made explicit so that the stage's input name does not matter):
 # (PP stage, CC stage). .s has no preprocessing: its CC stage reads the unit alone (a `.include` there fails: use .S and #include).
@@ -98,7 +97,7 @@ def gcc_set(cxx):
     """(exes, trees) for runtime.py tool, defined by the compiler's own answers: -print-prog-name=cc1plus (libexec dir),
     -print-prog-name=as, -print-search-dirs (`install:` dir = headers/specs) and `echo | g++ -x c++ -E -v -` (built-in include
     dirs). Trees nested in another tree are dropped."""
-    env = dict(PROBE_ENV)
+    env = dict(os.environ, LC_ALL="C")
 
     def q(*a, inp=None):
         p = subprocess.run([cxx] + list(a), input=inp, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)

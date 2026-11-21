@@ -5,14 +5,13 @@
  * R_AARCH64_P32_RELATIVE entries of .rela.dyn that the loader applies.
  *
  * Shape as libnx's switch.ld: three PT_LOAD segments text (R-X) / rodata (R--) / data (RW-), page aligned, text first,
- * plus PT_DYNAMIC and PT_TLS.  Order inside the text segment: .crt0 (the entry branch, ENTRY __fnvnx_guest_start), then .crt0.hdr and .crt0.mod0 (data, "a"), then
+ * plus PT_DYNAMIC and PT_TLS.  Order inside the text segment: .crt0 (the entry branch; the ENTRY statement names a crt0 symbol, so it is in guest_image.ld), then .crt0.hdr and .crt0.mod0 (data, "a"), then
  * the ordinary code, then the lifted bodies (input section .text.fnvl, one `void L_<addr>(void)` each) as an output
  * section of their own.  The perfect-hash dispatcher table of the lifted code (input section .rodata.fnvl_disp,
  * lift/tools/phf.py table_asm) is kept in rodata.
  */
 OUTPUT_FORMAT("elf32-littleaarch64")
 OUTPUT_ARCH(aarch64:ilp32)
-ENTRY(__fnvnx_guest_start)
 
 PHDRS
 {

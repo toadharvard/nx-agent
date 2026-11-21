@@ -27,7 +27,7 @@ LIB_REC = {"format": "fnvnx-recipe/1", "compiler": TR.RECIPE["compiler"], "flags
 
 
 def main_rec(**kw):
-    r = TR.mut(os_layer=[], constants=None, include=[ROOT + "/inc"])
+    r = TR.mut(os_layer=[], include=[ROOT + "/inc"])
     r["link"] = dict(r["link"], **kw)
     r.pop("generated")
     return r
@@ -212,7 +212,7 @@ def main():
     # (k) kinds: exe and shared host images (LP64), and the target of the link
     LP64FL = {"c": ["-O1", "-ffreestanding", "-fPIC", "-fno-stack-protector", "-fno-asynchronous-unwind-tables"], "cxx": [], "asm": []}
     def host_rec(kind, **kw):
-        r = TR.mut(os_layer=[], constants=None, include=[ROOT + "/inc"], flags={"c": ["-O1", "-ffreestanding", "-fPIC", "-fno-stack-protector", "-fno-asynchronous-unwind-tables"],
+        r = TR.mut(os_layer=[], include=[ROOT + "/inc"], flags={"c": ["-O1", "-ffreestanding", "-fPIC", "-fno-stack-protector", "-fno-asynchronous-unwind-tables"],
                                                                        "cxx": [], "asm": []})
         r.pop("generated")
         r["link"] = dict({"output": "x.exe" if kind == "exe" else "x.so", "kind": kind, "flags": ["-m", "aarch64linux"]}, **kw)
