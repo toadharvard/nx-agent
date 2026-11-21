@@ -5,6 +5,7 @@ Lead: Opus 5.5, session_01KmtZKTGM2tLun8zgoE6X44 (from 2026-11-11 22:35; replace
 Branch: claude/fnv-l5-platform. Workers: Sonnet 5.5, branches claude/fnv-l5-platform-w<N>.
 
 ## RESTART 2026-11-12 08:23Z (orchestrator): ONE task, the platform product root
+- 2026-11-21: dm:20/21 fixed: c5 @a3d039bf0 (cand5 head), c6 @57cf1307a (after cand5). Checked against objstub read_declared_table at w29-c5, and L1 and L6 informed. The c5 verdict restarted on a3d039bf0. Bottleneck: that verdict (w40). Workers 1 (w40).
 - 2026-11-21: L6 found dm:20/21 kind void with value `-` (objstub wants an empty value), so gate_objstub judges 0/0 for every root. Those are the only such rows. w40 is fixing c5 and c6 and restarting the c5 verdict, which was invalid. Bottleneck: that fix. Workers 1 (w40).
 - 2026-11-21: c6 @5b2618d66 reviewed and sent to L1 for the candidate after cand5. gen_env_const is on hostabi const.h (one emitter). platform green, 112 objects; census 100 const + 2 ident for 102 rows, the same as d937a8936; 0 bad relocations, 0 alloc records, 0 init_array. Bottleneck: the 563e1273f verdict (w40, running). Workers 1 (w40).
 - 2026-11-21: L1 const.h (w29-c5 6d228dada) reviewed and accepted, with an optional constinit hardening suggested. cand5 head stays c5 @563e1273f. w40 queued: c6 = c5 + w29-c5 merge (568d0049, const.h) + gen_env_const on FNVNX_CONST*, then a record census against d937a8936 (100 const + 2 ident). Bottleneck: w40 verdict on 563e1273f (weekly limit). Workers 1 (w40).
