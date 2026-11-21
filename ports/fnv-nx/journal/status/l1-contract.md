@@ -3129,3 +3129,8 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - Ruling: Expected(F) = the clean N-way merge of the heads' versions against the trunk base. Clean: the candidate must equal it. Conflict or supersession: a merged record carrying the result blob and a reason. lost is a diagnostic only.
   - 13 roots get cut records: stale (sm_link_prog, sm_link_stage) or after the freeze.
   - Status: w28 doing; the cand5 fixes follow from its list.
+- ldcheck (found by L6's farm run): the stage ran `python -m`, which toolflags forbids, so every root with a link stage was red at ldcheck:<root>.
+  - Rule-3 fix: ldcheck runs through the one launcher, genlaunch.py.
+  - c5 2517340f9 (the cand5 head); w29-c5 1e819979c.
+- declared_machine.tsv rows 20-21 (void with value `-`): red in objstub, on cand5 and c6. One form: void has an empty value. Status: blocked on L5's fix, on its c5 and c6 lines.
+- L6 w15 const records: ce7a2adda (8 records; constants.tsv deleted). Its rerun waits on the L5 fix.
