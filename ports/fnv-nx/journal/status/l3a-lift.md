@@ -1,3 +1,5 @@
+step 3: lift/rt and the image pack roots are not on the trunk. lift/rt is green at base3 645157660 and enters with cand5; the pack generators (liftsrc, liftprov) mount the forbidden SDM reading (lift/sdm, lift/sdmrows), whose deletion is w16 on claude/fnv-l3a-lift-w16-c5; the packs also need the 9-image facts pin (w7), the density configuration chosen for the cold build (w13, farm 3), and the cold pack build itself (up to 8 farms). step 4: the ELF link root does not exist yet; w8 is drafting it after lift/rt reaches cand5.
+
 # L3a LIFT status
 
 Lead: Opus 5.5, branch `claude/fnv-l3a-lift`. Handoff read: 422c3d39 (`journal/inbox/l3a-lift-handoff-opus.md`).
@@ -1925,3 +1927,14 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - doing (w13, farm 3): density bytes on one commit with four --density configurations (694a54f02). The baseline waits on w28's repo_signature stall fix.
 - doing (L3b): the default-ds store code-selector variant: rule or count asked.
 - toolchain/ comes to cand5 from L2's line (dispatch byte-identical with base3).
+
+## 2026-11-21 19:00Z (owner order 0aa926371: only the four product steps)
+
+- w16 session_01KmtZKR7g59TndD4Prm9yjX: doing. The SDM deletion for cand5 on claude/fnv-l3a-lift-w16-c5, from 407914779 with verify/cpuid_model.json at c5 5c80eeb6e. exec_as (cand6) is cancelled.
+- w8 session_01KmtZKR4JRJLXpi1LcSzp9b: doing. lift/rt into cand5 (base3 97f335d19, the cand5 shape outside lift/), then the ELF link root (step 4). The cand6 sorting of out-of-tree files is done: 1 real file, L5 test_gen_cxx, on claude/fnv-l3a-lift-to-l5 48fad17a1, already in L5 c6.
+- w7 session_01KmtZKV5F6B2PqGD9piX26f: doing. The 9-image facts pin. 19b (the foreach) is dropped.
+- w13 session_01KmtZKT9VGwj9Youb1vJwUR, with farm 3: doing. The density bytes of the 4 configurations over the whole pack, plus shapes.tsv. The udcensus is dropped.
+- Fixed since 11-16:
+  - dispatch.c ENTRY1-CONT: toolchain/ and rules/ come whole from L2 overlay 35e622293, which has 67164ec5 and the fnvnx prefix.
+  - verify/cpuid_model.json had lost its declared-CPU keys; restored by L1 at c5 5c80eeb6e.
+- Pending in cand6: L5 599f1bb26, the lift/rt/build.json exporthdr/include line, which lands with L1's admit.json that drops the contract/exporthdr root.
