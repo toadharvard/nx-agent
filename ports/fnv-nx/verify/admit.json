@@ -463,26 +463,8 @@
    "recipe": "ports/fnv-nx/platform/build.json"
   },
   {
-   "path": "ports/fnv-nx/platform/coremath",
-   "class": "product",
-   "target": "guest",
-   "recipe": "ports/fnv-nx/platform/coremath/build.json"
-  },
-  {
-   "path": "ports/fnv-nx/platform/gmp",
-   "class": "product",
-   "target": "guest",
-   "recipe": "ports/fnv-nx/platform/gmp/build.json"
-  },
-  {
    "path": "ports/fnv-nx/platform/include",
    "class": "header"
-  },
-  {
-   "path": "ports/fnv-nx/platform/mpfr",
-   "class": "product",
-   "target": "guest",
-   "recipe": "ports/fnv-nx/platform/mpfr/build.json"
   },
   {
    "path": "ports/fnv-nx/render/d3d9",
