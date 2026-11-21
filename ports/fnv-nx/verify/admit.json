@@ -173,6 +173,12 @@
    "recipe": "ports/fnv-nx/lift/disp/build.json"
   },
   {
+   "path": "ports/fnv-nx/lift/elf",
+   "class": "product",
+   "target": "guest",
+   "recipe": "ports/fnv-nx/lift/elf/build.json"
+  },
+  {
    "path": "ports/fnv-nx/lift/facts",
    "class": "tool",
    "target": "host",

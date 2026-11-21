@@ -1,0 +1,39 @@
+{
+ "format": "fnvnx-recipe/1",
+ "profile": "guest",
+ "flags": {
+  "c": [
+   "-O2",
+   "-g",
+   "-ffunction-sections",
+   "-fdata-sections",
+   "-Wall",
+   "-Wextra",
+   "-D__LINUX_ERRNO_EXTENSIONS__",
+   "-std=gnu11",
+   "-Werror=attributes"
+  ],
+  "cxx": [
+   "-O2",
+   "-g",
+   "-ffunction-sections",
+   "-fdata-sections",
+   "-Wall",
+   "-Wextra",
+   "-D__LINUX_ERRNO_EXTENSIONS__",
+   "-std=gnu++20",
+   "-Werror=attributes"
+  ],
+  "asm": []
+ },
+ "include": [],
+ "units": "all",
+ "link": {
+  "output": "fnvnx.elf",
+  "flags": [
+   "-m",
+   "aarch64linux32"
+  ],
+  "entry": "__fnvnx_guest_entry"
+ }
+}
