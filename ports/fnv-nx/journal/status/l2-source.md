@@ -794,3 +794,4 @@ After the first frame:
   - Overlay head: 2ba233f20.
 - bottleneck: the farm's rt rerun at fc87efde2 -> the pin commit.
 - 2026-11-21 18:20Z: L1 refined the names clone-origin fact. The params map runs from each clone parameter to its origin (copy / split offset,size / const value / removed), read from ipa_param_adjustments and tree_map. It blocks L6's translator root (objstub on dk_cfg.isra.0) -> w2's first item.
+- 2026-11-21 18:40Z: names clone-origin fact done and reviewed. cand4b c29772b12 + a6b6fb2fc (head 8075e2492); overlay 67d85465d + 9b30693aa. It is the `.fnvnx.clones` section, with a total params map, from the cgraph hooks, never the suffix. test_names 43, pi 121, layout 214, dispatch 67. Sent to L1 for w29's objstub parser. Follow-up for w2, not blocking: a clone-of-clone fixture.
