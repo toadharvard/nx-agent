@@ -8,7 +8,7 @@
   3. a signature that disagrees with the decorated name, a base without cxx info and a citation that is not wine-9.0 stop the generator."""
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X)
 import os
 import re
 import subprocess
@@ -18,8 +18,8 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, sys.argv[1])
-import gen_cxx
-from contract import proto
+from fnvnx.platform.com import gen_cxx
+from fnvnx.contract import proto
 
 LETTERS = {"A": "cdecl", "C": "pascal", "E": "thiscall", "G": "stdcall", "I": "fastcall"}
 fails = []
