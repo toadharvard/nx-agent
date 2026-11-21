@@ -30,3 +30,8 @@ int use_cfg(int u) { return dk_cfg(u)->a + dk_cfg(u + 1)->b; }
 
 // 5. not a clone: no record
 __attribute__((noinline)) int plain(int a) { return opaque(a) + 1; }
+
+// 6. IPA-SRA split: a struct parameter of which one field is used is passed as that field by value: split_f.isra.0(int) is the int at byte 4 of parameter 0
+struct Big { int a; int b; int c[4]; };
+static __attribute__((noinline)) int split_f(const Big *p) { return opaque(p->b) + 5; }
+int use_split(const Big *p) { return split_f(p) + split_f(p + 1); }

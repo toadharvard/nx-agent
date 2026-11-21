@@ -87,6 +87,7 @@ FNVNX_CXX_ONLY(uses_template_parms);
 #include "stor-layout.h"
 #include "fold-const.h"
 #include "tree-iterator.h"
+#include "tree-pretty-print.h"
 #include "intl.h"
 #include "pretty-print.h"
 #include "diagnostic.h"
@@ -1418,12 +1419,20 @@ static std::vector<tree> sdd_slot_decls()
  *     constprop  clone_info::tree_map is not empty (IPA-CP replaced a parameter by a constant);
  *     isra       clone_info::param_adjustments is not NULL (IPA-SRA, or any pass that changes the signature, described the new parameters);
  *     clone      none of these: a clone that changes neither parameters nor constants (a version, an ICF wrapper...).
- *   Parameter map, relative to the ORIGIN's parameters (the clone's immediate origin, which for a clone of a clone is the previous clone): one entry per
- *   (origin index, clone index) pair, from param_adjustments (ipa-param-manipulation.h): an adjusted parameter j with op COPY or SPLIT is the origin's
- *   parameter prev_clone_index (the index in the previous clone; base_index is the index in the root); every origin parameter at or after
- *   m_always_copy_start is copied behind the adjusted ones, in order (clone index = |m_adj_params| + k - m_always_copy_start); an origin parameter that
- *   appears in none of these is "removed". A tree_map entry (parm_num k) makes k "const": the clone's body takes the value from the constant, whether or not the
- *   clone still has the parameter. With neither param_adjustments nor tree_map the map is null.
+ *   Parameter map (params, a JSON array in the fifth column; `null` when the clone has neither param_adjustments nor tree_map, and for a part), relative to the
+ *   ORIGIN's parameters (the clone's immediate origin, which for a clone of a clone is the previous clone). It is total over both sides, from
+ *   param_adjustments (ipa-param-manipulation.h) and the tree_map: for each clone parameter j (the adjusted parameters in order, then the origin parameters at or
+ *   after m_always_copy_start, copied behind them) one of
+ *     {"j":j,"origin":i,"op":"copy"}                                      op COPY: the origin's parameter prev_clone_index (the index in the previous clone;
+ *                                                                          base_index is the index in the root), unchanged;
+ *     {"j":j,"origin":i,"op":"split","offset":O,"size":S}                 op SPLIT: the component of origin parameter i at byte unit_offset O, of the adjusted
+ *                                                                          parameter's type size S in bytes;
+ *     {"j":j,"op":"new"}                                                  op NEW: a parameter with no origin;
+ *   then, per origin parameter i that has no clone parameter or is replaced:
+ *     {"origin":i,"op":"const","value":V}                                 a tree_map entry (parm_num i): the clone's body takes the value V, an integer constant as
+ *                                                                          its decimal number, any other tree as the compiler's printed form in a string. a clone that keeps the signature
+ *                                                                          (no param_adjustments) also has the origin parameter's copy entry;
+ *     {"origin":i,"op":"removed"}                                         neither a clone parameter nor a replacement.
  *   Written once per clone symbol whose body the unit writes (TREE_ASM_WRITTEN, not external; a clone is static, so sym_emitted's TREE_PUBLIC does not apply).
  */
 struct CloneRec {
@@ -1431,7 +1440,7 @@ struct CloneRec {
   std::string origin;      /* asmname of the origin */
   std::string kind;
   bool has_map;
-  std::vector<std::pair<int, std::string> > map;   /* origin index -> clone index, "removed" or "const" */
+  std::string params;      /* the parameter map as a JSON array (see the rule above) */
 };
 static std::map<UidKey, CloneRec> clone_recs;   /* by uid_decl of the clone's decl */
 
@@ -1453,6 +1462,37 @@ static int param_count(tree fndecl)
   return n;
 }
 
+/* the text escaped for a gas .ascii string (backslash and quote); the TAB between fields is written as the escape gas reads back */
+static std::string asm_quote(const std::string &t)
+{
+  std::string o;
+  for (char c : t) { if (c == '"' || c == '\\') o += '\\'; if (c == '\t') o += "\\t"; else o += c; }
+  return o;
+}
+
+/* a JSON string literal of S (the section is read by tools; the assembler gets it through asm_quote below) */
+static std::string json_str(const std::string &t)
+{
+  std::string o = "\"";
+  for (unsigned char c : t) {
+    if (c == '"' || c == '\\') { o += '\\'; o += (char)c; }
+    else if (c < 0x20 || c >= 0x7f) { char b[8]; snprintf(b, sizeof b, "\\u%04x", c); o += b; }
+    else o += (char)c;
+  }
+  return o + "\"";
+}
+
+/* the constant of a tree_map entry as the tree gives it: an integer constant as its decimal value (signed or unsigned by its type), any other tree as the compiler's
+ * own printed form, a JSON string */
+static std::string const_json(tree t)
+{
+  if (t && TREE_CODE(t) == INTEGER_CST) {
+    if (TYPE_UNSIGNED(TREE_TYPE(t)) && tree_fits_uhwi_p(t)) return std::to_string(tree_to_uhwi(t));
+    if (!TYPE_UNSIGNED(TREE_TYPE(t)) && tree_fits_shwi_p(t)) return std::to_string(tree_to_shwi(t));
+  }
+  return json_str(t ? print_generic_expr_to_str(t) : "");
+}
+
 static void clone_dup(cgraph_node *src, cgraph_node *dst, void *)
 {
   if (dst->decl == src->decl) return;   /* an inline clone: the origin's own decl, no body of its own */
@@ -1466,24 +1506,35 @@ static void clone_dup(cgraph_node *src, cgraph_node *dst, void *)
   r.has_map = pa || (tm && vec_safe_length(tm));
   if (r.has_map) {
     int n = param_count(src->decl);
-    std::vector<std::vector<int> > to(n);
+    std::vector<bool> covered(n, false);
+    std::vector<std::string> side_clone, side_origin;   /* entries by clone parameter j, then entries by origin parameter */
+    auto copy = [&](int j, int i) { side_clone.push_back("{\"j\":" + std::to_string(j) + ",\"origin\":" + std::to_string(i) + ",\"op\":\"copy\"}"); };
     if (pa) {
       unsigned len = vec_safe_length(pa->m_adj_params);
       for (unsigned j = 0; j < len; j++) {
         ipa_adjusted_param &p = (*pa->m_adj_params)[j];
-        if ((p.op == IPA_PARAM_OP_COPY || p.op == IPA_PARAM_OP_SPLIT) && (int)p.prev_clone_index < n) to[p.prev_clone_index].push_back(j);
+        int i = (int)p.prev_clone_index;
+        if (p.op == IPA_PARAM_OP_COPY) { copy(j, i); if (i < n) covered[i] = true; }
+        else if (p.op == IPA_PARAM_OP_SPLIT) {
+          side_clone.push_back("{\"j\":" + std::to_string(j) + ",\"origin\":" + std::to_string(i) + ",\"op\":\"split\",\"offset\":" + std::to_string(p.unit_offset)
+                               + ",\"size\":" + std::to_string(tree_to_uhwi(TYPE_SIZE_UNIT(p.type))) + "}");
+          if (i < n) covered[i] = true;
+        } else side_clone.push_back("{\"j\":" + std::to_string(j) + ",\"op\":\"new\"}");   /* a parameter with no origin */
       }
       if (pa->m_always_copy_start >= 0)
-        for (int k = pa->m_always_copy_start; k < n; k++) to[k].push_back(len + k - pa->m_always_copy_start);
+        for (int k = pa->m_always_copy_start; k < n; k++) { copy(len + k - pa->m_always_copy_start, k); covered[k] = true; }
     } else
-      for (int k = 0; k < n; k++) to[k].push_back(k);   /* IPA-CP keeps the signature */
-    std::set<int> consts;
-    for (unsigned i = 0; tm && i < tm->length(); i++) consts.insert((*tm)[i]->parm_num);
+      for (int k = 0; k < n; k++) { copy(k, k); covered[k] = true; }   /* IPA-CP keeps the signature */
+    std::map<int, std::string> consts;
+    for (unsigned i = 0; tm && i < tm->length(); i++) consts[(*tm)[i]->parm_num] = const_json((*tm)[i]->new_tree);
     for (int k = 0; k < n; k++) {
-      if (consts.count(k)) r.map.push_back(std::make_pair(k, std::string("const")));
-      else if (to[k].empty()) r.map.push_back(std::make_pair(k, std::string("removed")));
-      else for (int j : to[k]) r.map.push_back(std::make_pair(k, std::to_string(j)));
+      std::map<int, std::string>::iterator c = consts.find(k);
+      if (c != consts.end()) side_origin.push_back("{\"origin\":" + std::to_string(k) + ",\"op\":\"const\",\"value\":" + c->second + "}");
+      else if (!covered[k]) side_origin.push_back("{\"origin\":" + std::to_string(k) + ",\"op\":\"removed\"}");
     }
+    r.params = "[";
+    for (auto *v : {&side_clone, &side_origin}) for (auto &e : *v) r.params += (r.params.size() > 1 ? "," : "") + e;
+    r.params += "]";
   }
   clone_recs[uid_decl(dst->decl)] = r;
 }
@@ -1517,13 +1568,10 @@ static void write_clones()
     if (!TREE_ASM_WRITTEN(d) || DECL_EXTERNAL(d)) continue;
     std::map<UidKey, CloneRec>::iterator c = clone_recs.find(uid_decl(d));
     if (c == clone_recs.end()) continue;
-    std::string ps;
-    if (c->second.has_map) {
-      for (auto &m : c->second.map) ps += (ps.empty() ? "" : ",") + std::to_string(m.first) + ":" + m.second;
-    } else ps = "-";
+    std::string ps = c->second.has_map ? c->second.params : "null";
     out[asmname(d)] = c->second.origin + "\t" + clone_root(uid_decl(d)) + "\t" + c->second.kind + "\t" + ps;
   }
-  for (auto &o : out) fprintf(asm_out_file, "\t.ascii\t\"%s\\t%s\\n\"\n", o.first.c_str(), o.second.c_str());
+  for (auto &o : out) fprintf(asm_out_file, "\t.ascii\t\"%s\\n\"\n", asm_quote(o.first + "\t" + o.second).c_str());
   fprintf(asm_out_file, "\t.popsection\n");
 }
 
