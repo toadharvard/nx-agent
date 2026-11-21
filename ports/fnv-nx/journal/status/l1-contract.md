@@ -3200,3 +3200,6 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - Farm reordered: cand5 verdict, then cand4 per-test errors, then the toolchain rerun.
   - w29 keeps the deb pins (toolchain for platform) and the lift/rt measurement; drops item 0, test_pathrules and the test_recipe baseline.
   - cand4 verdict: 44 green, 1 red (selftests 146/169, 1466.6 s against the 300 s budget).
+- 19:00 Farm order: the toolchain rerun at 87b242f0c (L2) finishes first, about 4 minutes; then cand5 e4e9b7e53; then cand4 gd3.
+  - L3a w16 SDM deletion f7363e7. w28 assigns cand5b on c5: lift/ from f7363e7, the lift/sdm(rows) admit rows removed, the poppler pins deleted. It merges after L3a farm 2 is green and the cand5 verdict is in.
+  - w8 base3 36b49a9a2 keeps admit.json at c5 9bd09cfee. The union admit.json is L1's (w28).
