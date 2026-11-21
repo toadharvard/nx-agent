@@ -3146,3 +3146,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - Required: split entries carry by_ref (from POINTER_TYPE_P); every clone param appears once; a self-check against DECL_ARGUMENTS.
   - w29's parser waits for the fix.
 - FTOI (w3 3164eff45): report is null only when no object with the same bytes has one; newlib's copied libm members are covered. Waiting on the farm.
+- candcheck at c5 9bd09cfee (w28 4c932036e), per-step base: 1355 files; 948 equal; 138 merge-red; 269 conflicts; roots 0 red; 140 lost.
+  - Ruling: owner-directed. Each source row declares disjoint `trees`; the L1 row is the candidate itself; the integration branch owns CLAUDE.md and ORCHESTRATION.md.
+  - The candidate holds the owner's version. A non-owner edit must be contained in the owner (merge(O,G) == O), else not-in-owner, remedied by the owner: take the change, or a superseded record.
+  - Status: w28 rerunning; the per-(O,G) lists then go to the owners.
