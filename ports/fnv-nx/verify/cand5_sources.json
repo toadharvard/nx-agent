@@ -1,0 +1,12 @@
+{"trunk": "origin/claude/fnv-nx-clean",
+ "sources": [
+  {"head": "40c639d16", "owner": "w28 (L1): link, verify, contract, farm"},
+  {"head": "563e1273f", "owner": "L5: platform, rt, hostabi, manifest, loader, bridgetable"},
+  {"head": "da0e4ff78", "owner": "L6: render, bridgefacts"},
+  {"head": "04f1e5dfb", "owner": "L4: tests/bootrt"},
+  {"head": "407914779", "owner": "L3a: lift (base3)"},
+  {"head": "a36b3c8f2", "owner": "L2: toolchain, rules"},
+  {"head": "5241e02c7", "base": "5241e02c7~1", "owner": "L2 overlay"},
+  {"head": "c64609950", "base": "c64609950~1", "owner": "L2 overlay"},
+  {"head": "35e622293", "base": "35e622293~1", "owner": "L2 overlay"}],
+ "merged": [], "cut": []}
