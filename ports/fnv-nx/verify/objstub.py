@@ -180,10 +180,11 @@ the function or into a data island; (c) no SVC/atomic/system word (not in the wh
 of x19..x30 into the frame and RET of x30 = E(30): no argument, x8 or vector argument is read, loads read only frame slots stored
 earlier; (e) at every reachable RET each of x0, x1, v0 is never written (void) or is K or A. So effects stay in the frame and the
 result is a function of immediates and link-time addresses: V => result and effects are input-independent (merges give I or D,
-never K). Limits: (1) never-written x0 means void OR identity (`ret` is both), so such a function is V-flagged and needs a LEN 0
-record; (2) not complete: a body that logs and returns a constant is not V (class `oracle`). DECLARED CONSTANTS come from the compile itself: the object's
+never K). Limits: (1) never-written x0 means void OR identity of argument 0 (`ret` is both), so such a function is V-flagged and needs a LEN 0
+record (void) or an `.fnvnx.ident` record (k=0); an identity of another argument k reads x_k, so it is V only through its `.fnvnx.ident` record k (vanalyse ident=k); (2) not complete: a body that logs and returns a constant is not V (class `oracle`). DECLARED CONSTANTS come from the compile itself: the object's
 non-alloc section `.fnvnx.const` (contract/l2consts.py; no constants table). A record is an ABS relocation to the function, u32 LEN and LEN bytes holding the
-value as an object of the row's type (LEN 0: void; a relocation at the value: the address of that symbol). A V function is certified iff it has exactly one
+value as an object of the row's type (LEN 0: void; a relocation at the value: the address of that symbol), or an `.fnvnx.ident` record {ABS relocation to the function, u32 k}: the function returns its argument k
+unchanged (hostabi/include/fnvnx/const.h writes both). A V function is certified iff it has exactly one
 record and it equals the result bit for bit (the low 8*LEN bits of x0; x1 and v0 unwritten): `const-missing`, `const-duplicate`, `const-mismatch` (also a
 record on a body that is not V), `const-malformed` (a record with no relocation, a bad length, a relocation of another kind: with its offset)."""
 import atexit
@@ -439,7 +440,7 @@ def step(off, w, st, rel, obj, inf):
         elif (w & 0x1F000000) == 0x10000000:  # ADR/ADRP: known only when relocated
             new[rd_] = ("A", obj.canon(rel[0], rel[2])) if rel else ("I",)
         elif (w >> 24) & 0x1F == 0b01010 and (w >> 29) & 3 == 1 and rn == 31 and not (w >> 21) & 1 and (w >> 10) & 63 == 0 and (w >> 22) & 3 == 0:
-            new[rd_] = g(rm) if sf or g(rm)[0] == "K" or (g(rm) == ("N",) and not getattr(obj, "w64", True)) else ("I",)  # orr rd, zr, rm = mov (ILP32: the 32-bit mov of a pointer keeps it)
+            new[rd_] = g(rm) if sf or g(rm)[0] == "K" or (g(rm) == ("N",) and not getattr(obj, "w64", True)) else ("T", g(rm)[1]) if g(rm)[0] == "E" else ("I",)  # orr rd, zr, rm = mov (ILP32: the 32-bit mov of a pointer keeps it; of an entry register: T, its low 32 bits)
     except Fail:
         pass
     for i in range(64):
@@ -495,12 +496,139 @@ def is_const_store(w):
         (w >> 24) & 3 == 1 or ((w >> 24) & 3 == 0 and not (w >> 21) & 1 and (w >> 10) & 3 != 2))
 
 
-def vanalyse(words, a, b, rels, obj, dec, wine=False, loads_ok=False, errno_ok=False):
+ADRP_REL = {False: 11, True: 275}   # R_AARCH64_P32_ADR_PREL_PG_HI21 / R_AARCH64_ADR_PREL_PG_HI21
+LDST_REL = {False: frozenset(range(13, 18)), True: frozenset((278, 284, 285, 286, 299))}   # R_AARCH64_(P32_)LDST{8,16,32,64,128}_ABS_LO12_NC (AAELF64)
+
+
+def const_cells(o):
+    """The constant cells of the object O: [(section, start, end, initializer bytes)] of every object with internal linkage (a LOCAL STT_OBJECT
+    symbol of a loaded data section) whose address does not escape the object and whose every store, in every function, writes the value that the
+    cell's static initializer already holds. Such a cell never changes, so a store to it is no effect and a load of it is the initializer.
+    Facts only from the object's own symbols, relocations and instructions. Not constant (the cell is left out):
+      - a relocation to the cell, in any loaded section, of another kind than ADRP page or LDST lo12 in code (an ADD lo12, a data pointer: the
+        address escapes; the cell may be reached by anything, also by a byte of the next cell, so the address one past the end counts too);
+      - an access to the cell that is not a plain load or a plain single-register store of a constant equal to the initializer (a pair, a SIMD
+        store, an atomic, a writeback, an access that leaves the cell, a stored value that is not that constant);
+      - a function that the flow analysis cannot take (unanalysable code that holds a relocation to the cell);
+      - two symbols that overlap partly.
+    Raises nothing for unanalysable code. Memoised in O."""
+    if "cells" in o.__dict__:
+        return o.cells
+    cs = {}
+    for n, v, sz, t, b, shn in o.syms:
+        if t == 1 and b == 0 and sz and 0 < shn < 0xFF00:
+            nm, ty, fl, off, ssz, _, _ = o.secs[shn]
+            if fl & 2 and not fl & 4:
+                cs.setdefault((shn, v, v + sz), [shn, v, v + sz, bytes(sz) if ty == 8 else o.data[off + v:off + v + sz], True])
+    cells = sorted(cs.values(), key=lambda c: (c[0], c[1], c[2]))
+    for x, y in zip(cells, cells[1:]):
+        if x[0] == y[0] and y[1] < x[2]:
+            x[4] = y[4] = False
+    keys = [(c[0], c[1]) for c in cells]
+
+    def find(shn, off):
+        k = bisect.bisect_right(keys, (shn, off)) - 1
+        return cells[k] if k >= 0 and cells[k][0] == shn and cells[k][1] <= off < cells[k][2] else None
+
+    allowed = LDST_REL[o.w64] | {ADRP_REL[o.w64]}
+    if cells:
+        for si, tbl in o.rela.items():
+            fl = o.secs[si][2]
+            if fl & 2:
+                for off, (sidx, t, ad) in tbl.items():
+                    k = o.canon(sidx, ad)
+                    if k[0] == "sec":
+                        if not (fl & 4 and t in allowed):
+                            for c in (find(k[1], k[2]), find(k[1], k[2] - 1)):
+                                if c:
+                                    c[4] = False
+        for si, (sname, stype, sflags, soff, ssize, _, _) in enumerate(o.secs):
+            if not sflags & 4 or stype != 1:
+                continue
+            buf, rel, kind, mkeys, funcs, dec = sec_info(o, si)
+            for a, sz, name in funcs:
+                b = a + sz
+                if not sz or b > ssize or (a % 4 or sz % 4):
+                    continue
+                hits = []
+                for ro, (sidx, t, ad) in rel.items():
+                    k = o.canon(sidx, ad)
+                    if a <= ro < b and k[0] == "sec" and find(k[1], k[2]) and t in allowed:
+                        hits.append((ro, find(k[1], k[2])))
+                if not hits:
+                    continue
+                words = {x: struct.unpack_from("<I", buf, x)[0] for x in range(a, b, 4) if kind(x) != "d"}
+                try:
+                    fl = _flow(words, a, b, rel, o, {x: dec.get(soff + x) for x in words})
+                except Unanalysable:
+                    fl = None
+                if fl is None:
+                    for ro, c in hits:
+                        c[4] = False
+                    continue
+                succ, inf, ins = fl
+                seen = set()
+                for x, (r, w, mem, wb) in inf.items():
+                    if not mem:
+                        continue
+                    base, index, disp, size = mem
+                    rl = rel.get(x)
+                    v = ins[x][base] if base is not None else ("I",)
+                    if rl and rl[1] in LDST_REL[o.w64]:
+                        k = o.canon(rl[0], rl[2])
+                    elif v[0] == "A" and v[1][0] == "sec":
+                        k = (v[1][0], v[1][1], v[1][2] + (disp or 0))
+                    else:
+                        continue
+                    c = k[0] == "sec" and find(k[1], k[2])
+                    if not c:
+                        continue
+                    seen.add(x)
+                    word, ok = words[x], False
+                    if index is None and wb is None and size and k[2] + size <= c[2]:
+                        if is_load(word):
+                            ok = True
+                        elif is_const_store(word):
+                            rt = word & 31
+                            val = ("K", 0) if rt == 31 else ins[x][rt]
+                            ok = val[0] == "K" and (val[1] & ((1 << 8 * size) - 1)).to_bytes(size, "little") == c[3][k[2] - c[1]:k[2] - c[1] + size]
+                    if not ok:
+                        c[4] = False
+                for ro, c in hits:
+                    if ro not in seen and rel[ro][1] in LDST_REL[o.w64]:
+                        c[4] = False
+    o.cells = [tuple(c[:4]) for c in cells if c[4]]
+    o.cell_keys = [(c[0], c[1]) for c in o.cells]
+    return o.cells
+
+
+def const_cell_at(o, w, rl, v, mem):
+    """The constant cell (const_cells) that the memory access of word W (relocation RL or None, base value V, memory operand MEM) lies in, or None."""
+    cells = const_cells(o)
+    base, index, disp, size = mem
+    if not cells or index is not None or not size:
+        return None
+    if rl and rl[1] in LDST_REL[o.w64]:
+        k = o.canon(rl[0], rl[2])
+    elif v[0] == "A" and v[1][0] == "sec" and disp is not None:
+        k = (v[1][0], v[1][1], v[1][2] + disp)
+    else:
+        return None
+    if k[0] != "sec":
+        return None
+    i = bisect.bisect_right(o.cell_keys, (k[1], k[2])) - 1
+    c = cells[i] if i >= 0 else None
+    return c if c and c[0] == k[1] and c[1] <= k[2] and k[2] + size <= c[2] else None
+
+
+def vanalyse(words, a, b, rels, obj, dec, wine=False, loads_ok=False, errno_ok=False, ident=None):
     """-> {'x0'|'x1'|'v0': None (never written) | ('K',c) | ('A',addr) | ('U',)} if the function is V (no proof of dependence or
     effect), else None. Non-vacuity proofs: cfg() (i, iv), a memory access whose base is not provably the own frame (ii, iii), an
     input register live at entry (v). LOADS_OK (the trap shape (T-B), which is defined by output effect alone): a load from any address
     is not an effect, only stores must be based on the own frame. ERRNO_OK (the image rule, fixed-failure): a store of a constant through the errno
-    pointer (x0 after a call of obj.errno_fn, the value N) is no effect that makes the body non-vacuous; it is counted in obj.errno_stores. Raises Unanalysable."""
+    pointer (x0 after a call of obj.errno_fn, the value N) is no effect that makes the body non-vacuous; it is counted in obj.errno_stores. IDENT = k (the function has an
+    `.fnvnx.ident` record for argument k): the one input register that the body may read is x_k, and the result carries "id" = k iff x0 at every return is the entry value
+    of x_k (E, or T: its low 32 bits, the 32-bit mov) and x1 and v0 are unwritten. Raises Unanalysable."""
     fl = _flow(words, a, b, rels, obj, dec)
     if fl is None:
         return None
@@ -510,6 +638,8 @@ def vanalyse(words, a, b, rels, obj, dec, wine=False, loads_ok=False, errno_ok=F
         if mem:
             base, index, disp, size = mem
             v = ins[o][base] if base is not None else ("I",)
+            if const_cell_at(obj, words[o], rels.get(o), v, mem):   # a load or an initial-valued store of a constant cell (const_cells): no effect
+                continue
             if loads_ok and is_load(words[o]):
                 continue
             if errno_ok and v == ("N",) and is_const_store(words[o]) and index is None and (words[o] & 31 == 31 or ins[o][words[o] & 31][0] == "K"):
@@ -524,7 +654,7 @@ def vanalyse(words, a, b, rels, obj, dec, wine=False, loads_ok=False, errno_ok=F
             n = (inf[o][0] & INP) | (functools.reduce(operator.or_, (live[s] for s in set(succ[o])), 0) & ~inf[o][1])
             if n != live[o]:
                 live[o], ch = n, True
-    if live[a] and not wine:   # WINE: the input rule (v) is replaced by the result rule (the result must be constant, wine_sim)
+    if live[a] and not wine and not (ident is not None and live[a] == 1 << ident):   # IDENT: the argument the record names may be read; WINE: the input rule (v) is replaced by the result rule (the result must be constant, wine_sim)
         return None
     rets = [o for o in succ if not succ[o] and not is_stop(words[o], rels.get(o), obj)]   # a call of a declared-noreturn callee ends its path without a result
     fin = {o: step(o, words[o], ins[o], rels.get(o), obj, inf[o]) if is_tail(words[o], rels.get(o), obj) else ins[o] for o in rets}   # a tail B returns after the call
@@ -532,6 +662,8 @@ def vanalyse(words, a, b, rels, obj, dec, wine=False, loads_ok=False, errno_ok=F
     for name, r in (("x0", 0), ("x1", 1), ("v0", 32)):
         vals = {fin[o][r] for o in rets}
         res[name] = None if vals == {("E", r)} else sorted(vals)[0] if len(vals) == 1 and sorted(vals)[0][0] in "KA" else ("U",)
+        if name == "x0" and ident is not None:
+            res["id"] = ident if vals in ({("E", ident)}, {("T", ident)}) else None
     return res
 
 
@@ -1286,40 +1418,47 @@ def read_cites(o):
     return at, bad
 
 
+IDENT_SEC = ".fnvnx.ident"   # the argument a function returns unchanged (contract/l2consts.py)
 CONST_SEC = ".fnvnx.const"   # the declared constant a function returns (contract/l2consts.py)
 ABSPTR = {(183, True): 257, (183, False): 1, (62, True): 1}   # the pointer-width absolute relocation of each ABI: R_AARCH64_ABS64, R_AARCH64_P32_ABS32, R_X86_64_64
 
 
 def read_consts(o):
-    """The `.fnvnx.const` records of the object O (contract/l2consts.py) -> ({(section index, function offset): [record]}, [(item name, detail)] of
-    malformed records). A record is {"len": n, "int": value or None, "addr": [names of the address, as addr_names] or None}. The function is named by the ABS relocation of the
-    record's pointer field, and must resolve to the start of a function DEFINED in this object, as for a cite."""
+    """The `.fnvnx.const` and `.fnvnx.ident` records of the object O (contract/l2consts.py) -> ({(section index, function offset): [record]}, [(item name, detail)] of
+    malformed records). A const record is {"len": n, "int": value or None, "addr": [names of the address, as addr_names] or None}, an identity record {"ident": k}. The function is
+    named by the ABS relocation of the record's pointer field, and must resolve to the start of a function DEFINED in this object, as for a cite."""
     from fnvnx.contract import l2consts
     at, bad = {}, []
     fn = {(s[5], s[1]) for s in o.syms if s[3] == 2 and 0 < s[5] < 0xFF00}
     ptr, absr = (8 if o.w64 else 4), ABSPTR[(o.machine, o.w64)]
     for si, (sname, stype, sflags, soff, ssize, _, _) in enumerate(o.secs):
-        if sname != CONST_SEC:
+        if sname not in (CONST_SEC, IDENT_SEC):
             continue
         if stype != 1 or sflags & 2:
-            bad.append((CONST_SEC, "the section must be PROGBITS without SHF_ALLOC (type %d, flags %#x)" % (stype, sflags)))
+            bad.append((sname, "the section must be PROGBITS without SHF_ALLOC (type %d, flags %#x)" % (stype, sflags)))
             continue
         rel = o.rela.get(si, {})
         odd = [off for off, (_, t, _) in rel.items() if t != absr]
         if odd:
-            bad.append(("%s+0x%x" % (CONST_SEC, min(odd)), "a relocation of type %d, not the pointer-width absolute relocation %d of the ABI" % (rel[min(odd)][1], absr)))
+            bad.append(("%s+0x%x" % (sname, min(odd)), "a relocation of type %d, not the pointer-width absolute relocation %d of the ABI" % (rel[min(odd)][1], absr)))
             continue
         try:
-            recs = l2consts.parse_consts(o.data[soff:soff + ssize], rel, CONST_SEC, ptr)
+            if sname == IDENT_SEC:
+                recs = [(off, sidx, add, k, None) for off, sidx, add, k in l2consts.parse_idents(o.data[soff:soff + ssize], rel, sname, ptr)]
+            else:
+                recs = l2consts.parse_consts(o.data[soff:soff + ssize], rel, sname, ptr)
         except ValueError as e:
-            bad.append((CONST_SEC, str(e)))
+            bad.append((sname, str(e)))
             continue
         for off, sidx, add, value, target in recs:
-            nm = "%s+0x%x" % (CONST_SEC, off)
+            nm = "%s+0x%x" % (sname, off)
             sy = o.syms[sidx]
             key = (sy[5], sy[1] + add) if 0 < sy[5] < 0xFF00 else None
             if key not in fn:
                 bad.append((nm, "the record's relocation does not name the start of a function defined in this object (symbol %s)" % sy[0]))
+                continue
+            if sname == IDENT_SEC:
+                at.setdefault(key, []).append({"ident": value})
                 continue
             rec = {"len": len(value), "int": int.from_bytes(value, "little") if target is None else None, "addr": None}
             if target is not None:
@@ -1335,6 +1474,8 @@ def const_matches(rec, v):
     x0 = v["x0"]
     if v["x1"] or v["v0"]:
         return False
+    if "ident" in rec:   # the identity of argument k: x0 is the entry value of that register on every path (vanalyse ident=k)
+        return v.get("id") == rec["ident"]
     if rec["len"] == 0:
         return x0 is None
     if x0 is None:
@@ -1342,6 +1483,22 @@ def const_matches(rec, v):
     if rec["addr"] is not None:
         return x0[0] == "A" and bool(set(rec["addr"]) & set(x0[1]))
     return x0[0] == "K" and x0[1] & (2 ** (8 * rec["len"]) - 1) == rec["int"]
+
+
+def sec_info(o, si):
+    """(bytes, relocations {offset: (sym, type, addend)}, kind(x) 'x'|'d' at offset x, the mapping-symbol offsets, functions [(offset, size, name)],
+    decoder info {file offset: info}) of the executable section SI of O, computed once per object (the one decoder run over the code islands)."""
+    memo = o.__dict__.setdefault("_sec_info", {})
+    if si not in memo:
+        sname, stype, sflags, soff, ssize, _, _ = o.secs[si]
+        buf, rel = o.data[soff:soff + ssize], o.rela.get(si, {})
+        maps = sorted((s[1], s[0][1:2]) for s in o.syms if s[5] == si and s[3] == 0 and s[0][:2] in ("$x", "$d"))
+        mkeys = [m[0] for m in maps]  # kind(x): "x" code or "d" data at offset x
+        kind = lambda x: maps[bisect.bisect_right(mkeys, x) - 1][1] if bisect.bisect_right(mkeys, x) else "x"
+        funcs = sorted((s[1], s[2], s[0]) for s in o.syms if s[5] == si and s[3] == 2)
+        cuts0 = [0] + [m for m in mkeys if 0 < m < ssize] + [ssize]   # one decoder run over every code island of the section
+        memo[si] = (buf, rel, kind, mkeys, funcs, decode(o.data, [(soff + x, soff + y) for x, y in zip(cuts0, cuts0[1:]) if kind(x) != "d"]))
+    return memo[si]
 
 
 def check_obj(path, terms, os_layer, probe=None, machine=None):
@@ -1372,14 +1529,8 @@ def check_obj(path, terms, os_layer, probe=None, machine=None):
     for si, (sname, stype, sflags, soff, ssize, _, _) in enumerate(o.secs):
         if not sflags & 4 or stype != 1:
             continue
-        buf, rel = o.data[soff:soff + ssize], o.rela.get(si, {})
-        maps = sorted((s[1], s[0][1:2]) for s in o.syms if s[5] == si and s[3] == 0 and s[0][:2] in ("$x", "$d"))
-        mkeys = [m[0] for m in maps]  # kind(x): "x" code or "d" data at offset x
-        kind = lambda x: maps[bisect.bisect_right(mkeys, x) - 1][1] if bisect.bisect_right(mkeys, x) else "x"
-        funcs = sorted((s[1], s[2], s[0]) for s in o.syms if s[5] == si and s[3] == 2)
+        buf, rel, kind, mkeys, funcs, dec = sec_info(o, si)
         fn_at = {fa: fnm for fa, fsz, fnm in funcs}
-        cuts0 = [0] + [m for m in mkeys if 0 < m < ssize] + [ssize]   # one decoder run over every code island of the section
-        dec = decode(o.data, [(soff + x, soff + y) for x, y in zip(cuts0, cuts0[1:]) if kind(x) != "d"])
         thits = sorted((off, sidx) for off, (sidx, t, ad) in rel.items() if sidx in tid)
         rch = {sym: sorted(off for off, (sidx, t, ad) in rel.items() if o.syms[sidx][0] == sym) for sym in (REACH, ASSUME) + CITE}
         tk, cover, last = [t[0] for t in thits], [], None
@@ -1471,7 +1622,8 @@ def check_obj(path, terms, os_layer, probe=None, machine=None):
                 # returning paths are judged by the V rules (a constant or vacuous result needs a record or a citation)
                 o.stop = stops if (nrv is None and nterm) else frozenset()
                 try:
-                    v = vanalyse(words, a, b, rel, o, {x: dec.get(soff + x) for x in words}, bool(wsites) or bool(ids))
+                    idk = [r["ident"] for r in consts_at.get((si, a), []) if "ident" in r]   # an `.fnvnx.ident` record: the one input register that the body may read
+                    v = vanalyse(words, a, b, rel, o, {x: dec.get(soff + x) for x in words}, bool(wsites) or bool(ids), ident=idk[0] if len(set(idk)) == 1 and 0 <= idk[0] < 8 else None)
                 except Unanalysable as e:
                     v = None
                     fnd.append((name, "unanalysable", str(e), None))
@@ -1576,7 +1728,7 @@ def check_obj(path, terms, os_layer, probe=None, machine=None):
 
 def vjson(v, o):
     """V result -> JSON: None | ["K", c] | ["A", [names of the symbols at that address (the row's `value` must be one of them)]] | ["U"]."""
-    return {k: (None if x is None else list(x) if x[0] != "A" else ["A", addr_names(o, x[1])]) for k, x in v.items()}
+    return {k: (x if k == "id" else None if x is None else list(x) if x[0] != "A" else ["A", addr_names(o, x[1])]) for k, x in v.items()}
 
 
 def addr_names(o, c):

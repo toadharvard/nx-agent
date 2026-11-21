@@ -29,6 +29,11 @@ def rec(abi, fn, length, value=""):
     return ".pushsection .fnvnx.const,\"\",%%progbits\n.balign 4\n%s %s\n.4byte %d\n%s.balign 4\n.popsection\n" % (ptr, fn, length, value)
 
 
+def ident(abi, fn, k):
+    ptr = ".4byte" if abi == "ilp32" else ".8byte"
+    return ".pushsection .fnvnx.ident,\"\",%%progbits\n.balign 4\n%s %s\n.4byte %d\n.balign 4\n.popsection\n" % (ptr, fn, k)
+
+
 def judge(abi, src):
     N[0] += 1
     s, o = os.path.join(ROOT, "s%d.s" % N[0]), os.path.join(ROOT, "o%d.o" % N[0])
@@ -67,6 +72,33 @@ for abi in ("ilp32", "lp64"):
     check(P("a record whose relocation is no function of the object is const-malformed"), any(kk == "const-malformed" for _, kk in k), f)
     k, f = judge(abi, func("r", " mov w0, w1") + rec(abi, "r", 4, "\t.4byte 1\n"))
     check(P("a record on a body that is not V is const-mismatch"), k == {("r", "const-mismatch")}, f)
+
+for abi in ("ilp32", "lp64"):
+    P = lambda n: "%s: %s" % (abi, n)   # noqa: E731
+    k, f = judge(abi, func("i", " mov w0, w1") + ident(abi, "i", 1))
+    check(P("an identity record k=1 certifies a body that returns its argument 1 (32-bit mov)"), not k, f)
+    k, f = judge(abi, func("i", " mov x0, x1") + ident(abi, "i", 1))
+    check(P("an identity record k=1 certifies a body that returns its argument 1 (64-bit mov)"), not k, f)
+    k, f = judge(abi, func("i", "") + ident(abi, "i", 0))
+    check(P("an identity record k=0 certifies a bare ret"), not k, f)
+    k, f = judge(abi, func("i", " mov w0, w1") + ident(abi, "i", 0))
+    check(P("an identity record of another argument (k=0, body returns 1) is const-mismatch"), k == {("i", "const-mismatch")}, f)
+    k, f = judge(abi, func("i", " mov w0, w2") + ident(abi, "i", 1))
+    check(P("an identity record k=1 on a body that returns argument 2 is const-mismatch"), k == {("i", "const-mismatch")}, f)
+    k, f = judge(abi, func("i", " mov w0, w1\n str w0, [x2]") + ident(abi, "i", 1))
+    check(P("an identity record on a body that is not V (a store through an argument) is const-mismatch"), k == {("i", "const-mismatch")}, f)
+    k, f = judge(abi, func("i", " add w0, w1, #1") + ident(abi, "i", 1))
+    check(P("an identity record on a body that changes the argument is const-mismatch"), k == {("i", "const-mismatch")}, f)
+    k, f = judge(abi, func("i", "") + ident(abi, "i", 0) + rec(abi, "i", 0))
+    check(P("a function with an identity record and a const record is const-duplicate"), k == {("i", "const-duplicate")}, f)
+    k, f = judge(abi, func("i", " mov w0, #7") + ident(abi, "i", 0) + rec(abi, "i", 4, "\t.4byte 7\n"))
+    check(P("an identity record and a value record on one function is const-duplicate"), k == {("i", "const-duplicate")}, f)
+    k, f = judge(abi, func("i", " mov w0, w1") + ident(abi, "i", 1) + ident(abi, "i", 1))
+    check(P("two identity records are const-duplicate"), k == {("i", "const-duplicate")}, f)
+    k, f = judge(abi, func("i", " mov w0, w1"))
+    check(P("a body that returns its argument and has no record is not V (an implementation, no finding)"), not k, f)
+    k, f = judge(abi, func("i", " mov w0, w1") + ident(abi, "nowhere", 1))
+    check(P("an identity record whose relocation is no function of the object is const-malformed"), any(kk == "const-malformed" for _, kk in k), f)
 
 if FAILED:
     print("%d failed" % len(FAILED))

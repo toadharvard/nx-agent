@@ -45,6 +45,20 @@ err('value relocation on a non-pointer length', rec(2, b'\0\0'), dict([R(0), R(8
 err('address value bytes not zero', rec(4, b'\1\0\0\0'), dict([R(0), R(8)]), 'not zero')
 err('padding not zero', b'\0' * 4 + struct.pack('<I', 1) + b'\1\1\0\0', dict([R(0)]), 'padding')
 
+ident = lambda k, ptr=4: b'\0' * ptr + struct.pack('<I', k)   # noqa: E731
+check('ident record', C.parse_idents(ident(1), dict([R(0)]), 'w', 4), [(0, 1, 0, 1)])
+check('two ident records, addend kept', C.parse_idents(ident(0) * 1 + ident(2), dict([R(0), R(8, 3, 16)]), 'w', 4), [(0, 1, 0, 0), (8, 3, 16, 2)])
+check('LP64 ident record is padded to 4', C.parse_idents(ident(3, 8) + ident(4, 8), dict([R(0), R(12)]), 'w', 8), [(0, 1, 0, 3), (12, 1, 0, 4)])
+check('empty ident section', C.parse_idents(b'', {}, 'w', 4), [])
+for what, data, rl, part in (('ident without relocation', ident(1), {}, 'no relocation'), ('ident truncated', b'\0' * 6, dict([R(0)]), 'an identity record'),
+                             ('ident pointer bytes not zero', b'\1' + ident(1)[1:], dict([R(0)]), 'not zero'), ('ident stray relocation', ident(1), dict([R(0), R(2)]), 'not an identity')):
+    try:
+        C.parse_idents(data, rl, 'o.o:.fnvnx.ident', 4)
+        fails.append('%s: no error' % what)
+    except ValueError as e:
+        if part not in str(e):
+            fails.append('%s: message %r lacks %r' % (what, str(e), part))
+
 if fails:
     print('\n'.join('FAIL ' + f for f in fails))
     sys.exit(1)
