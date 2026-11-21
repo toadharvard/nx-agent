@@ -38,7 +38,7 @@ def obj(td, rel, src):
     os.makedirs(os.path.dirname(p), exist_ok=True)
     c = p[:-2] + '.c'
     open(c, 'w').write('#include "fnvnx_export.h"\n' + src)
-    subprocess.run(['gcc', '-c', '-I', os.path.join(C, 'include'), c, '-o', p], check=True)
+    subprocess.run(['gcc', '-c', '-I', os.path.join(C, 'exporthdr', 'include'), c, '-o', p], check=True)
 
 
 def collect(td):
@@ -76,12 +76,29 @@ with tempfile.TemporaryDirectory() as td:
 for typ, want in (('()void', 'v'), ('()float', 'f'), ('()double', 'd'), ('()long_double', 'd'), ('()long_long_int', 'q'), ('()long_long_unsigned_int', 'q'), ('()*char', 'i'),
                   ('()unsigned_int', 'i'), ('()long_int', 'i'), ('()enum:E=unsigned_int', 'i'), ('()const:long_long_int', 'q'), ('(int,*void)_Bool', 'i')):
     check('ret_class %s -> %s' % (typ, want), exportgen.ret_class(exportgen.ctypes_compat.parse(typ)) == want, typ)
-for typ in ('()struct:S{a:int;}', '()vec:4:16:16:float', '()complex:8:4:float', '()ref:4:4:int', '*int'):
+for typ in ('()vec:4:16:16:float', '()complex:8:4:float', '()ref:4:4:int', '*int'):
     try:
         exportgen.ret_class(exportgen.ctypes_compat.parse(typ))
         check('ret_class %s is an error' % typ, False)
     except ValueError:
         check('ret_class %s is an error' % typ, True)
+# a by-value record: a letter iff trivial for calls (no `!` mark), complete, integer/enum/pointer members only, 4 or 8 bytes (record_class)
+for typ, want in (('()struct:G{v_:int}', 'i'), ('()struct:G{v_:*void}', 'i'), ('()union:LI{q:long_long_int;l:int}', 'q'), ('()union:LI{s:struct:-{lo:unsigned_int;hi:int};q:long_long_int}', 'q'),
+                  ('()struct:P{a:short_int;b:short_int}', 'i'), ('()struct:P{a:enum:E=unsigned_int}', 'i')):
+    try:
+        got = exportgen.ret_class(exportgen.ctypes_compat.parse(typ))
+    except ValueError:
+        got = None
+    check('ret_class record %s -> %s' % (typ, want), got == want, (typ, got))
+check('args_class: a one-word record and an 8-byte union are i and q', exportgen.args_class(exportgen.ctypes_compat.parse('(struct:G{v_:*void},union:LI{q:long_long_int},int)void')) == 'iqi')
+for typ in ('()struct:G{v_:*void}!', '()struct:F{f:float}', '()struct:T{a:int;b:int;c:int}', '()struct:B{a:int:3}', '()struct:I', '()struct:A{a:char;b:char;c:char}', '()struct:D{d:double}', '()struct:F{a:int;b:float}'):
+    try:
+        exportgen.ret_class(exportgen.ctypes_compat.parse(typ))
+        check('ret_class %s is an error' % typ, False)
+    except ValueError:
+        check('ret_class %s is an error' % typ, True)
+check('a marked record parses with the mark and compares equal to the unmarked one', exportgen.ctypes_compat.parse('struct:G{v_:int}!')[3] is True
+      and exportgen.ctypes_compat.compatible(exportgen.ctypes_compat.parse('struct:G{v_:int}!'), exportgen.ctypes_compat.parse('struct:G{v_:int}')))
 with tempfile.TemporaryDirectory() as td:
     obj(td, 'a/d.o', 'double dd(void){return 1;}\n' + decl('dd', '()double') + 'FNVNX_EXPORT("m.dll","dd",dd,"func");\n')
     rows, err = collect(td)
@@ -94,7 +111,7 @@ with tempfile.TemporaryDirectory() as td:
 for typ, want in (('()void', '-'), ('(*void,int)int', 'ii'), ('(float,double,long_double,long_long_int)void', 'fddq'), ('(enum:E=unsigned_int,ref:4:4:int,[4]int)void', 'iii'),
                   ('(const:long_long_unsigned_int)void', 'q')):
     check('args_class %s -> %s' % (typ, want), exportgen.args_class(exportgen.ctypes_compat.parse(typ)) == want, typ)
-for typ in ('(struct:S{a:int;})void', '(vec:4:16:16:float)void', '(complex:8:4:float)void', '(?)int', '(*void,...)int', '*int'):
+for typ in ('(vec:4:16:16:float)void', '(complex:8:4:float)void', '(?)int', '(*void,...)int', '*int'):
     try:
         exportgen.args_class(exportgen.ctypes_compat.parse(typ))
         check('args_class %s is an error' % typ, False)
@@ -139,7 +156,7 @@ with tempfile.TemporaryDirectory() as td:
            + 'FNVNX_EXPORT("m.dll","CF",cf,"func");\nFNVNX_EXPORT("m.dll","CE",ce,"entry");\nFNVNX_EXPORT("m.dll","CD",cd,"data");\n')
     os.makedirs(td + '/b')
     open(td + '/b/x.cc', 'w').write(src)
-    subprocess.run(['g++', '-c', '-fPIC', '-I', os.path.join(C, 'include'), td + '/b/x.cc', '-o', td + '/b/x.o'], check=True)
+    subprocess.run(['g++', '-c', '-fPIC', '-I', os.path.join(C, 'exporthdr', 'include'), td + '/b/x.cc', '-o', td + '/b/x.o'], check=True)
     rows, err = collect(td)
     check('C++: func, entry and data records round-trip through the relocations', rows == [('m.dll', 'CD', 'cd', 'data', '-', '-'), ('m.dll', 'CE', 'ce', 'entry', '-', '-'), ('m.dll', 'CF', 'cf', 'func', 'i', 'i')], (rows, err))
 # parse_records on bytes: a missing relocation, a section symbol, an addend, an empty field, an unterminated string are errors; padding between records is skipped

@@ -108,9 +108,51 @@ def relocs_of(e, section):
     return out
 
 
+INT_BYTES = {'char': 1, 'signed_char': 1, 'unsigned_char': 1, '_Bool': 1, 'short_int': 2, 'short_unsigned_int': 2, 'int': 4, 'unsigned_int': 4, 'long_int': 4, 'long_unsigned_int': 4,
+             'long_long_int': 8, 'long_long_unsigned_int': 8}   # the integer words of the compiler's type names and their sizes in the ILP32 data model (DATAMODEL, OWNER 7); a pointer is 4
+
+
+def layout(t, sym='?'):
+    """(size, alignment) in bytes of the type T when T is made of integer, enumeration and pointer scalars only (an aggregate's members recursively, arrays of them), in the ILP32 layout of
+    the platform (a scalar aligns to its size); ValueError for anything else: a float, vector, complex, reference, function, incomplete, bit-field or invisible-reference (marked) member,
+    an unknown word. A bit-field is refused, not laid out: its packing is not derived here, so a record with one has no letter."""
+    while t[0] in ('q', 'enum', 'host'):
+        t = ('sc', t[1]) if t[0] == 'host' else t[2]
+    if t[0] in ('ptr', 'entry'):
+        return 4, 4
+    if t[0] == 'sc' and t[1] in INT_BYTES:
+        return INT_BYTES[t[1]], INT_BYTES[t[1]]
+    if t[0] == 'arr' and t[1] is not None:
+        sz, al = layout(t[2], sym)
+        return sz * t[1], al
+    if t[0] in ('struct', 'union') and t[2] is not None and len(t) == 3:
+        size, align = 0, 1
+        for _, mt, bw in t[2]:
+            if bw is not None:
+                raise ValueError('%s: a record with a bit-field has no class of the bridge table' % sym)
+            sz, al = layout(mt, sym)
+            align = max(align, al)
+            size = max(size, sz) if t[0] == 'union' else -(-size // al) * al + sz
+        return -(-size // align) * align, align
+    raise ValueError('%s: a %s has no layout of integer words' % (sym, t[0]))
+
+
+def record_class(t, sym='?'):
+    """The bridge letter of a by-value struct or union T: 'i' for 4 bytes, 'q' for 8, when (1) it is trivial for the purposes of calls (it carries no `!` mark: the compiler's
+    invisible-reference flag, Itanium C++ ABI 3.1.2), (2) it is complete and every member is, recursively, an integer, enumeration or pointer scalar (no float, vector or complex member
+    anywhere: that is an HFA or a mixed class, AAPCS64 6.8.2), and (3) its size is 4 or 8. Such a record is passed in the general registers like an integer word on AAPCS64 6.8.2 (x0)
+    and is 4 or 8 bytes of stack on MSVC x86 (returned in eax, edx:eax): the same as i or q. Any other record: ValueError."""
+    if len(t) == 4 and t[3]:
+        raise ValueError('%s: a %s passed by invisible reference has no class of the bridge table' % (sym, t[0]))
+    size = layout(t, sym)[0]
+    if size not in (4, 8):
+        raise ValueError('%s: a %s of %d bytes has no class of the bridge table (4 or 8)' % (sym, t[0], size))
+    return 'i' if size == 4 else 'q'
+
+
 def ret_class(t, sym='?'):
     """The bridge table's `ret` letter (v i q f d) of a function type T (a parsed link/ctypes_compat type) by the return type: void v; float f; double and long double d; the 64-bit integers
-    q; a pointer, an entry pointer, an enumeration (its integer type) and every other scalar word i.  A struct, union, vector, complex or reference return has no letter: ValueError."""
+    q; a pointer, an entry pointer, an enumeration (its integer type) and every other scalar word i.  A struct or union return has the letter of record_class (4 bytes i, 8 bytes q; trivial, integer words only); a vector, complex or reference return, or any other record, has no letter: ValueError."""
     if t[0] != 'fn':
         raise ValueError('%s: the type of a function export is not a function type' % sym)
     r = t[3]
@@ -118,6 +160,8 @@ def ret_class(t, sym='?'):
         r = ('sc', r[1]) if r[0] == 'host' else r[2]
     if r[0] in ('ptr', 'entry'):
         return 'i'
+    if r[0] in ('struct', 'union'):
+        return record_class(r, sym)
     if r[0] != 'sc':
         raise ValueError('%s: a %s return has no class of the bridge table (v i q f d)' % (sym, r[0]))
     w = r[1]
@@ -126,7 +170,7 @@ def ret_class(t, sym='?'):
 
 def args_class(t, sym='?'):
     """The bridge table's `args` letters (i q f d, in order; `-` for none) of a function type T by its parameters: a pointer, reference, array, entry pointer, enumeration and every scalar word of at most 4 bytes
-    i; the 64-bit integers q; float f; double and long double d. A struct, union, vector or complex parameter, a missing prototype (K&R) or varargs has no letter: ValueError."""
+    i; the 64-bit integers q; float f; double and long double d. A struct or union parameter has the letter of record_class (i for 4 bytes, q for 8); a vector or complex parameter, any other record, a missing prototype (K&R) or varargs has no letter: ValueError."""
     if t[0] != 'fn':
         raise ValueError('%s: the type of a function export is not a function type' % sym)
     if t[1] is None:
@@ -141,6 +185,8 @@ def args_class(t, sym='?'):
             out += 'i'
         elif a[0] == 'sc' and a[1] != 'void':
             out += FLOATS.get(a[1]) or ('q' if a[1] in LONGLONG else 'i')
+        elif a[0] in ('struct', 'union'):
+            out += record_class(a, sym)
         else:
             raise ValueError('%s: a %s parameter has no class of the bridge table (i q f d)' % (sym, a[0] if a[0] != 'sc' else 'void'))
     return out or '-'

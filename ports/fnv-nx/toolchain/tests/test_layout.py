@@ -283,8 +283,52 @@ CXX_ONLY = ('struct P { int a; };\nstruct Q : P { int b; };\nstruct V { virtual 
             'int cxxfn(int);\nint cxxuse() { return cxxfn(1); }\nint asmn(int) __asm__("plain_cxx");\nint asmuse() { return asmn(1); }\n')
 CXX_ONLY_ROWS = {
     'r1': '(ref:4:4:struct:P{a:int},ref:4:4:const:struct:Q{-:struct:P{a:int};b:int})int',
-    'r2': '(*struct:V{-:**(?)int;c:int},struct:ns__N{n:int},enum:EC=short_int,*struct:Top__In{i:int})int',
+    'r2': '(*struct:V{-:**(?)int;c:int}!,struct:ns__N{n:int},enum:EC=short_int,*struct:Top__In{i:int})int',
     'r3': '(nullptr_t)int', 'gq': 'struct:Q{-:struct:P{a:int};b:int}', 'gq2': 'struct:Q{-:struct:P{a:int};b:int}', 'r4': '(int)int', 'use': '()int'}
+
+
+CALLTRIVIAL_CXX = r'''#include <stdint.h>
+template <class Sig> class gfn;
+template <class R, class... A> class gfn<R(A...)> { public: constexpr gfn() = default; constexpr gfn(decltype(nullptr)) {} explicit constexpr gfn(uintptr_t v) : v_(v) {} private: uintptr_t v_ = 0; };
+struct CCopy { int a; CCopy(const CCopy &o) : a(o.a) {} };
+struct CDtor { int a; ~CDtor() {} };
+struct CDel { int a; CDel(const CDel &) = delete; CDel(CDel &&) = default; };
+struct CTriv { int a; int b; };
+union UTriv { int i; float f; };
+union UDtor { int i; struct M { ~M() {} } m; ~UDtor() {} };
+extern "C" {
+int ct_copy(CCopy x); int ct_dtor(CDtor x); int ct_del(CDel x); int ct_triv(CTriv x); int ct_union(UTriv x); int ct_udtor(UDtor *x, UTriv y);
+int ct_gfn(gfn<void(void *)> cb);
+int ct_ptr(CCopy *p);
+}
+int use_ct() { CCopy *c = 0; CDtor *d = 0; CDel *e = 0; CTriv t = {0, 0}; UTriv u = {0}; UDtor *ud = 0; return ct_copy(*c) + ct_dtor(*d) + ct_del(static_cast<CDel &&>(*e)) + ct_triv(t) + ct_union(u) + ct_udtor(ud, u) + ct_ptr(c) + ct_gfn(nullptr); }
+'''
+CALLTRIVIAL_C = 'struct CTriv { int a; int b; };\nint ct_triv(struct CTriv x);\nint use_ct(void) { return ct_triv((struct CTriv){0, 0}); }\n'
+
+
+def decltype_calltrivial(td, so):
+    """RULE LAYOUT-CALLTRIVIAL: a complete record whose compiler type is TREE_ADDRESSABLE (non-trivial for the purposes of calls, Itanium C++ ABI 3.1.2) is spelled
+    `struct:TAG{...}!`; every other record as before (no `!`); a C record never has it. The rows are read from the compiled objects, not typed."""
+    cx, cc_ = os.path.join(td, 'ct.cpp'), os.path.join(td, 'ct.c')
+    open(cx, 'w').write(CALLTRIVIAL_CXX)
+    open(cc_, 'w').write(CALLTRIVIAL_C)
+    got = {}
+    for src, o in ((cx, 'ct_cxx.o'), (cc_, 'ct_c.o')):
+        r = pb.compile(src, os.path.join(td, o), so)
+        check('calltrivial: %s compiles' % os.path.basename(src), r.returncode == 0, r.stderr[-800:])
+        if r.returncode:
+            return
+        got[o] = dt_all(os.path.join(td, o), o)[0]
+    g = got['ct_cxx.o']
+    bang = lambda k: g.get(k, '').count('}!')   # noqa: E731
+    check('calltrivial: a class with a user copy constructor, a user destructor, a deleted copy with a defaulted move... (the compiler decides, not the text)',
+          bang('ct_copy') == 1 and bang('ct_dtor') == 1, {k: g.get(k) for k in ('ct_copy', 'ct_dtor', 'ct_del')})
+    check('calltrivial: a deleted copy constructor with a defaulted (trivial) move constructor is trivial for calls (Itanium C++ ABI 3.1.2: a non-deleted trivial move constructor): no `!`', bang('ct_del') == 0 and 'struct:CDel{a:int}' in g.get('ct_del', ''), g.get('ct_del'))
+    check('calltrivial: a trivial struct, a trivial union and the guestfn-shaped class have no `!`', bang('ct_triv') == 0 and bang('ct_union') == 0 and bang('ct_gfn') == 0, {k: g.get(k) for k in ('ct_triv', 'ct_union', 'ct_gfn')})
+    check('calltrivial: a pointer to a non-trivial class is a pointer to a record: its row is as before (the record is spelled with `!` inside)', g.get('ct_ptr', '').startswith('(*struct:CCopy{a:int}!)'), g.get('ct_ptr'))
+    check('calltrivial: a union with a user destructor has `!`', g.get('ct_udtor', '').count('}!') >= 1 and 'union:UDtor' in g.get('ct_udtor', ''), g.get('ct_udtor'))
+    check('calltrivial: the C fixture with the same trivial struct is spelled with no `!` and equals the C++ row of ct_triv minus nothing',
+          '!' not in got['ct_c.o']['ct_triv'] and got['ct_c.o']['ct_triv'] == g['ct_triv'], (got['ct_c.o'].get('ct_triv'), g.get('ct_triv')))
 
 
 def decltype_cxx(td, so):
@@ -478,6 +522,7 @@ def main():
         plugsym(td)
         decltype_errors(td, so)
         decltype_cxx(td, so)
+        decltype_calltrivial(td, so)
         obj = os.path.join(td, 'v.o')
         r = pb.compile(os.path.join(HERE, 'layout', 'vec.c'), obj, so, args=['-std=gnu2x'])
         check('vec.c compiles', r.returncode == 0, r.stderr[:2000])

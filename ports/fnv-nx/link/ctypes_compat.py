@@ -14,7 +14,9 @@ layout plugin of a C unit) has one line per external symbol the unit declares or
     array         `[N]`T (N decimal) | `[]`T (incomplete)
     function      `(`P,P,...`)`T  with P a type, `...` last for varargs; `(?)`T has no prototype (K&R)
     struct/union  `struct:`TAG`{`m:T;m:T:W;...`}`  complete (member name, type, bit-field width W; an unnamed member has name `-`); `struct:`TAG  incomplete;
-                  TAG is `-` for an unnamed tag; `union:` likewise
+                  TAG is `-` for an unnamed tag; `union:` likewise.  A complete record may end in `!` (`struct:TAG{...}!`): the compiler passes it by invisible reference
+                  (GCC TREE_ADDRESSABLE: a non-trivial copy constructor or destructor, Itanium C++ ABI 3.1.2), so it is not a word in registers; the parse is ('struct', TAG, members, True)
+                  (the compatibility rule ignores the mark).  A C type never carries it.
     enum          `enum:`TAG`=`T   (T the compatible integer type of the enumeration)
 RULE (6.2.7p1/p2, 6.7.2.1, 6.7.6.2, 6.7.6.3): two types are compatible iff the same constructor with compatible parts: qualifiers equal; pointee compatible; arrays
 compatible element types and equal sizes when both are known; functions compatible return type, same parameter count, compatible parameters (qualifiers of
@@ -135,6 +137,9 @@ class Parse:
                     bw = self.num()
                 ms.append((n, t, bw))
             self.eat('}')
+            if self.peek() == '!':
+                self.i += 1
+                return (w, tag, tuple(ms), True)
             return (w, tag, tuple(ms))
         if w == 'enum' and self.peek() == ':':
             self.i += 1
