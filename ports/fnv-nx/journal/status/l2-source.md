@@ -1,3 +1,5 @@
+step 1: the platform root needs the recipe-built guest compiler and runtime pin. Missing: a green rt at cand4b 87b242f0c (farm), then w3's pin commit (mirror tools/gcc-ilp32-msvcmodel-noneelf + guest_compiler.json).
+
 # L2 SOURCE status (lead: Opus 5.5 session, branch claude/fnv-l2-source)
 
 Handoff read: d79467e6 (journal/inbox/l2-source-handoff-opus.md). Trunk CLAUDE.md taken at a565971.
@@ -806,3 +808,4 @@ After the first frame:
 - 2026-11-21 19:20Z: cand6 census done and sent to L1. claude/fnv-l2-source-cand6-l1 acb3875e8 (on c5 e4e9b7e53). Universe 710 commits at cand4b f3b188ec8: 0 equivalent, 42 in c5, 14 contributions (cherry-picked; recipe.py +71/-1, archive code re-inserted by hand), 654 stale. test_archive_sources passes; test_recipe has the same 6 env-only FAILs as the c5 base.
 - 2026-11-21 19:25Z: L1 accepted cand6-l1 acb3875e8 for cand6 (w28 folds the ar_bytes duplicate). w2 drops the env.json and ctypes_compat commits, which come via w29-c5.
 - 2026-11-21 19:28Z: cand6-l1 rebuilt at 778457923 (12 contributions, without the 2 w29 duplicates); test_archive_sources passes. Head sent to L1.
+- 2026-11-21 19:35Z: owner order 0aa926371: only the four product steps. L2's only item is the compiler and runtime pin for step 1 (w3 + farm). Stopped: the names clone follow-ups, CORE-MATH/MPFR tests, NAMES table, PERFDEBT. w2 archived (its queue was done: clone fact, cand6-l1 778457923).
