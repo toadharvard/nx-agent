@@ -18,12 +18,10 @@ VERIFY = os.path.dirname(HERE)
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(VERIFY)))
 sys.path.insert(0, VERIFY)
 sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
-from fnvnx.verify import bootlayout  # noqa: E402
-from fnvnx.verify import boothost  # noqa: E402
-from fnvnx.verify import bootmachine  # noqa: E402
-from fnvnx.verify.tests import test_bootlayout as tbl  # noqa: E402
+import bootlayout  # noqa: E402
+import boothost  # noqa: E402
+import bootmachine  # noqa: E402
+import test_bootlayout as tbl  # noqa: E402
 
 APP_CORES = bootmachine.APP_CORES
 FAILS = []
@@ -215,7 +213,7 @@ def call_h(a, name, reg):
 
 def make_plan(raw):
     rows = [("keys", 0xf0000, 0x200000), ("exe", 0x400000, 0x1409000)]
-    return bootlayout.plan(bootlayout.parse_elf(raw), rows, 4 << 20)
+    return bootlayout.plan(bootlayout.parse_elf(raw), rows, 4 << 20, entry=tbl.ENTRY)
 
 
 def run(raw, quantum, root, limit=None, svc=None):

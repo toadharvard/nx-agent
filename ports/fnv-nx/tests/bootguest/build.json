@@ -1,0 +1,52 @@
+{
+ "format": "fnvnx-recipe/1",
+ "profile": "guest",
+ "flags": {
+  "c": [
+   "-O2",
+   "-g",
+   "-Wall",
+   "-Wextra",
+   "-Werror=attributes"
+  ],
+  "cxx": [
+   "-O2",
+   "-g",
+   "-ffunction-sections",
+   "-fdata-sections",
+   "-Wall",
+   "-Wextra",
+   "-D__LINUX_ERRNO_EXTENSIONS__",
+   "-DFNVNX_SDD=1",
+   "-std=gnu++20",
+   "-Werror=attributes"
+  ],
+  "asm": []
+ },
+ "include": [
+  "/ext/gcc/aarch64-none-elf/include/c++/13.3.0",
+  "/ext/gcc/aarch64-none-elf/include/c++/13.3.0/aarch64-none-elf",
+  "/ext/gcc/aarch64-none-elf/include"
+ ],
+ "units": "all",
+ "uses": [
+  {
+   "root": "ports/fnv-nx/hostabi",
+   "output": "INCLUDE"
+  }
+ ],
+ "include_uses": [
+  {
+   "root": "ports/fnv-nx/hostabi",
+   "output": "INCLUDE"
+  }
+ ],
+ "link": {
+  "output": "bootguest.elf",
+  "flags": [
+   "-m",
+   "aarch64linux32"
+  ],
+  "entry": "bootguest_entry"
+ }
+}

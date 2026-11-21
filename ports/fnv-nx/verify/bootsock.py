@@ -64,27 +64,34 @@ Served per service (everything else listed here as NOT answered):
 import ipaddress
 import struct
 
+import hostabirec
+
 U64 = (1 << 64) - 1
-# sockwire.h numbers (tests/test_bootmachine.py compares them with the fixture header)
-WE_BADF, WE_AGAIN, WE_FAULT, WE_INVAL, WE_OVERFLOW = 9, 11, 14, 22, 75
-WE_DESTADDRREQ, WE_NOPROTOOPT, WE_PROTONOSUPPORT, WE_OPNOTSUPP, WE_AFNOSUPPORT = 89, 92, 93, 95, 97
-WE_ADDRNOTAVAIL, WE_NETUNREACH, WE_NOTCONN = 99, 101, 107
-WIRE_AF, WIRE_SOCKTYPE = (0, 2, 10), (1, 2, 3)   # FNVNX_WIRE_AF_LIST, FNVNX_WIRE_SOCKTYPE_LIST
-AF_UNSPEC, AF_INET, AF_INET6 = WIRE_AF
-STREAM, DGRAM, RAW = WIRE_SOCKTYPE
-WIRE_AI_MASK = 0x1 | 0x2 | 0x4 | 0x8 | 0x10 | 0x20 | 0x400   # FNVNX_WIRE_AI_LIST
-WEAI_BADFLAGS, WEAI_NONAME, WEAI_AGAIN, WEAI_FAMILY, WEAI_SOCKTYPE = 2001, 2002, 2003, 2005, 2006
-WPOLLNVAL, POLL_MAX = 0x20, 0x1000000
-WO_RDWR, WO_NONBLOCK = 2, 0x800
-MSG_KNOWN, MSG_OOB, MSG_DONTWAIT = 0x1 | 0x2 | 0x4 | 0x100 | 0x40 | 0x4000, 0x1, 0x40
-SOCKADDR, FIRST_HANDLE = 32, 3   # sizeof(FnvnxWireSockaddr)
-# option shapes and their sizes (sockwire.h); level 1 = SOL_SOCKET, the others IANA protocol numbers
-INT, LINGER, TIMEVAL, TYPE, ERRNO = 0, 1, 2, 3, 4
+_R = hostabirec.record()   # sockwire.h and sockwire_errno.h parsed by verify/hostabirec.py: no wire number is typed here
+_ERRNO = dict(_R.xlist("FNVNX_WIRE_ERRNO_LIST"))
+WE_BADF, WE_AGAIN, WE_FAULT, WE_INVAL, WE_OVERFLOW = (_ERRNO[n] for n in ("EBADF", "EAGAIN", "EFAULT", "EINVAL", "EOVERFLOW"))
+WE_DESTADDRREQ, WE_NOPROTOOPT, WE_PROTONOSUPPORT, WE_OPNOTSUPP, WE_AFNOSUPPORT = (
+    _ERRNO[n] for n in ("EDESTADDRREQ", "ENOPROTOOPT", "EPROTONOSUPPORT", "EOPNOTSUPP", "EAFNOSUPPORT"))
+WE_ADDRNOTAVAIL, WE_NETUNREACH, WE_NOTCONN = (_ERRNO[n] for n in ("EADDRNOTAVAIL", "ENETUNREACH", "ENOTCONN"))
+WIRE_AF, WIRE_SOCKTYPE = tuple(v for _, v in _R.xlist("FNVNX_WIRE_AF_LIST")), tuple(v for _, v in _R.xlist("FNVNX_WIRE_SOCKTYPE_LIST"))
+_AF, _ST = dict(_R.xlist("FNVNX_WIRE_AF_LIST")), dict(_R.xlist("FNVNX_WIRE_SOCKTYPE_LIST"))
+AF_UNSPEC, AF_INET, AF_INET6 = _AF["AF_UNSPEC"], _AF["AF_INET"], _AF["AF_INET6"]
+STREAM, DGRAM, RAW = _ST["SOCK_STREAM"], _ST["SOCK_DGRAM"], _ST["SOCK_RAW"]
+_POLL, _MSG = dict(_R.xlist("FNVNX_WIRE_POLL_LIST")), dict(_R.xlist("FNVNX_WIRE_MSG_LIST"))
+WPOLLNVAL, POLL_MAX = _POLL["POLLNVAL"], 0x1000000   # POLL_MAX: nfds bound of host_sockets (blocked by header, owner L5)
+WO_RDWR, WO_NONBLOCK = _R.define("FNVNX_WO_RDWR"), _R.define("FNVNX_WO_NONBLOCK")
+MSG_KNOWN = 0
+for _v in _MSG.values():
+    MSG_KNOWN |= _v   # the wire list is the set of the bits the host answers
+MSG_OOB, MSG_DONTWAIT = _MSG["MSG_OOB"], _MSG["MSG_DONTWAIT"]
+SOCKADDR, FIRST_HANDLE = 32, 3   # sizeof(FnvnxWireSockaddr); first handle number: blocked by header (owner L5)
+# option shapes and their sizes (sockwire.h); level 1 = SOL_SOCKET, the others IANA protocol numbers (blocked by header: no defines, owner L5)
+INT, LINGER, TIMEVAL, TYPE, ERRNO = (_R.define("FNVNX_WOPT_" + n) for n in ("INT", "LINGER", "TIMEVAL", "TYPE", "ERRNO"))
 SIZE = {INT: 4, LINGER: 8, TIMEVAL: 16, TYPE: 4, ERRNO: 4}
-OPTS = {(1, 1): INT, (1, 2): INT, (1, 3): TYPE, (1, 4): ERRNO, (1, 5): INT, (1, 6): INT, (1, 7): INT, (1, 8): INT, (1, 9): INT,
-        (1, 10): INT, (1, 13): LINGER, (1, 15): INT, (1, 18): INT, (1, 19): INT, (1, 20): TIMEVAL, (1, 21): TIMEVAL, (1, 30): INT,
-        (6, 1): INT, (0, 1): INT, (0, 2): INT, (0, 33): INT, (0, 34): INT, (41, 16): INT, (41, 18): INT, (41, 19): INT, (41, 26): INT}
-BOOLEAN = {(1, 1), (1, 2), (1, 5), (1, 6), (1, 9), (1, 10), (1, 15), (6, 1)}
+_LEVELS = (("FNVNX_WIRE_SO_OPT_LIST", _R.define("FNVNX_WLVL_SOCKET")), ("FNVNX_WIRE_TCP_OPT_LIST", 6), ("FNVNX_WIRE_IP_OPT_LIST", 0),
+           ("FNVNX_WIRE_IPV6_OPT_LIST", 41))
+OPTS = {(lvl, num): shape for lst, lvl in _LEVELS for _, num, shape in _R.xlist(lst)}
+BOOLEAN = {(1, 1), (1, 2), (1, 5), (1, 6), (1, 9), (1, 10), (1, 15), (6, 1)}   # blocked by header (owner L5): which options store 0/1
 LEVEL_FAMILY = {0: AF_INET, 41: AF_INET6}
 LEVEL_TYPE = {6: STREAM}
 UNDECIDED_PROTOCOLS = {1, 58, 132, 136, 262}

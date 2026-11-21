@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """The boot stage CLI: runs the guest ELF under bootmachine.Machine, watches the milestone table, counts instructions.
 
-  boot.py run --elf GUEST.elf --reserved modules.tsv --keys LO:HI --heap-size N --root SDROOT [--game DIR]
+  boot.py run --elf GUEST.elf --facts elffacts.json --reserved modules.tsv --keys LO:HI --heap-size N --root SDROOT [--game DIR]
               --milestones TABLE --manifest entries.tsv [--icount-spec SPEC.json] [--limit-instructions N]
-              --quantum N [--declared-inputs PINS [--declared-src NAME=DIR]] [--profile handheld|docked] [--watch-log SYMS] --out OUT.json
+              --quantum N [--declared-inputs PIN] [--profile handheld|docked] [--watch-log SYMS] --out OUT.json
 
 plan = bootlayout (same rules as its CLI), watch points = bootmiles.resolve(table, manifest, ELF symbols, bias = image
 base). OUT.json ("fnvnx-boot/1", sorted keys, indent 1, no wall time) holds the plan, the run record, the milestone state
@@ -32,7 +32,7 @@ Host parts: the table's `host` target is an ID word, so the exact console line a
 writes exactly that line. Two more host events exist: `present` (every present of the renderer) and `gpu-first-call` (the first
 guest call of ext module 10); they only fire with --gpu. Any other host name is an input error listing the known forms.
 
-Renderer: --gpu LIB registers ext module 10 and forwards it to the host library LIB (bootgpu.py); --frames DIR is its
+Renderer: --gpu registers ext module 10 and forwards it to the host library libnxgl4.so, the recipe product of render/gl4 in $GATE_CACHE (bootgpu.py; no other source); --frames DIR is its
 $NXGL4_FRAMES (the library writes frame_%06u.rgba/.txt there). The three GL variables for software rendering are set for it.
 Without --gpu module 10 is not registered (a guest call answers NO_MODULE). EVERY present of the renderer is a record of OUT.json "frames" = [{n (from 1), t_ns (virtual clock
 at the present), per_tid: {thread name: instructions}, sha256 (with --frames)}] (Icount.frames(): frame n counts every instruction since
@@ -62,22 +62,21 @@ import unicorn
 
 from unicorn.arm64_const import UC_ARM64_REG_LR, UC_ARM64_REG_X0, UC_ARM64_REG_X1, UC_ARM64_REG_X2, UC_ARM64_REG_X3
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
-from fnvnx.verify import bootinput
-from fnvnx.verify import bootdecl
-from fnvnx.verify import bootgpu
-from fnvnx.verify import bootlayout
-from fnvnx.verify import bootmachine
-from fnvnx.verify import bootmiles
-from fnvnx.verify import boothost
+import bootinput
+import bootdecl
+import bootfacts
+import bootgpu
+import bootlayout
+import bootmachine
+import bootmiles
+import boothost
 
 FORMAT = "fnvnx-boot/1"
 HOST_PREFIX = "console."
 HOST_EVENTS = ("present", "gpu-first-call")
 GPU_ENV = {"LIBGL_ALWAYS_SOFTWARE": "1", "GALLIUM_DRIVER": "llvmpipe", "EGL_PLATFORM": "surfaceless"}
 INPUT_ERRORS = (bootdecl.InputError, bootlayout.LayoutError, bootmiles.TableError, bootmiles.ManifestError, bootmiles.ResolveError,
-                bootmiles.ElfError, bootmachine.MachineError, bootgpu.GpuError, ValueError, OSError)
+                bootmiles.ElfError, bootfacts.FactError, bootmachine.MachineError, bootgpu.GpuError, ValueError, OSError)
 
 
 def store_frame(directory, frame):
@@ -122,7 +121,7 @@ def _host_lines(host):
     return lines
 
 
-def _plan(a, raw):
+def _plan(a, raw, facts):
     rows = bootlayout.normalize_reserved(bootlayout.read_tsv(a.reserved))
     try:
         lo, hi = (int(x, 16) for x in a.keys.split(":"))
@@ -131,25 +130,24 @@ def _plan(a, raw):
     if not lo < hi or lo < bootlayout.MIN_ADDR:
         raise bootlayout.LayoutError("--keys: need %x <= lo < hi, got 0x%x..0x%x" % (bootlayout.MIN_ADDR, lo, hi))
     rows.append(("keys", lo // 4096 * 4096, (hi + 4095) // 4096 * 4096))
-    return bootlayout.plan(bootlayout.parse_elf(raw), sorted(rows, key=lambda r: r[1]), a.heap_size, n_stacks=a.threads)
+    return bootlayout.plan(bootlayout.parse_elf(raw), sorted(rows, key=lambda r: r[1]), a.heap_size, entry=bootfacts.entry(facts), n_stacks=a.threads)
 
 
-MEM_SPEC = re.compile(r"^(x[0-7])((?:->(?:0x[0-9a-fA-F]+|[0-9]+))*)(?:\+(0x[0-9a-fA-F]+|[0-9]+))?:(0x[0-9a-fA-F]+|[0-9]+)$")
+MEM_SPEC = re.compile(r"^(x[0-7])((?:->(?:0x[0-9a-fA-F]+|[0-9]+))*):(0x[0-9a-fA-F]+|[0-9]+)$")
 MEM_MAX = 1 << 16
 
 
 def parse_mem_spec(spec):
-    """`REG(->OFF)*(+DELTA)?:LEN` -> (reg index, [offsets], len, delta). The address is the 32-bit value of REG (x0..x7); each `->OFF` loads the
-    32-bit little-endian word at address+OFF and takes it as the new address; then DELTA (default 0) is added and LEN bytes (at most 65536 per
-    spec) are read there: a longer object is captured by several specs with growing DELTA"""
+    """`REG(->OFF)*:LEN` -> (reg index, [offsets], len). The address is the 32-bit value of REG (x0..x7); each `->OFF` loads the 32-bit
+    little-endian word at address+OFF and takes it as the new address; LEN bytes (at most 65536) are read there"""
     m = MEM_SPEC.match(spec)
     if not m:
-        raise bootmiles.ResolveError("--watch-log: memory spec %r is not REG(->OFF)*(+DELTA)?:LEN with REG x0..x7" % spec)
+        raise bootmiles.ResolveError("--watch-log: memory spec %r is not REG(->OFF)*:LEN with REG x0..x7" % spec)
     offs = [int(t, 0) for t in m.group(2).split("->")[1:]]
-    n = int(m.group(4), 0)
+    n = int(m.group(3), 0)
     if not 0 < n <= MEM_MAX:
         raise bootmiles.ResolveError("--watch-log: memory spec %r: LEN must be 1..%d" % (spec, MEM_MAX))
-    return int(m.group(1)[1:]), offs, n, int(m.group(3), 0) if m.group(3) else 0
+    return int(m.group(1)[1:]), offs, n
 
 
 def parse_until(tok):
@@ -199,14 +197,14 @@ def _watch_names(path, syms):
 
 def read_chain(m, regs, spec):
     """the bytes `spec` (parse_mem_spec) names, or None when a page on the way is not mapped"""
-    reg, offs, n, delta = spec
+    reg, offs, n = spec
     addr = regs[reg] & 0xFFFFFFFF
     for o in offs:
         w = m.peek((addr + o) & 0xFFFFFFFF, 4)
         if w is None:
             return None
         addr = int.from_bytes(w, "little")
-    return m.peek((addr + delta) & 0xFFFFFFFF, n)
+    return m.peek(addr, n)
 
 
 def load_state_request(path):
@@ -255,17 +253,18 @@ def run(a):
     t0 = time.time()
     with open(a.elf, "rb") as f:
         raw = f.read()
-    plan = _plan(a, raw)
+    facts = bootfacts.load(a.facts)   # the link record of the ELF: the one source of its entry, sections and symbols
+    plan = _plan(a, raw, facts)
     declared, ro = [], []
     if a.declared_inputs:
-        ro = [p["mount"] for p in bootdecl.load_pins(a.declared_inputs)]   # read-only on the guest's card, bootpath.BootPath   # verified and mounted read-only on the SD root before anything runs; a mismatch is an input error
-        declared = bootdecl.mount_all(a.declared_inputs, a.root, dict(s.split("=", 1) for s in a.declared_src))
+        declared = bootdecl.mount_all(a.declared_inputs, a.root)   # fetched through the recipe's external mechanism, tree-hash verified, mounted read-only on the SD root before anything runs; a mismatch is an input error
+        ro = [bootdecl.mount_point()]                               # read-only on the guest's card (bootpath.BootPath)
     base = plan["image"]["base"]
     with open(a.milestones) as f:
         table = bootmiles.load_table(f.read())
     with open(a.manifest) as f:
         manifest = bootmiles.load_manifest(f.read())
-    syms = bootmiles.read_symtab(a.elf)
+    syms = bootmiles.symbols(facts)
     watch = bootmiles.resolve(table, manifest, syms, base)
     host = _host_lines(watch["host"])
     wl, wl_ret, wl_mem, wl_until = _watch_names(a.watch_log, syms) if a.watch_log else (None, set(), {}, {})
@@ -362,7 +361,7 @@ def run(a):
                     rets_hooked.add(x30)
                     m.watch_pc(x30, lambda tid_, pc_, x30=x30: returned(x30))
         m.watch_pc(syms[name] + base, logged)
-    fnvl = bootmiles.read_section(a.elf, ".text.fnvl") if wl is not None else []
+    fnvl = bootmiles.alloc_sections(facts, ".text.fnvl") if wl is not None else []
     for lo, size in fnvl:   # game entry: a call from outside the lifted section into it (the section's own range, no list of functions)
         def entered(tid, src, dst):
             unwind(tid)
@@ -392,7 +391,7 @@ def run(a):
             sys.stdout.flush()
             sys.stderr.flush()
             os._exit(rc)
-        gpu = bootgpu.Gpu(a.gpu, m, a.profile, on_present=presented, on_exit=host_exit,
+        gpu = bootgpu.Gpu(m, a.profile, on_present=presented, on_exit=host_exit,
                           on_first_call=lambda: [fire(i, m.tid()) for i in watch["host"].get("gpu-first-call", ())])
 
     def finish(r, gpu_report):
@@ -454,7 +453,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
     sp = sub.add_parser("run", help="run the guest and write OUT.json (format %s)" % FORMAT)
-    for opt in ("--elf", "--reserved", "--keys", "--root", "--milestones", "--manifest", "--out"):
+    for opt in ("--elf", "--facts", "--reserved", "--keys", "--root", "--milestones", "--manifest", "--out"):
         sp.add_argument(opt, required=True)
     sp.add_argument("--heap-size", required=True, type=lambda s: int(s, 0))
     sp.add_argument("--game")
@@ -462,7 +461,7 @@ def main(argv=None):
     sp.add_argument("--limit-instructions", type=lambda s: int(s, 0))
     sp.add_argument("--quantum", required=True, type=lambda s: int(s, 0),
                     help="instructions per slice of a core's thread (bootmachine.py rule 3); a declared parameter of the run, no default; recorded in OUT.json machine")
-    sp.add_argument("--gpu", help="host renderer library libnxgl4.so: registers ext module 10 (bootgpu.py)")
+    sp.add_argument("--gpu", action="store_true", help="registers ext module 10, forwarded to the recipe-built render/gl4 library libnxgl4.so (bootgpu.py; needs GATE_CACHE)")
     sp.add_argument("--frames", help="directory for the library's frame files ($NXGL4_FRAMES); needs --gpu")
     sp.add_argument("--threads", type=int, default=256,
                     help="guest thread stacks the stage provides (a number of the run, not of the contract; beyond it "
@@ -477,14 +476,10 @@ def main(argv=None):
     sp.add_argument("--text-entry", action="append", default=[], metavar="TEXT",
                     help="the answer of one TEXT_ENTRY call (the system keyboard), repeatable, consumed in order; none left: the call "
                          "is cancelled (0); a text longer than the call's max_len ends the run as scenario-error")
-    sp.add_argument("--declared-inputs", metavar="PINS", help="verify/boot_inputs.json: each pinned port input (the font set) is fetched by its commit "
-                    "(or taken from --declared-src), verified against its checksum list and mounted read-only under --root (bootdecl.py); "
-                    "any mismatch is an input error and nothing runs; OUT.json inputs.declared holds {name, commit, sums_sha256, files}")
-    sp.add_argument("--declared-src", action="append", default=[], metavar="NAME=DIR",
-                    help="a checkout holding the input's path and sums file, in place of the fetch (needs --declared-inputs)")
+    sp.add_argument("--declared-inputs", metavar="PIN", help="manifest/fonts_mirror.json: the pinned font mirror is fetched by the recipe's external mechanism "
+                    "(commit, tree_sha256; the cache is $GATE_CACHE) and mounted read-only at FNVNX_SD_FONTS under --root (bootdecl.py); a mismatch is an "
+                    "input error and nothing runs; OUT.json inputs.declared holds {name, commit, tree_sha256, files}")
     a = ap.parse_args(argv)
-    if a.declared_src and not a.declared_inputs:
-        ap.error("--declared-src needs --declared-inputs")
     if a.frames and not a.gpu:
         ap.error("--frames needs --gpu")
     try:

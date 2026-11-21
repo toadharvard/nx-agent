@@ -7,10 +7,8 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
-from fnvnx.verify import bootsock  # noqa: E402
-from fnvnx.verify.bootsock import NotDetermined, BadGuestMemory, neg  # noqa: E402
+import bootsock  # noqa: E402
+from bootsock import NotDetermined, BadGuestMemory, neg  # noqa: E402
 
 FAILED, N = [], [0]
 SA, BUF, VAL, LEN, FD = 0x1000, 0x2000, 0x2800, 0x2900, 0x2A00

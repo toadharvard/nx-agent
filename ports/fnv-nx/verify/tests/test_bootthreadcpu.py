@@ -3,7 +3,6 @@
 FNVNX_CPU_SPEC(ideal, mask) with ideal in mask within the application cores (else BADINPUT, nothing created, id 0); thread_set_cpu takes a spec
 or a plain core, KEEP / mask 0 keep, a negative spec changes nothing; the main thread starts at FNVNX_DEFAULT_CORE. Every number is read by name
 from the headers. The machine is built on the synthetic ELF of test_bootlayout; the calling thread is set the way run() sets main. Exit 0 on pass."""
-import json
 import os
 import re
 import struct
@@ -13,14 +12,12 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
-QUANTUM = 20000   # instructions per slice (bootmachine.py rule 3)
 sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
-from fnvnx.verify import bootlayout  # noqa: E402
-from fnvnx.verify import boothost  # noqa: E402
-from fnvnx.verify import bootmachine  # noqa: E402
-from fnvnx.verify.tests.test_bootlayout import make_elf  # noqa: E402
+import bootlayout  # noqa: E402
+import hostabirec  # noqa: E402
+import boothost  # noqa: E402
+import bootmachine  # noqa: E402
+from test_bootlayout import ENTRY, make_elf  # noqa: E402
 
 
 def _scratch(prefix):
@@ -40,19 +37,18 @@ def case(name, cond, extra=""):
         FAILED.append(name)
 
 
-def define(name):
-    for h in ("hostapi.h", "placement.h"):
-        m = re.search(r"#define\s+%s\s+(0x[0-9A-Fa-f]+|\d+)(?:ull|u)?\b" % name, open(os.path.join(INC, h)).read())
-        if m:
-            return int(m.group(1), 0)
-    return None
+define = hostabirec.record().define   # the headers' constants by name, from the one record (hostabirec.py)
+
+
+QUANTUM = 20000   # instructions per slice: a declared parameter of every run (the value is not under test)
 
 
 def main():
     D, APP, KEEP, FN, BAD, NOTF = (define(n) for n in ("FNVNX_DEFAULT_CORE", "FNVNX_APP_CORES", "FNVNX_CPU_KEEP",
                                                              "FNVNX_PLAT_THREAD_CPU", "FNVNX_HE_BADINPUT", "FNVNX_HE_NOTFOUND"))
     case("headers: default core, app cores, KEEP, THREAD_CPU by name", None not in (D, APP, KEEP, FN) and FN == 38, (D, APP, KEEP, FN))
-    case("machine constants equal the headers", (bootmachine.FNVNX_DEFAULT_CORE, bootmachine.APP_CORES, bootmachine.FNVNX_CPU_KEEP) == (D, APP, KEEP))
+    case("machine constants equal the headers", (bootmachine.FNVNX_DEFAULT_CORE, bootmachine.APP_CORES,
+                                                 bootmachine.FNVNX_CPU_KEEP) == (D, APP, KEEP))
     case("BADINPUT 0x1759 and NOTFOUND by name", BAD == bootmachine.LIBNX_BAD_INPUT and (NOTF or bootmachine.FNVNX_HE_NOTFOUND) == bootmachine.FNVNX_HE_NOTFOUND)
 
     def SPEC(ideal, mask):
@@ -60,7 +56,7 @@ def main():
 
     elf = make_elf()
     rows = [("keys", 0xf0000, 0x200000), ("exe", 0x400000, 0x1409000)]
-    plan = bootlayout.plan(bootlayout.parse_elf(elf), rows, 4 << 20)
+    plan = bootlayout.plan(bootlayout.parse_elf(elf), rows, 4 << 20, entry=ENTRY)
 
     def machine():
         svc = boothost.Services(_scratch("tc-"))
@@ -80,12 +76,13 @@ def main():
 
     for tag, app in (("app cores 0-2", APP),):
         m, svc = machine()
+        case("[%s] the machine's app cores are the header's FNVNX_APP_CORES" % tag, m.app_cores == APP, m.app_cores)
         case("[%s] main starts at the default core, mask 1 << default; THREAD_CPU answers it" % tag,
              thread_cpu(m) == D and svc._placed(0) == {"ideal": D, "mask": 1 << D}, svc._placed(0))
         for c in range(4):
             before = len(m.threads)
             h = create(svc, SPEC(c, 1 << c))
-            ok = app >> c & 1
+            ok = c < 3
             case("[%s] thread_create on core %d %s" % (tag, c, "is placed" if ok else "is refused (not an app core): id 0, nothing created"),
                  (h != 0 and len(m.threads) == before + 1) if ok else (h == 0 and len(m.threads) == before), (h, len(m.threads)))
             if ok:
@@ -123,7 +120,7 @@ def main():
         case("[%s] set_cpu mask outside the app cores -> BADINPUT, unchanged" % tag, svc.h_thread_set_cpu(0, SPEC(KEEP, 1 << 4)) == BAD
              and p() == keep)
         r3 = svc.h_thread_set_cpu(0, 3)
-        case("[%s] set_cpu plain core 3 (not an app core) -> BADINPUT, unchanged" % tag, r3 == BAD and p() == keep, (r3, p()))
+        case("[%s] set_cpu plain core 3 -> BADINPUT, unchanged" % tag, r3 == BAD and p() == keep, (r3, p()))
         case("[%s] set_cpu ideal 3 joining the mask -> BADINPUT" % tag, svc.h_thread_set_cpu(0, SPEC(3, 0x3)) == BAD)
         case("[%s] fn 39 -> NO_SERVICE (header bound)" % tag, thread_cpu(m) is not None and m.ext_call(11, 39, ARGS, 0) == 0xFFFFFFFFFFFFFF02)
 

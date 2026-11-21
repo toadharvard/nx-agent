@@ -11,25 +11,16 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
 sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
-from fnvnx.verify import bootlayout  # noqa: E402
-from fnvnx.verify import boothost  # noqa: E402
-from fnvnx.verify import bootmachine  # noqa: E402
-from fnvnx.verify.tests.test_bootlayout import make_elf  # noqa: E402
-
-
-def _scratch(prefix):
-    d = tempfile.mkdtemp(prefix=prefix)
-    __import__('atexit').register(__import__('shutil').rmtree, d, True)   # a test leaves no scratch behind
-    return d
+import bootlayout  # noqa: E402
+import boothost  # noqa: E402
+import bootmachine  # noqa: E402
+from test_bootlayout import ENTRY, make_elf  # noqa: E402
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(VERIFY)))
 HDR = os.path.join(REPO, "ports", "fnv-nx", "hostabi", "include", "fnvnx", "hostapi.h")
 FAILED = []
 N = [0]
 P = 0x1000
-QUANTUM = 20000   # instructions per slice (bootmachine.py rule 3): a declared parameter of these runs
 
 
 def case(name, cond, extra=""):
@@ -51,8 +42,8 @@ def main():
     case("header: UNMAP_RANGE is 37, BADINPUT 0x1759, RANGE 0xD401", (FN, BAD, RNG) == (37, 0x1759, 0xD401), (FN, BAD, RNG))
     elf = make_elf()
     rows = [("keys", 0xf0000, 0x200000), ("exe", 0x400000, 0x1409000), ("mod1", 0x1410000, 0x1500000), ("mod2", 0x4000000, 0x4200000)]
-    plan = bootlayout.plan(bootlayout.parse_elf(elf), rows, 4 << 20)
-    m = bootmachine.Machine(elf, plan, boothost.Services(_scratch("bu-")), quantum=QUANTUM)
+    plan = bootlayout.plan(bootlayout.parse_elf(elf), rows, 4 << 20, entry=ENTRY)
+    m = bootmachine.Machine(elf, plan, boothost.Services(tempfile.mkdtemp(prefix="bu-")))
     ARGS = 0x1400000   # inside the window, scratch for the argument array
     m.map_fixed(ARGS & ~0xFFF, P, 0)
 

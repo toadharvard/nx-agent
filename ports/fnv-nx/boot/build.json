@@ -1,0 +1,156 @@
+{
+ "format": "fnvnx-recipe/1",
+ "compiler": {
+  "cc": "aarch64-linux-gnu-gcc-13",
+  "cxx": "aarch64-linux-gnu-g++-13"
+ },
+ "flags": {
+  "c": [],
+  "cxx": [],
+  "asm": []
+ },
+ "include": [],
+ "units": "all",
+ "external": [
+  {
+   "name": "exe",
+   "repo": "fnv-nx-build",
+   "ref": "gamedata/exe",
+   "commit": "0948da1e89ab719dcf8471e45b67bc60575f6b93",
+   "tree_sha256": "ba933b684b5e221e74b8a841a0ebb35ea8599c78a4d582ca0c376ef5a424ef2b",
+   "at": "/ext/exe"
+  },
+  {
+   "name": "data-FalloutNV.esm",
+   "repo": "fnv-nx-build",
+   "ref": "gamedata/data/FalloutNV.esm",
+   "commit": "6a50bdff77d337f4e2a3222539fc940eba0d7a4c",
+   "tree_sha256": "239c62dfb28531e779a32ca06da5f1c3101823f298252ffec9aec8073f87bf60",
+   "at": "/ext/gamedata/data/FalloutNV.esm"
+  },
+  {
+   "name": "data-FalloutNV_lang.esp",
+   "repo": "fnv-nx-build",
+   "ref": "gamedata/data/FalloutNV_lang.esp",
+   "commit": "3658438f18bb32d2268c9e299566024b96cb90ec",
+   "tree_sha256": "fa6d956886836ae04deb5aa44e73fb6f1c02a718567b2544f98feadf1a6d959a",
+   "at": "/ext/gamedata/data/FalloutNV_lang.esp"
+  },
+  {
+   "name": "data-Fallout_-_Meshes.bsa",
+   "repo": "fnv-nx-build",
+   "ref": "gamedata/data/Fallout_-_Meshes.bsa",
+   "commit": "be3a31e01c3b4ffa080a03b69b4326898bc5ed85",
+   "tree_sha256": "9bc6b4bbaedbc71172aa682f04c4c7c74a034d86154e73a8ba134b6fba6ddbf4",
+   "at": "/ext/gamedata/data/Fallout_-_Meshes.bsa"
+  },
+  {
+   "name": "data-Fallout_-_Misc.bsa",
+   "repo": "fnv-nx-build",
+   "ref": "gamedata/data/Fallout_-_Misc.bsa",
+   "commit": "90958177763f0b0fd00d495da4bbfb67d4e4e3e6",
+   "tree_sha256": "a6989974ca4dfb5fa71e74ea6696417ae7866f6cdee59d5c281313a69f44b613",
+   "at": "/ext/gamedata/data/Fallout_-_Misc.bsa"
+  },
+  {
+   "name": "data-Fallout_-_Sound.bsa",
+   "repo": "fnv-nx-build",
+   "ref": "gamedata/data/Fallout_-_Sound.bsa",
+   "commit": "664b8a127054fdb882f96ed4031ab7337ee7c513",
+   "tree_sha256": "c8238c61bd1bbc985072e993aa0cfe777a87165797747c821a5aa01ec1c30d4c",
+   "at": "/ext/gamedata/data/Fallout_-_Sound.bsa"
+  },
+  {
+   "name": "data-Fallout_-_Textures.bsa",
+   "repo": "fnv-nx-build",
+   "ref": "gamedata/data/Fallout_-_Textures.bsa",
+   "commit": "6a9def0deb7afd58d03ef0019a712ad7243b4c13",
+   "tree_sha256": "d4909e816866f0fb88db3947953af5951d6a8624c7fc0deb23827f15d796a312",
+   "at": "/ext/gamedata/data/Fallout_-_Textures.bsa"
+  },
+  {
+   "name": "data-Fallout_-_Textures2.bsa",
+   "repo": "fnv-nx-build",
+   "ref": "gamedata/data/Fallout_-_Textures2.bsa",
+   "commit": "01e33c2d2aa74ed7e7e00a8ed4b134d2f67ce414",
+   "tree_sha256": "76bf706bccc1368a53dd1c47de613eb5410016da6923d9ed6bae720f4e82a547",
+   "at": "/ext/gamedata/data/Fallout_-_Textures2.bsa"
+  },
+  {
+   "name": "data-Fallout_-_Voices1.bsa",
+   "repo": "fnv-nx-build",
+   "ref": "gamedata/data/Fallout_-_Voices1.bsa",
+   "commit": "42bb9c708ef6e38852bc88f986c514d0a8abca7b",
+   "tree_sha256": "8a5a2082a0291e83d27ca0b624177aa4ff204abf45282d2010c0901ae7745a50",
+   "at": "/ext/gamedata/data/Fallout_-_Voices1.bsa"
+  },
+  {
+   "name": "data-Music",
+   "repo": "fnv-nx-build",
+   "ref": "gamedata/data/Music",
+   "commit": "95b3ae0653f90c472fe25a191627572f9c2bcc9e",
+   "tree_sha256": "0b7272a5e2e1587d5154d62472a4cba697e146d5cd3ebf189dd0bc3508a732db",
+   "at": "/ext/gamedata/data/Music"
+  },
+  {
+   "name": "data-Shaders",
+   "repo": "fnv-nx-build",
+   "ref": "gamedata/data/Shaders",
+   "commit": "e81354b5da613b01fd7d549f3665370c0e1aaac1",
+   "tree_sha256": "ee33de99cbb446887367210264f274199e6087922b9e2b05a15316ff3ec8796e",
+   "at": "/ext/gamedata/data/Shaders"
+  },
+  {
+   "name": "data-Update.bsa",
+   "repo": "fnv-nx-build",
+   "ref": "gamedata/data/Update.bsa",
+   "commit": "4d6820bcb8e246f637ea314f772fdc721030b26e",
+   "tree_sha256": "05e3d8e68238dbbc246153e9a2ebf1c58383dd33f99e1a5d865b8483200993be",
+   "at": "/ext/gamedata/data/Update.bsa"
+  }
+ ],
+ "uses": [
+  {
+   "root": "ports/fnv-nx/loader",
+   "output": "KEYS_TSV"
+  },
+  {
+   "root": "ports/fnv-nx/loader",
+   "output": "MODULES_TSV"
+  },
+  {
+   "root": "ports/fnv-nx/contract/facts",
+   "output": "n1"
+  },
+  {
+   "root": "ports/fnv-nx/lift/pack",
+   "output": "ENTRIES"
+  }
+ ],
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/link/milestones.py",
+   "args": [
+    "--exe",
+    "/ext/exe/FalloutNV.exe",
+    "--modules",
+    "/uses/ports/fnv-nx/loader/MODULES_TSV",
+    "--n1",
+    "/uses/ports/fnv-nx/contract/facts/n1",
+    "--keys",
+    "/uses/ports/fnv-nx/loader/KEYS_TSV",
+    "--entries",
+    "/uses/ports/fnv-nx/lift/pack/ENTRIES",
+    "--out",
+    "/out/gen/milestones.tsv"
+   ],
+   "inputs": [],
+   "outputs": [
+    "gen/milestones.tsv"
+   ]
+  }
+ ],
+ "outputs": {
+  "MILESTONES_TSV": "gen/milestones.tsv"
+ }
+}
