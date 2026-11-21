@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
-"""Candidate assembly check (owner order "defects impossible by construction", rule 8; L1 rule of 2026-11-21): a take must not lose any source head's edits.
+"""Candidate assembly check (owner order "defects impossible by construction", rule 8; L1 rulings of 2026-11-21): a candidate takes each file from its owner, and
+no source head's edit is lost.
     python3 -I verify/candcheck.py --sources FILE [--candidate REF] [--json OUT]        cwd = the git checkout root
-FILE (the candidate's source list, JSON): {"trunk": REF, "sources": [{"head": REV, "patches": [REV..] (optional), "owner": NAME}], "merged": [{"file": PATH, "heads": [REV..], "result": BLOB, "reason": TEXT}],
-"cut": [{"root": PATH, "heads": [REV..], "reason": TEXT}]}. Nothing else is listed: files and roots come from git.
-Rule, derived per file F that any source head changed. A head changed F when its version differs from that at merge-base(head, trunk). Files under a `cut` root are out of Expected.
-1. Expected(F) = the clean N-way merge of the versions of the heads that changed F, folded pairwise in source-list order with `git merge-file`; folding G_i into
-   G_1..G_{i-1}, the base is `git merge-base G_i G_1..G_{i-1}` (per step, per file), its version of F; one changer: that head's version; a deletion by all changers: absent.
-2. Clean: the candidate must equal Expected, else RED `merge-red` naming F and the heads whose changes are missing.
-3. Conflict (a pairwise fold conflicts, or one head deletes what another changes): a `merged` record {file, heads, result, reason} is needed and the candidate must hold its
-   `result` blob; a conflict with no record is RED `conflict`; a record whose merge is actually clean, or that names heads that did not change F, is RED `record`. A deliberate
-   supersession is the same record: `result` is the owner's blob and `reason` says why the other heads' change is dropped.
-4. Roots: every root with a recipe in a head's verify/admit.json must be admitted in the candidate or be recorded in `cut` with that head and a non-empty reason, else RED `root`;
+FILE (the candidate's source list, JSON): {"trunk": REF, "sources": [{"head": REV or "self", "patches": [REV..] (optional), "layer": NAME, "trees": [PATH PREFIX..]}],
+"superseded": [{"file": PATH, "head": REV, "owner": REV, "reason": TEXT}], "cut": [{"root": PATH, "heads": [REV..], "reason": TEXT}]}.
+`self` is the candidate's own line (L1's fixes are committed on it). Nothing else is listed: the files and roots come from git.
+Rules. A head changed F when its version differs from that at merge-base(head, trunk). The files are every file a non-self head changed, minus the files under a `cut` root.
+1. Trees: the owner of F is the source row with the longest tree prefix of F (a nested prefix is a more specific owner); the same prefix in two rows is RED `overlap`.
+   A file in no row's trees is RED `unowned`.
+2. The candidate's version of F is its owner's version (the row's head; `self`: the candidate itself), else RED `owner-red`.
+3. For every non-owner head G that changed F, merge(owner O's version, G's version) on the base `git merge-base O G` must equal O's version: then G's edit is contained in O.
+   Otherwise RED `not-in-owner` (F, G, O), conflict or not. The remedy belongs to O: take G's change into O's head, or a `superseded` record {file, head G, owner O, reason}
+   (O's version deliberately replaces G's). A record nothing needs, or without a reason, is RED `record`.
+4. Roots: every root with a recipe in a head's verify/admit.json must be admitted in the candidate or in `cut` with that head and a non-empty reason, else RED `root`;
    a `cut` record nothing needs is RED `record`.
-`lost` (the candidate's blob is none of the heads' versions) is printed as a diagnostic count only; rule 2 covers it.
-Prints one global line (sources, files checked, clean-equal, clean-red, conflicts, records, roots, the candidate commit). Exit 0 iff nothing is red."""
+Prints one global line with the counts per class. Exit 0 iff nothing is red."""
 import json
 import os
 import subprocess
@@ -99,65 +100,86 @@ def expected(p, vers, mbs):
 def check(doc, cand):
     """-> (stats, [(kind, file or root, heads, text)])"""
     trunk, cand = rev(doc["trunk"]), rev(cand)
-    heads = [source_head(s) for s in doc["sources"]]
-    rowheads = [rev(s["head"]) for s in doc["sources"]]
-    memo = {}
-
-    def mbs(g, prev):
-        k = (g, tuple(prev))
-        if k not in memo:
-            memo[k] = git("merge-base", g, *prev).decode().strip()
-        return memo[k]
+    rows = doc["sources"]
+    heads = [cand if r["head"] == "self" else source_head(r) for r in rows]
+    rowheads = [cand if r["head"] == "self" else rev(r["head"]) for r in rows]
+    names = [("self" if r["head"] == "self" else rev(r["head"])[:9]) for r in rows]
+    layer = {n: r.get("layer", "") for n, r in zip(names, rows)}
+    red = []
+    seen = {}
+    for n, r in zip(names, rows):
+        for t in r["trees"]:
+            if t in seen and seen[t] != n:
+                red.append(("overlap", t, "%s,%s" % (seen[t], n), "the same tree prefix in two rows"))
+            seen[t] = n
+    owner_of = lambda p: max(((len(t), n) for t, n in seen.items() if p.startswith(t)), default=(0, None))[1]
     cb = blobs(cand)
-    hb = [blobs(h) for h in heads]
-    tb = [blobs(git("merge-base", h, trunk).decode().strip()) for h in heads]   # each head's own base on the trunk: what it changed
-    merged = {m["file"]: m for m in doc.get("merged", [])}
-    cut = {m["root"]: m for m in doc.get("cut", [])}
-    red, st = [], {"clean_equal": 0, "clean_red": 0, "conflicts": 0, "conflict_recorded": 0, "lost": 0}
+    hb = [cb if r["head"] == "self" else blobs(h) for r, h in zip(rows, heads)]
+    tb = [None if r["head"] == "self" else blobs(git("merge-base", h, trunk).decode().strip()) for r, h in zip(rows, heads)]
     files = set()
     for b, t in zip(hb, tb):
-        files |= {p for p in set(b) | set(t) if b.get(p) != t.get(p)}
+        if t is not None:
+            files |= {p for p in set(b) | set(t) if b.get(p) != t.get(p)}
     cutroots = [m["root"].rstrip("/") + "/" for m in doc.get("cut", [])]
     files = {p for p in files if not any(p.startswith(r) for r in cutroots)}   # a cut root takes its files with it
+    sup = {(m["file"], m["head"][:9], m["owner"][:9] if m["owner"] != "self" else "self"): m for m in doc.get("superseded", [])}
+    used = set()
+    idx = {n: i for i, n in enumerate(names)}
+    st = {"files": len(files), "owner_equal": 0, "owner_red": 0, "unowned": 0, "not_in_owner": 0, "superseded": 0}
+    pairs = {}
     for p in sorted(files):
-        vers = [(h[:9], h, b.get(p)) for h, b, t in zip(heads, hb, tb) if b.get(p) != t.get(p)]
-        exp, ok = expected(p, vers, mbs)
-        if cb.get(p) not in {v for _, _, v in vers}:
-            st["lost"] += 1
-        if not ok:
-            st["conflicts"] += 1
-            m = merged.get(p)
-            names = ",".join(h for h, _, _ in vers)
-            if m is None:
-                red.append(("conflict", p, names, "the heads' changes conflict and no merged record gives the result"))
-            elif cb.get(p) != m["result"] or not m.get("reason"):
-                red.append(("conflict", p, names, "candidate %s, record result %s%s" % ((cb.get(p) or "-")[:9], m["result"][:9], "" if m.get("reason") else ", no reason")))
-            else:
-                st["conflict_recorded"] += 1
+        o = owner_of(p)
+        if o is None:
+            st["unowned"] += 1
+            red.append(("unowned", p, ",".join(n for n, b, t in zip(names, hb, tb) if t is not None and b.get(p) != t.get(p)), "in no source row's trees"))
             continue
-        if p in merged:
-            red.append(("record", p, "", "merged record for a clean merge or for a file no head changed"))
-        if cb.get(p) == exp:
-            st["clean_equal"] += 1
+        ob = hb[idx[o]].get(p)
+        if cb.get(p) == ob:
+            st["owner_equal"] += 1
         else:
-            st["clean_red"] += 1
-            red.append(("merge-red", p, ",".join(h for h, _, _ in vers), "candidate %s, expected %s" % ((cb.get(p) or "-")[:9], (exp or "-")[:9])))
-    for p in sorted(set(merged) - files):
-        red.append(("record", p, "", "merged record for a file no head changed"))
-    ca, nroots, used = admitted(cand), 0, set()
-    for g, rh in zip(heads, rowheads):
-        for r in sorted(admitted(g)):
+            st["owner_red"] += 1
+            red.append(("owner-red", p, o, "candidate %s, owner version %s" % ((cb.get(p) or "-")[:9], (ob or "-")[:9])))
+        for n, b, t, g in zip(names, hb, tb, heads):
+            if t is None or n == o or b.get(p) == t.get(p):
+                continue
+            gb = b.get(p)
+            contained = gb == ob
+            if not contained and ob is not None and gb is not None:
+                mb = git("merge-base", heads[idx[o]], g).decode().strip()
+                m = merge3(ob, at(mb, p), gb)
+                contained = m is not None and git("hash-object", "--stdin", inp=m).decode().strip() == ob
+            elif not contained and ob is None and gb == at(git("merge-base", heads[idx[o]], g).decode().strip(), p):
+                contained = True
+            if contained:
+                continue
+            k = (p, n, o)
+            if k in sup and sup[k].get("reason"):
+                used.add(k)
+                st["superseded"] += 1
+                continue
+            st["not_in_owner"] += 1
+            pairs.setdefault((o, n), []).append(p)
+            red.append(("not-in-owner", p, "%s<-%s" % (o, n), "owner %s's version does not contain %s's edit" % (o, n)))
+    for k in sorted(set(sup) - used):
+        red.append(("record", k[0], "%s<-%s" % (k[2], k[1]), "superseded record nothing needs, or without a reason"))
+    ca, nroots, usedc = admitted(cand), 0, set()
+    cut = {m["root"]: m for m in doc.get("cut", [])}
+    for rh, n in zip(rowheads, names):
+        if n == "self":
+            continue
+        for r in sorted(admitted(rh)):
             nroots += 1
             if r in ca:
                 continue
             c = cut.get(r)
             if c and rh in {rev(h) for h in c["heads"]} and c.get("reason"):
-                used.add(r)
+                usedc.add(r)
             else:
-                red.append(("root", r, rh[:9], "admitted by the head, not by the candidate, not cut with a reason"))
-    for r in sorted(set(cut) - used):
+                red.append(("root", r, n, "admitted by the head, not by the candidate, not cut with a reason"))
+    for r in sorted(set(cut) - usedc):
         red.append(("record", r, "", "cut record nothing needs (the candidate admits the root, no listed head does, or no reason)"))
-    st.update({"candidate": cand, "trunk": trunk, "sources": len(heads), "files": len(files), "roots_checked": nroots, "red": len(red)})
+    st.update({"candidate": cand, "trunk": trunk, "sources": len(rows), "roots_checked": nroots, "red": len(red), "pairs": {"%s<-%s" % k: len(v) for k, v in sorted(pairs.items())}})
+    st["layers"] = layer
     return st, red
 
 

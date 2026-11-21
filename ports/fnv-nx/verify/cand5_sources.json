@@ -2,36 +2,77 @@
  "trunk": "origin/claude/fnv-nx-clean",
  "sources": [
   {
-   "head": "40c639d16",
-   "owner": "w28 (L1): link, verify, contract, farm"
-  },
-  {
-   "head": "a3d039bf0",
-   "owner": "L5: platform, rt, hostabi, manifest, loader, bridgetable"
-  },
-  {
-   "head": "da0e4ff78",
-   "owner": "L6: render, bridgefacts"
-  },
-  {
-   "head": "04f1e5dfb",
-   "owner": "L4: tests/bootrt"
+   "head": "self",
+   "layer": "L1 (w28)",
+   "trees": [
+    "ports/fnv-nx/"
+   ]
   },
   {
    "head": "407914779",
-   "owner": "L3a: lift (base3)"
+   "layer": "L3a",
+   "trees": [
+    "ports/fnv-nx/lift/",
+    "ports/fnv-nx/contract/exporthdr/"
+   ]
+  },
+  {
+   "head": "a3d039bf0",
+   "layer": "L5",
+   "trees": [
+    "ports/fnv-nx/platform/",
+    "ports/fnv-nx/rt/",
+    "ports/fnv-nx/hostabi/",
+    "ports/fnv-nx/manifest/",
+    "ports/fnv-nx/loader/",
+    "ports/fnv-nx/bridgetable/",
+    "ports/fnv-nx/shim/",
+    "ports/fnv-nx/lib/"
+   ]
+  },
+  {
+   "head": "da0e4ff78",
+   "layer": "L6",
+   "trees": [
+    "ports/fnv-nx/render/",
+    "ports/fnv-nx/bridgefacts/"
+   ]
+  },
+  {
+   "head": "04f1e5dfb",
+   "layer": "L4",
+   "trees": [
+    "ports/fnv-nx/tests/",
+    "ports/fnv-nx/boot/",
+    "ports/fnv-nx/verify/tests/icount/"
+   ]
   },
   {
    "head": "a36b3c8f2",
-   "owner": "L2: toolchain, rules (+ overlay patches)",
+   "layer": "L2",
+   "trees": [
+    "ports/fnv-nx/toolchain/",
+    "ports/fnv-nx/toolchain-stage1/",
+    "ports/fnv-nx/rules/",
+    "ports/fnv-nx/platform/coremath/",
+    "ports/fnv-nx/platform/gmp/",
+    "ports/fnv-nx/platform/mpfr/"
+   ],
    "patches": [
     "5241e02c7",
     "c64609950",
     "35e622293"
    ]
+  },
+  {
+   "head": "88a506c7d",
+   "layer": "orchestrator",
+   "trees": [
+    "CLAUDE.md",
+    "ports/fnv-nx/docs/ORCHESTRATION.md"
+   ]
   }
  ],
- "merged": [],
  "cut": [
   {
    "root": "ports/fnv-nx/boot",
@@ -108,5 +149,6 @@
    ],
    "reason": "new item after the cand5 freeze; next candidate"
   }
- ]
+ ],
+ "superseded": []
 }
