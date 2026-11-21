@@ -920,3 +920,18 @@ calls, not smaller ones.
     candidate. Their completion stays on the lead's branch.
   - A gate's own failing selftest is fixed, not cut.
   - The warm verdict stays at most 300 s.
+
+## Orchestrator decision of 2026-11-21: one owner per tree (binding for every lead)
+
+Cause (rule 8): cand5 was assembled by taking each tree whole from its owner. That silently dropped L3a's edits to
+`verify/cpuid_model.json`, which is L1's tree, and that root turned red.
+
+- A lead edits no file outside its own trees on its branch. Its own trees are the trees of its row in the candidate
+  source list.
+- A change to another owner's file goes to that owner as commits on a branch based on the owner's head. The owner takes
+  it into its own branch.
+- Candidate assembly is checked by `verify/candcheck.py` (L1). A non-owner edit is red unless the owner's version
+  contains it. The only exception is a pair record {owner, head, reason} that the candidate carries.
+- The pair records are a transition aid for cand5 and cand6 (24 records at L1 c5 e4e9b7e53). Every lead delivers its
+  edits in other owners' files to those owners, or declares them stale, before cand6. Each pair record is deleted once
+  its owner holds the edit. From cand7 on there are none.
