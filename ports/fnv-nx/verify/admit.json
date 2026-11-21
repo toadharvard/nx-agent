@@ -363,13 +363,6 @@
    "recipe": "ports/fnv-nx/lift/liftprov/build.json"
   },
   {
-   "path": "ports/fnv-nx/lift/sdm",
-   "class": "tool",
-   "target": "host",
-   "entry": [],
-   "recipe": "ports/fnv-nx/lift/sdm/build.json"
-  },
-  {
    "path": "ports/fnv-nx/lift/fpfacts",
    "class": "tool",
    "target": "host",
@@ -473,13 +466,6 @@
    "class": "tool",
    "target": "host",
    "recipe": "ports/fnv-nx/lift/udsail/build.json",
-   "entry": []
-  },
-  {
-   "path": "ports/fnv-nx/lift/sdmrows",
-   "class": "tool",
-   "target": "host",
-   "recipe": "ports/fnv-nx/lift/sdmrows/build.json",
    "entry": []
   },
   {

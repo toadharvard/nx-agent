@@ -1,4 +1,4 @@
-"""Forms of the instructions whose CPUID feature the declared CPU (CPUREF, lift/rt/cpumodel.c) clears (CLAUDE.md "The declared CPU").  The one reader is proof/cpufeat.py (the SDM opcode rows and the declared CPU's words: `sdmrows` and `cpumodel` inputs);
+"""Forms of the instructions whose CPUID feature the declared CPU (CPUREF, lift/rt/cpumodel.c) clears (CLAUDE.md "The declared CPU").  The one reader is proof/cpufeat.py (the declared CPU record: the `cpumodel` input);
 this module only turns its answer into a Form, and forms.build asks it before any handler runs.
   UD   cpufeat.missing(ins) is non-empty: the Form is fault(UD) with no other effect, the behaviour of a CPU that lacks the feature (SDM Vol. 3 Event 6 and the instruction's `#UD If CPUID ... = 0` line).  It is valid only for a site under L3a's call-graph certificate (dominated by the exe's own cpuid test); the Form does not decide reachability.
   NOP  the SDM says that the encodings of a cleared feature execute as NOP: MPX (SDM Vol. 1 E.4.1 'All Intel MPX instructions are NOP on processors that report CPUID.07H.00H:EBX.MPX[14] = 0'), the opcodes 0F 1A and

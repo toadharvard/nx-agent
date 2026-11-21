@@ -40,7 +40,6 @@
     "/in/4",
     "/in/7",
     "/in/8",
-    "/in/9",
     "/in/5",
     "/in/6"
    ],
@@ -54,7 +53,6 @@
     "ports/fnv-nx/lift/proof/sail_patches",
     "ports/fnv-nx/lift/proof/x86_fetch.sail",
     "ports/fnv-nx/lift/proof/x86_code_regs.sail",
-    "ports/fnv-nx/lift/proof/sdmfeat.py",
     "ports/fnv-nx/lift/fnvlift/cpumodel_bits.py",
     "ports/fnv-nx/verify/cpuid_model.json"
    ],

@@ -168,8 +168,8 @@ def run(uni):
 
 
 def main(argv):
-    if len(argv) < 6 or argv[0] != '--sdmrows' or argv[2] != '--cpumodel' or len(argv) % 2: print('usage: def_check.py --sdmrows SDMROWS.JSON --cpumodel CPUID_MODEL.JSON IMAGE FACTS [IMAGE FACTS ...]', file=sys.stderr); return 2
-    from fnvnx.lift.fnvlift import inputs; inputs.configure(sdmrows=argv[1], cpumodel=argv[3]); argv = argv[4:]
+    if len(argv) < 4 or argv[0] != '--cpumodel' or len(argv) % 2: print('usage: def_check.py --cpumodel CPUID_MODEL.JSON IMAGE FACTS [IMAGE FACTS ...]', file=sys.stderr); return 2
+    from fnvnx.lift.fnvlift import inputs; inputs.configure(cpumodel=argv[1]); argv = argv[2:]
     res = run(universe(list(zip(argv[::2], argv[1::2]))))
     d = os.environ.get('GATE_OUT')
     if d:

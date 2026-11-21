@@ -6,7 +6,6 @@ Checks, all static (text of the emitter and of the header; the semantics of the 
      FUCOMI / FUCOMIP give Q = 1 (IE only for a signaling NaN);
   3. a non-compare operation (FADD with an SNaN operand) takes its flags from the host FPSR owned by the x87 family: the emitted text makes the x87 family the owner (FOWN_X87) or the function's prepass proves it.
   4. C1 of FIST / FRNDINT is 1 iff the result rounded away from zero (|r| > |x|): the header computes it at the site, the table checks the predicate against the rounded value of every RC mode.
-The input SDMROWS is mounted only because lifting a byte buffer runs core.dispatch's CPUID gate (proof/cpufeat.missing), which reads the SDM opcode rows for every instruction; the test itself reads no x87 row of the SDM.
     test_x87_exc_routing.py"""
 import os as _q_os, sys as _q_sys
 _q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
