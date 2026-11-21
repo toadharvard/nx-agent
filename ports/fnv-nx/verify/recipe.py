@@ -3194,7 +3194,10 @@ class Job:
         p, pws = self.produce(ws, u["root"])
         if p.red:   # the output this root uses is not produced
             raise BuildRed({"stage": "uses:" + u["root"], "exit": None, "stderr": ["producer %s is red: %s" % (u["root"], p.red[0]["stage"])] + list(p.red[0]["stderr"])[-18:]})
-        return cas.ingest(os.path.join(pws, "root", p.rec["outputs"][u["output"]]), self.store)
+        out = os.path.join(pws, "root", rel) if isinstance(rel, str) else ""
+        if not os.path.lexists(out):   # a green producer that does not write a declared output is a named red, never an OSError at ingest
+            raise BuildRed({"stage": "uses:" + u["root"], "exit": None, "stderr": ["producer %s is green but its declared output %s (%r) is not written" % (u["root"], u["output"], rel)]})
+        return cas.ingest(out, self.store)
 
     def objects_input(self, ws, tmp, g):
         """The tree mounted at /objs of a generate stage with `objects_of`: the objects of every admitted product root (implicit variant) the rule
