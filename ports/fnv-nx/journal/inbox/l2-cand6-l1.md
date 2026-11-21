@@ -1,0 +1,753 @@
+# L2 contributions to L1's trees: census for cand6 (w2)
+
+Measured at origin/claude/fnv-l2-source-plugins-cand4b f3b188ec8 against origin/claude/fnv-l1-contract-c5 e4e9b7e53.
+Universe: `git log --no-merges c5..cand4b` restricted to ports/fnv-nx without toolchain/, toolchain-stage1/, rules/, platform/{coremath,gmp,mpfr}/, journal/: 710 commits.
+
+## Rules used (each mechanical)
+
+- Equivalent (1): `git cherry` is "-" against c5. Result: 0 in this universe (the 2 that git cherry finds are toolchain-only commits).
+- In c5 already (2): the commit's diff restricted to L1's trees reverse-applies cleanly onto c5 (`git apply -R --check`), i.e. every hunk is present; plus d9995de2d, whose line c5 supersedes (Job.produce runs run_all for every consumer path).
+- L2 contribution (3): a commit authored on our line (not reachable from any of the 474 non-L2 remote refs) whose L1-tree part is absent from c5 and serves an L2 item. 19 commits are ours by that test; 14 are category 3; f3d1cd214 and c57839fbf are category 2; the revert pair 410ab9d13/76d3bdfe5 and no other are stale (net zero).
+- Stale (4): everything else. The other 691 commits arrived through merges: each is reachable from another layer's branch, so it is that layer's commit.
+
+## Counts
+
+| category | commits |
+|---|---|
+| 1 equivalent | 0 |
+| 2 in c5 already | 42 |
+| 3 L2 contribution | 14 |
+| 4 stale | 654 |
+| total | 710 |
+
+(empty L1-tree diff under the path restriction, counted in 4: ba1ad7dc8)
+
+DATAMODEL `types` commits f7b5d9b3b and badb397be touch only toolchain/msvcmodel: outside L1's trees, not in this universe, they stay in the toolchain overlay.
+
+## Category 3: original -> commit on claude/fnv-l2-source-cand6-l1
+
+- 0bee5040e -> 93f64edf8  env.json: the compiler-build profile holds libgmp-dev, libmpfr-dev, libmpc-dev, zlib1g-dev (gcc's configure)
+- 8611f2cb1 -> 9e0caefe7  coremath root: CORE-MATH binary64 exp2m1 log2 log2p1 tan atan2 sin cos as a guest product root over the tools/
+- 33e2f9b26 -> 5e9c54018  coremath root: admit entry without cxx_origin (no C++ units), -Werror=attributes in both flag lists, NOTES
+- 798eacad4 -> bd159c4c5  guest_compiler.json: the citation of the -frounding-math row (CORE-MATH README:173)
+- bb9456e2c -> a89fa4e73  gmp root: configure, generated tables and the compile list as one generate stage
+- f5cf85c53 -> c3e353814  recipe: archive input {archive: ROOT} for tool steps; gmpgen makes BUILT_SOURCES first; tests and RECIPE.md fo
+- 6c2557ab8 -> 1428391e3  gmp: the headers of a unit's source directory are written beside the unit (quoted includes)
+- 497b68cb3 -> af5a8bca9  mpfr root, archive input mounts the root's directory outputs, mkunits supplied include dirs
+- 953bfc096 -> e97612f6c  gmp mkunits: -DNAME is NAME 1; directory outputs of a run step count for include_uses
+- 434813099 -> 6c91fbce2  recipe: archive builds are memoised per Job in their own table
+- 7bedd49a8 -> de84379e1  recipe: run steps take include_uses like CC stages; the archive mount holds only the archive
+- 00fb791f5 -> cf17baec0  test_archive_sources: behavioural include_uses toy for run steps (green and red)
+- 67d1ae6fe -> b80dd5f15  recipe: archive input is a guest root only; probes compile and link only (cross_compiling asserted in gmpgen/m
+- 6f147b874 -> 625926737  layout: LAYOUT-CALLTRIVIAL, a complete record whose compiler type is TREE_ADDRESSABLE is spelled struct:TAG{..
+
+Applied by their L1-tree part only (conflicts resolved to c5's surrounding code: the archive code of f5cf85c53 is placed after c5's pp_errors / run_foreach, admit.json entries are written in c5's one-key-per-line format).
+
+## Category 2 (42)
+
+- 02205a405 int3: test_ranges reads the last relocation section of the listing (no blank line after it once -fno-asynchron
+- 139e6eeb2 rt/imp.h: one guest-register save for lifted -> native transfers (fnvl_native_enter/leave); native_in and nati
+- 1b1abc42c render/nxgpu: include path is the root's include/ subtree (headers moved there by c58c0a4f3)
+- 1dc90f08d lift: universe_schema.py (universe.tsv schema generated from the producers' definitions)
+- 220c19ddb sandbox: open_channels cites glibc for AT_RANDOM/RDRAND uses
+- 2aa2ebba4 lift: x87sites: MXCSR sites also require DAZ clear (MXCSR_MASK 0xFFBF); sets-daz verdict
+- 2c3591efc x86flow.compute: an entry whose decode failed, or a tail chain ending in one, has no RETN row (as the in-proce
+- 2ffe0f6e4 rt/rcptab.c: the certified bytes again (d2a3920e...); the comment edit of 6e2972b15 is reverted, no re-certifi
+- 3f875c252 lift: test_exitbridge, test_disp, test_imp, test_msvcrt removed (direct stock-g++ builds and a hand-written Fa
+- 48922c8c2 lift: pointsto canonical form drops subsumed tokens ((o,c) under (o,None), objects under the summary, constant
+- 494bbc40b env.json: pin rustc, cargo, libstd-rust-dev and their closure (8 debs, snapshot 20261110) for the isla build s
+- 503185771 lift: pcsrc bounded decode cache (exe fits in memory)
+- 5f9bc70d5 platform/exptable: the native C++ root flag -DFNVNX_SDD=1
+- 60980045d lift: README DEF0/DEFPRIOR global counts (5 of 7 images, facts 163ec389), conditional-undefined class and mode
+- 6243edfc0 keep the d3d9total gate entry (L1/L6's gate) on the L5 line
+- 662f4d9f6 ASSUMPTIONS: the gate_eh completeness records are ASM-222..224 (the orchestrator's ids), cited in gate_eh
+- 74c32c454 guest_compiler.json: the pin 84f0883e (tree 5fd17b86..ad10c, K2 6a485ab9d3d3d486, built from plugins 3c6a1ebd5
+- 7cbe4d71f lift: inbox note of the SIMD flag-priority and no-form work
+- 7e803286a test_recipe_scratch: string-built ws paths and local creator helpers are judged too
+- 7fb057ccb test_plugins: fixture roots default to the guest profile (the recipe's plugin set is a function of the target 
+- 800efa95c lift: delete the stray host binary --help/g (a census run took --help as an output path)
+- a27b61b75 drop tests/bootguest/build.json: an orphan recipe (its root and admit row are on L4's line)
+- adba10d8e platform declares INCLUDE (include), as L3a base3 does: headers cross roots only as declared outputs
+- b39f131e4 rt/rcptab.c: the certified bytes again (d2a3920e...); the comment edit of af133dc17 is reverted, no re-certifi
+- b3cc6f3b9 contract/facts: n1 takes the msvc external root (it reads <root>/obj/u<i>.obj)
+- b462277dd lift: resolve_slice: a call on the walk and a store through a base not provably disjoint are red; two tests
+- b55d62f4b int3: selftests split, closed rule for a test that imports several roots: it goes to the root that depends on 
+- b85bd445b test_dispgen: the rows file header lines with the table_id
+- bb43d14df CLAUDE.md from the trunk at 55cbf861; assumptions handoff: Sail model, provers and the TSO mapping are owner i
+- bb80c6a1e inbox: l3a-w7-fpexc (item 29: FP mask, sticky readers, rounding at imports, reachability after imports, 7 imag
+- bc9de3d83 env: profile rust (rustc, cargo, libstd-rust-dev); envcheck roots the deb closure at the declared packages and
+- c57839fbf recipe: a sources line <run step>:<dir> names the units of a directory output of the step; gmp root lists its 
+- c8938b24c recipe: a host root loads a plugin only where a C/C++ unit is compiled with it (generated-only roots declare p
+- d033d52aa test_toolstep: the toy pins include the machine's layout deb (base-files) that every exec step names
+- d21519314 lift: drop the tools copy of gate_eh (home: lift/gates)
+- d9995de2d recipe: a used root's run steps run before its output is read
+- e6eb6d8e3 farm_shapeprove: an empty queue is a successful no-op
+- e77c1c993 puregate: xml.etree.ElementTree and ElementPath in PURE with the criterion stated; audit-stdlib reads dotted e
+- e8747468d lift: rangeinv.py (range disjointness / instruction-boundary invariant); rangecheck --loaded and data classes
+- f3d1cd214 toolchain tests: scratch.store for temporary stores (plugbuild); scratch.py from base3
+- fda075769 guestgen_citest: create the output directory
+- ffd74aee1 cpuid_model.json: mxcsr_mask_doc cites ASM-055 (OWNER 10, the SDM-documented ISA)
+
+## Category 4 (654)
+
+- 76d3bdfe5 Revert "toolchain: cross-root imports by the module path fnvnx.<rel> (ports/fnvnx symlink and the toolchain hu
+- 410ab9d13 toolchain: cross-root imports by the module path fnvnx.<rel> (ports/fnvnx symlink and the toolchain hunks of 8
+- f5bac6210 test_plugins: the external-commit fixture names /ext/pack in its include path (a stage keys only the externals
+- 322698c53 recipe: run tool step with exec python (the pinned python runtime of the generated stages through pyrt; test, 
+- 94bfc9e00 test_plugins: a lifted guest root loads the full plugin set (the recipe's rule: the plugin set is a function o
+- 01e91c00d recipe.ext_bare/ext_checkout: the one accessors of the external cache layout; test_extpaths universe is every 
+- 3ac52dd53 sandbox: the entropy stream (getrandom, /dev/urandom, /dev/random) is SHA-256 in counter mode over the stage k
+- 08109b9ce FNVNX_EXPORT: the record references the definer by a relocated pointer (&symbol), exportgen names the symbol f
+- abdd9bec6 plugsem/recipe: the semantic flag set is computed when asked (semantic_flags(datamodel=path)), not at import; 
+- 3a45cf484 export kinds func/entry/data: an entry is a guest-state body (definer void(void), bridge row bind entry, no ma
+- 35cdcd88f pathflow: a parameter default is an assignment of the parameter (positional, keyword-only, lambda); module pat
+- c071d7e1b sandbox: getrandom is answered with the constant entropy stream (seccomp user notification), the same stream a
+- 3de3eee4e recipe: the tree of a deb is the pinned deb's own data (dpkg-deb -x of the mirror file, sha256 checked); a dan
+- 3560895cc export lookup generated from exports.tsv: platform/exptable root (gen_export_lookup) replaces the g_exports ha
+- 8862ee5e4 recipe: include_of input form; external readers take the build's external cache
+- 010f2c569 admit: one root, one tree (a trees list is red); plugin set and SDD flags are a function of the target profile
+- c2c160cfd bridge table: stage A reads exports.tsv; native symbol and ret from the export record; link becomes an admitte
+- 2fe125d83 recipe: external_of input form (an external another root declares, one validator and reader, owner's pin in th
+- f203e1a1c assumptions gate: the users of an entry are derived from the tracked text that cites its id; used_by deleted f
+- d0b52b39f qualified imports: every tracked .py imports another root's module by its qualified path (72 files); admit gat
+- 275771a6f verdict: a red gate's own detail is the reason (not the exit code), a crash or missing result carries the stde
+- cae56a4e5 verdict: a gate that ends without a verdict with reasons is red with its stderr tail; exports root (objects_of
+- a6773ff1f contract: qualified sibling imports; a root's own modules are importable under its module path (one path per m
+- 8cb8603b3 platform uses the contract/include header root (INCLUDE)
+- 2fe9061af Export header lives in the header root contract/include; exporthdr root deleted
+- 9a5206d73 lift/rt: fnvnx_export.h through uses of the header root contract/include (w28 2872f3ac8); the exporthdr and co
+- 2872f3ac8 header roots: one implicit output INCLUDE reached only through uses (recipe.root_outputs, include_home, header
+- cbc2b5b30 FNVNX_EXPORT records for the dsound, dinput8 and xinput resolver modules (25 records, one per module and name)
+- b804e1c47 gate abi: crossing universe (IAT natives, dispatch rows) and va forwarders derived by the gate, in the memo ke
+- 6641b1d4a lift/rt: fnvnx_export.h through uses of the contract/exporthdr root (L5's header home, same files as 418ecba);
+- 8e917f591 gamedata_fetch.sh: fetches exactly the gamedata externals the admitted recipes declare, by commit, tree-checke
+- 418ecba9b L5 w23: FNVNX_EXPORT record at the definition of every Windows import (486 rows); contract/exporthdr root publ
+- a032be733 contract: header-only root (INCLUDE = contract/include) admitted; lift/rt takes fnvnx_export.h through uses
+- 131f3c915 verify: plugsem (guest compiler record facts: plugin set and arguments, semantic sets, runtime options) split 
+- 372def0cf lift/rt: FNVNX_EXPORT records beside every definition that implements a Windows import (msvcrt EH set, _CI*, f
+- 29265b98b test_plugins: drop the frame_address fixture (the builtin takes a constant level only)
+- 3c7533723 contract: export-table form (.fnvnx.export records via FNVNX_EXPORT, exportgen.py -> exports.tsv with one-defi
+- 41d73a973 admit: the toolchain root declares only the verify import (no module of it imports contract)
+- 8666fb756 hostabi, lib/sha256: host recipes inherit units, include and outputs from the base
+- 70f9c3fd3 order: a no-library builtin with only constant operands is the frame/register class (no fence, proof in the co
+- f634ea68b admit: L6's rows stay with their roots (the recipes are not on this line); the unused imports of manifest and 
+- 018e4fac1 artifacts: one accessor (verify/artifacts.py: recorded URL, else the env.json pin); recipe and install_mirror 
+- c316e6222 admit: manifest declares no imports (no module of it imports contract)
+- d2c0fe379 recipe: from-import of a subpackage directory of a declared root resolves like the qualified import; check jud
+- 2487aaf75 toolchain stage 1: the host build tools are named by their real files (gcc-13, g++-13, x86_64-linux-gnu-ar/ran
+- d29ad43cc liftsrcgen: the shard stages of one image come from image_shards(name, n, where, common), the image an input; 
+- 649c80075 order: a no-library builtin with vops and no pointer operand is ordered as an unknown-effect builtin (fences),
+- 5c7b36289 recipe: per-target recipes hold target fields only (generated/run/uses/outputs base-only, units/include inheri
+- a081cba96 gates take no commit or artifacts URL from the environment: tree of HEAD, recipe.artifacts_url (artifacts.url 
+- 9da69f5f3 dispatch: generic atomic builtins are same-type entry copies (ENTRY1-ATOMIC); order: fence the no-library RTL 
+- 8b50252e7 dispatch: generic atomic builtins are same-type entry copies (ENTRY1-ATOMIC); order: fence the no-library RTL 
+- 9affb1631 ldsynth: ld's own answer for each member's own objects (synth_set), per root and kind; toy GOT test with the h
+- cb13571f5 imports: one rule for cross-root Python imports (gate_admit.import_roots: qualified module path, /imp mount, P
+- 44356754a env.json: debs mirror 0bc84222 (396 debs, tree 7b2adceb)
+- 1681092ad recipe: exec libs (declared lib dirs for NEEDED, LD_LIBRARY_PATH, transitive read)
+- 3a3c3bc3e test_toolexec: debs profile cases
+- 0025951bb recipe: debs profile form (env.json debs.profiles, compiler-build) resolved through the same closure
+- a17db360d bridgetable: msvcrt operator new/delete are served by the name table (no constructed native symbol); test_brid
+- 9f4a82aee recipe: gen:unused-import is per declaring root (no module of the declaring root imports the declared root), n
+- b9caf5d59 env.json: debs mirror e37c2692 (397 debs, tree 9b257f4a)
+- 8fee88315 linkset: per-target definers (host: pinned system libs' .dynsym, host-lib-unpinned red), ld-synthesised names 
+- 36e071499 msvcrttest: case cx8 (the platform's native operator new fails: throw_bad_alloc -> bare _CxxThrowException, ca
+- 0127057f4 lift: the proof package is a declared input of every stage that carries the fnvlift package (w28's foreign-imp
+- f891b0c5a lift/rt: the bare _CxxThrowException (one body, two ABI entries): the native entry raises at the guest call si
+- f3cbb982c recipe: run-step exec from a pinned external file or a built root's output, static ELF resolution, env map, ti
+- 84bc327a9 linkset: one accessor of the link a guest root enters (members, pinned runtime, script names); gate imports re
+- ccfcffd72 lift: file-escape closed: cpuid_model.json as input --cpumodel, liftgen --lift required (no path from __file__
+- 8579f3baf lift/disp: the dispatcher table root (dispgen over contract/facts native, generated units only); lift/rt drops
+- f3962c48e lift: liftsrc sdmrows stage: pinned SDM pdf (tools/intel-sdm) through pdftotext in root lift/sdm, sdmrows gene
+- 587b1d1ca gate rtasm: the pinned runtime's checkout through recipe.exttree; test_extpaths: no file outside recipe.py bui
+- d15f316a1 env.json: the debs mirror at tools/verdict-debs 52ec11342 and dash (from 2f2e8e19a)
+- b10bdd3fe gate imports: an import's definer is resolved over the members of the link the root enters (recipe.link_candid
+- e06b3e69f objstub: the terminator run loads the root's own plugins with the recipe's plugin_flags (one spelling for the 
+- 2f2e8e19a env.json: the debs mirror at 52ec11342 (the 8 toolchain debs, dash, the 4 poppler debs)
+- 9bee9ca42 doubles: a root of admit class test is judged as a test (its defined symbols meet no product root's); gate_obj
+- 61ee55d2a gate machine: a hive writer is a CALL relocation to a writer API (recipe.call_refs by e_machine); an address t
+- 69e119a42 L5 w20: gen_combridge imports the declared input contract.proto by its path
+- 6077947f8 L5 w19: one declaration per Win32 function (waveOut, FLS, iob lowio via the platform header); display.cpp make
+- 29a5b057e verify: pin poppler-utils and its closure (libpoppler134, libnss3, libnspr4) for the SDM text stage; RECIPE.md
+- 9be53fd50 admit toolchain/kinds
+- 670ef9b54 contract: the sympair kind table is a declared input of the facts stages (cherry-pick of cand3b 8a54f23d4 0834
+- 21587243a L5 w20: generators pure by rule: regex Match indexing, sorted walks, contract import declared by the platform 
+- c083295b3 toolchain steps: dash joins the debs (the /bin/sh configure and make need; env.json pins the mirror at a8c2aee
+- ad24a247c lift: no-SDM-row forms decided by the Sail rule (udsail input), one decide() path; cpufeat_diff --udsail/--und
+- e8ad3bf60 lift: CPUID feature gate from the SDM opcode rows (sdmfeat.match_form/needs_of, sdmrows input); capstone group
+- cfe4cb389 lift: udsail class (a) from the SDM opcode rows (sdmfeat.match_rows) for every cleared CPUID flag; --sdm
+- 183e1ebef lift: udsail soundness: default-arm opcodes derived from the model, system-state variants, FETCH_OUT, row clas
+- 60fefd57e lift: #UD decoder completeness: Sail-decided verdicts for sequences capstone refuses (proof/udsail.py, f_sys.u
+- 03fa3561d l2sections: the sympair kinds come from a declared input passed by the caller (load_kinds), no read through th
+- 2bcbe1598 recipe: run_errors on a recipe without run steps
+- 09de3ac85 recipe: run_errors judges the debs form as written, not the expanded one
+- 9a5defce4 recipe: listing base-files in a run step's debs is red (the layout deb is implied)
+- fe8a24533 recipe: the machine's root layout deb (base-files) joins the debs of every run step; a step never lists it
+- 26ca028e5 toolflags: PYTHONPATH is allowed when every component lies under a declared input (the /imp dirs of a generato
+- 80bd1328d lift: shape Form carries its domain; int shape excludes int_ring3.excluded vectors, instantiating one is red (
+- 12fc2d44c lift/proof: a Python decision on a symbolic value raises SymbolicBranch (dsl.N and symform.SV: truth, comparis
+- 54a90f05e recipe: run step forms debs {closure: [tops]} (Depends closure on the declared machine) and input {plugins: ro
+- b03650ca1 recipe: gonly:unused-compiler reads the compiler the recipe wrote, not the one expand_profile fills in
+- 5efb3c44a recipe: own_sources (nested admitted roots and plugin-stage sources are not units of the outer root), runtime.
+- ec740b368 admit: toolchain/tests as its own tool root (the fixtures of the toolchain tests)
+- 2c8b97644 test_fixpoint_cycle: modlift no longer adds the parent of the tool root to sys.path; the test adds lift/ from 
+- 95589eef2 env.json: bash sed grep patch xz-utils findutils diffutils gzip declared in packages (the sandbox tools; the d
+- 021845831 generated-only roots: compiler and plugins only when a run step uses them (gonly:unused-plugin, gonly:unused-c
+- e407cb486 toolchain roots on the L1 line (w28 1b7fdb441): build.json of toolchain and toolchain-stage1, step scripts, re
+- 5df6d9fe7 recipe run inputs: a tree of an admitted root (link/ of contract) is accepted
+- 1b7fdb441 test_missingrecipe: fix the assertion
+- 157538f8c recipe check: an admit row whose recipe is not tracked is red; drop the toolchain rows (they enter with L2's r
+- 92b07afef env.json: debs bash sed grep patch xz-utils findutils diffutils gzip (from the pinned snapshot index); generat
+- 1aa024320 recipe: merge_inputs scratch is private (mkdtemp); test_recipe_scratch judges every function of recipe.py by a
+- 22af0d841 recipe: declared imports of a generator's tool (closure mounted at /imp, gen:unused-import, data-by-__file__ r
+- a7eed7718 recipe: a source that is a declared input of a run step is the step's input, not a unit; run-only roots count 
+- c557ed084 recipe check: gen:file-escape over each generator's import closure; the escape rule moves to pathflow.py, shar
+- abbf9662a oracle.json: test_formgate_real.py takes the trunk's reference (L1's registry)
+- 78d46bc07 lift/tests/guest/msvcrttest/native: one image per terminal case plus the return-ending image (variants term1..
+- e8851e0cf lift/tests/guest/{citest,imptest}/native: the entries have crt0's call ABI uint64_t(uint64_t api); rt/fnvl_ent
+- a857c9852 lift/tests/guest/{citest,imptest,msvcrttest}/native: link.entry is the test's own process entry symbol (fnvl_<
+- ed782d127 lift: every generated stage of factsimg/exe, retn and fpfacts declares lift/fnvlift and passes the mount (--li
+- 055adf3d5 recipe foreign_imports: relative from-imports follow Python's resolution (a name inside a module is an attribu
+- 094b62a1e recipe foreign_imports: relative from-imports follow Python's resolution (a name inside a module is an attribu
+- 6d84f3a10 lift: the recipe writer (recipe(), inc_stages, resolved_flags, PACK_ROOT_FLAGS) moves out of tools/liftgen.py 
+- af133dc17 lift: host C programs in host roots: rcpcert and rcpgen on the recipe, rcptab via lift/rcphost; rcpcert.sh and
+- c153d518e lift: rcphost host root on the recipe (rcptab .so; rcpref.h from lift/rt GEN); test_simdspec builds the .so th
+- 82ff5eb86 recipe: sources line <root>:<path> names a tracked file of an admitted root in uses (copied as a unit, content
+- ee66191a0 L1 recipe: one normalization of --root (absolute inside the checkout, outside is red, unknown root is red); on
+- 80832d8b5 lift: the shape handlers are named for what they are (SHAPE_HANDLERS, @shape_handler); no 'fallback' in the li
+- 743de8cb2 lift: int is the Form alone (h_int removed); segment-register mov/push/pop/CRn/DRn shapes are a fallback; h_de
+- 6698cf34f cpufeat: table 137fc92db; mirror rows (mirror_of) skipped, one canonical row per feature; tests share the --cp
+- c02c82812 lift: cpufeat table format /2 (canonical names, fnv-nx-build l3b-lift/cpuid-feature-bits/ffb79d19d @ 947b7817d
+- 428d94d9e test_null_seg: carries --cpufeat across its input resets
+- b80698ee1 lift: cpufeat table is a declared external of lift/liftsrc (fnv-nx-build l3b-lift/cpuid-feature-bits/964510be8
+- 0f3522c3e lift: f_cpufeat derives FEATURES from the cpufeat lifter input (L3b cpuid_feature_bits.tsv, fnv-nx-build 66d81
+- f71c543f9 WIP lift: f_cpufeat derives FEATURES from the cpufeat input (cpuid_feature_bits.tsv); raises until the table h
+- b5fda5e65 segwrites: proof argument in the docstring; tests for pop r / mov r, r2 carrying unproven values
+- de9389ffb lift/segwrites: the may-null selector rule (backward walk over unique predecessors, greatest fixpoint per imag
+- 89abc5d4b lift: segment null guard by the may-be-null rule per segment register (SEGWRITES fact from the decoded runs; d
+- 789ef219c L1: cxx_origin.pack may be a root in uses (units checked against the generated steps of lifted_by); gate_lift 
+- ad3af10c5 x86sys: selectors.gs = 0 derived from the pinned Windows 7 SP1 x86 kernels and public PDBs (OMAP-aware decode,
+- 99b0218fd forms: the SSE2 cmpsd is dispatched from the string handler that owns the mnemonic (cmpsd is also the string c
+- 7abf794a6 lift/facts: remove the GSCERTS stage (gscerts.py, test, root output)
+- e53c09106 lift: null_seg_access consumer (ds/es/fs/gs prefixed operand guard by the record row, PRIV vs AV by the row's 
+- bf89c7b36 lift: no environment default and no absolute path in tools: model_sail.configure(work, ir, isla) from shapepro
+- 766ddb401 x86sys: null_seg_access row (SDM 3.4.2 + Wine 9.0 PROTFLT err 0: privileged-opcode check, else access violatio
+- f5e8bc692 lift/facts: GSCERTS output (gscerts.json, fnvnx-gsfail/1) by rule from the load-config SecurityCookie and the 
+- 0dd2ae53f forms: CMPPS/CMPPD/CMPSS/CMPSD shapes over the predicate imm8: the decoder's cmp<pred> alias gets the generic 
+- 88f691c09 forms: immediate-selected SIMD lanes and byte shifts are one rule for the shape and the instruction (selidx/se
+- 69f0497a9 liftsrc: fixed shard set (N from the image size, shard = bucket % N), FPSTATE/FPDEPTH from lift/fpfacts throug
+- 212f252ff int n: gate / excluded / other vectors are read from the record's int_ring3; other vectors raise the record's 
+- f1da9b3e9 x86sys: int_ring3.other_vectors decided from SDM and Wine 9.0 signal_i386.c (#GP vector*8+2 delivered as an ac
+- fa8075b5c liftsrc: UNIVERSE/FACTS/JTAB come from the lift/facts FACTS output through uses; facts@6944080c external delet
+- eb9a3c2e6 int n: a vector outside the record's int_ring3 gates is undecided and the lift is red at the site; faults.json
+- c8e5e828b Revert "lift: faults.json row FASTFAIL (int 0x29): immediate process termination with 0xC0000409, no handler r
+- 6c59e8412 liftsrc: jump-table facts are shard inputs (exe --jtab, module facts-out/<m>/ehtables.json)
+- 9d1124891 L1 abspath escape rule: a path of the file's own location with a non-constant or undecidable part is red unles
+- 5d55e8638 liftsrc: shard stages take lift/proof (__init__, shape) as inputs; lifter_tree hashes them
+- 8e3643237 L1 abspath gate: escape rule, a stage tool's data file built from __file__ must stay inside the tree its stage
+- 0cdff83c8 L1 recipe: every link/start-file/probe invocation builds in its own mkdtemp scratch (ws/syslib EEXIST); rule t
+- b9261cd85 lift: universe.py back to the streaming driver of e7b12ab35 (the farms' version)
+- 42217f3b2 lift/fpfacts on the facts root: per-image RETN (lift/retn), fpmodes and fpstate scan per image with the base f
+- a4e1c3c72 lift: restore universe.py to 53583fa77 (the farms run it; the streaming driver change waits until they are don
+- e7b12ab35 lift: universe.py driver streams every round's stderr as it happens
+- 53583fa77 lift: every exit of a facts producer carries its reason on stderr (a round killed by a signal reports it); tes
+- 632a45447 L1: liftfacts reads the loader root's published MODULES_TSV and always compares; abspath: /arch, KeyError-awar
+- 2deb533ef liftfacts: universe from GATES/summary.tsv (w7's layout), summary rows and total checked, optional module-tabl
+- 0397ae4ed liftfacts gate (verify/gate_liftfacts.py, gates.d/liftfacts.json, tests): reads the cached GATES output of the
+- af76a93cc modules.tsv: one row for the exe, column dll = PE IMAGE_FILE_DLL bit (the row kind, never the name). contract/
+- 37e483aa6 abspath: L1 findings closed as declared inputs. env.json record host (bindir, dpkg_info, dpkg_status, egl_vend
+- be6877651 abspath gate (verify/gate_abspath.py, gates.d/abspath.json, tests): ast closure of stage tools and gate script
+- 4cfca085d check_gen_fontmachine: the sample font is a synthetic sfnt built in the test; no host fc-list lookup
+- 2364df8ad check_gen_fontmachine: drop the FNVNX_FONTS env path input; the check reads no path from the environment
+- 3159647ea lift/factsimg: module stages mount the fnvlift package (input) and pass --lib; universe.py module mode takes -
+- 355aa2bee lift/facts: GATES output (every image's gate_codemap.json, gate_pcsrc.json) and summary.tsv with per-image sta
+- 3a5531e1d lift: the facts producers exit 0 when the facts are written; red gates stay in gate_codemap.json / gate_pcsrc.
+- 30e1ef4ad lift: the fixed points (exe reloc-consistency rounds, modlift R3 rounds) have no round cap: R only grows over 
+- 21ce5a15d lift/facts: one admitted root per image (lift/factsimg/<name>, exe included) so farms build images in parallel
+- 393e79d8c test_defdisp follows DEFDISP-NS: a definition without a shape compiles with the -i128 row (static, address tak
+- ae69d335c modlift: stderr timing line of the pcsrc call
+- b28f1b836 lift/retn: reads the universe from lift/facts FACTS (no published facts external)
+- 69beba664 lift/facts: decomp external tree_sha256
+- e4650bda5 lift/facts: admitted tool root; one universe stage per image (exe + every row of the module table), funcs from
+- 79c499e88 lift tools: modlift drops the exe-mnemonics report and the L1 exports comparison (print-only inputs); universe
+- 350332393 liftsrc: pinned external hashes
+- 82983ef4d liftsrc WIP: recipe emitter, finish takes --image, unit sources .src
+- d46b3ad87 lift: one module table. liftgen takes the image set and every base from the loader's modules.tsv (check_images
+- 3f008ed82 lift tools: fpreach takes the facts dir and the base as arguments (no FNVNX_FACTS env); ehtables.py loses its 
+- 7639952ce liftgen: --lift DIR (the lifter package and runtime headers as a declared input of a stage); lifter_tree keys 
+- 663853bb9 lift/pack: the runtime's headers of the pack (inc/fnvl_prelude.h, inc/imp.h) are generated stages from the cur
+- d1c34b647 lift: the rows file carries the table_id of its entries file
+- 330edfa1c lift: the rows file of a dispatcher table is generated from phf.layout, the arrays the emitter writes, with th
+- c41aafc67 lift: dispgen --rows, the rows file fnvnx-disp-rows/1 of each dispatcher table is a declared stage output (pac
+- a0531f8f1 lift: the dispatcher tables are typed C++ data (phf.table_c, entries array of fnvnx_entry_fn, slots {key, inde
+- d9d208c61 base3: lift/rt republishes its 7 headers in GEN (gen_copy); the tests/guest roots use rt GEN and shim INCLUDE 
+- 16bea74c0 lift tools: an image's base is a required argument (x86flow.Image, load_universe, fpmodes --base, fpstate scan
+- 775d913ff lift: every image reader goes through fnvlift.image.Image(path, base); funcsfacts; universe --theirs optional
+- 49848fd9e base3: guest profile for the L3a guest roots (rt, bridges, tests); platform declares INCLUDE; rt and bridges u
+- 3455cbb18 base3: L3a hunks on cand3: loader IMPORTED_TSV + shim include; lift/pack takes BRIDGE from bridgefacts and the
+- 01893a2a6 guest_compiler.json: the cand2 pin 56a4d09c (tree cbb8843f..151f, build_key 74cafda21648518e, patch b850b469, 
+- b9f6b3a69 test_plugins: the external-commit case names /ext/pack in the include path (a stage keys only the externals it
+- 65347be8c DECLTYPE-PLUGINSYM: one registry of the symbols plugins write as text (names/plugsym.inc); every writer regist
+- 3b11d1185 lift: jtab worklist terminates: St equality compares the alias partition, not fresh class labels (an aliased l
+- 6a5d70f74 lift: retn/thunk/alloca are the declared output of the facts-stage root lift/retn (tools/retnfacts.py); fpmode
+- 776b0d3a9 x86flow: M32 is a module constant again (configure() had made it local)
+- 18c2b9cde lift: faults.json row FASTFAIL (int 0x29): immediate process termination with 0xC0000409, no handler runs; doc
+- 9c97f84bc lift: one decision of far FF (fnvlift/formkey.is_far_raw, from the encoding bytes) for the form key and the Fo
+- 2f7e93c83 pack: import completeness comes from the loader IMPORTED_TSV (uses), need.tsv and --need are gone; external db
+- f22105a07 lift rt: asm immediates are template parameters (pc, static address); no __builtin_constant_p selection
+- df8cfeda7 lift: far CALL/JMP as one Form (FF /3 /5, 9A, EA), far hand handlers deleted, hand/Form overlap 0; far form ke
+- 463571562 lift: one path, every mnemonic a Form covers loses its hand handler (335 -> call/jmp far shape only); emit='' 
+- cfe7049b7 lift: tests for the SIMD FP flag-priority rule and the conversion, reciprocal, MXCSR and hint Forms
+- 85d9ee23a lift: SSE conversion, reciprocal, MXCSR, movnt, prefetch, pause and emms Forms
+- d90205d39 lift: SIMD FP flags in one priority function (dsl._pre / fx_pre, SDM Vol 1 11.5.2.1), dsl.cvt and dsl.tab node
+- 61e59c490 cpuid_model.json: mxcsr_mask provenance per the orchestrator ruling of 2026-11-15. The value is unchanged, 0xF
+- 022c5d5f2 lift selftests: the declared x86 system record is the tracked platform/declared/x86sys.json (L1: no pin, no ar
+- 7484deb7e plugbuild, realobj: taken from claude/fnv-l2-source-plugins d99d81271 (one copy); farm lift scripts take X86SY
+- c740e1f13 pack: the external is independent of the loader table; imp.cpp, import rows, entries.tsv trailer and disp.S ar
+- 02d9bba2c reconcile, formcert, ehflow keys, liftgen --certs, pointsto, closure test and farm scripts: explicit arguments
+- 8277d52c3 x86flow: retn/thunk/alloca recomputed in process, no flow/retn.tsv memo; modules_check takes modules.tsv and m
+- 3cd815262 universe_r3_check, modules_check: exe, base, facts and X86SYS from argv; no FNVNX_EXE/BASE/UNIVERSE
+- ba497fce7 test_lifted_vs_shapes: facts layout and argv X86SYS; inputs.json names stay the externals of contract_inputs.j
+- cef5bc406 lift/proof/tests/oracle.json: entry for test_formgate_real (the certs external)
+- 8faec7074 lift inputs: no None forms: an empty universe or depth is an empty file read by the same code; a missing file 
+- 723ff9415 lift: delete instest, instest_extra, x87dyn, mmxtest, fpflags and the stale proof/universe.py; prove.py taken 
+- ddad19f6c test_lifted_vs_shapes: configure fnvlift.inputs from declared inputs (inputs.json names fpstate, fpdepth, x86s
+- 09b777c31 lift P2: the lifter and its generators take every input as an explicit argument (no environment variable, no /
+- b29d1e7cc lift: explicit inputs (fnvlift/inputs.py): universe, fpstate, fpdepth, x86sys read from configured paths, no e
+- cdd01d5be lift/proof/README: the --backends mode is gone
+- 66a500309 lift: no second cache (gate_fpexact, test_gate_lift use GATE_CACHE), delete proof/backends.py (the host g++ pa
+- 6e2972b15 lift: delete the second test paths rothost, bthost, x87test, golden, rcptest, fmathtest, citest, sehcodes; ref
+- 70f94925b lift/proof/tests/oracle.json: entry for test_dsl_xsimd, drop the keys of the deleted test_formgate and test_fp
+- 370ff9993 lift: the declared machine's cpuid feature words are derived once (fnvlift/cpumodel_bits.py), shared by gen_cp
+- 2f60555a6 dispgen: the empty entry list is an ordinary input (no --allow-empty); 0-entry tables miss on every lookup
+- 747266213 loader: include list without the duplicate platform/include
+- 71d5a2267 toolchain/layout and link/ctypes_compat.py from L2 8f7217f4d together (VEC1 vector rows, complex, atomic, ref)
+- 802ba8215 lift/pack: build.json regenerated by liftgen.recipe (the int3 merge brought back the duplicate plugins key and
+- d85681332 loader: include dirs platform/include and shim/include (L5's loader recipe has them; boot.c includes fnvnx_win
+- 0282d2316 lift/pack: entries.tsv is the output of its own stage (packentries.py): table_id has one computation, sha256 o
+- fb856ca9b lift: persistent content-keyed jtab.resolve memo (FNVNX_JT_STORE) so a killed universe/module run resumes with
+- 47b68e51c lift: declared MXCSR_MASK 0xFFBF (host ∩ lifted: the Forms have no DAZ; SDM Vol 1 11.6.6) as derived data cpui
+- fcd76d874 lift/pack: the entries output is named ENTRIES (L1: boot root takes it through uses)
+- 605b184ef lift: x87sites.py (x87-masked-sites fact over fpstate scans); x86flow loads a module image at the assigned bas
+- 1f117bba4 lift/pack: entries.tsv is an output of the pack root (packcopy.py copies it with the units; outputs {entries})
+- 0bfa4a518 lift: SIMD FP exceptions are one XM fault (Wine 9.0 fpe_handler); on it MXCSR takes the exception flags and th
+- 54d556fb2 lift: generated rt headers reach the lift prelude, the fp gate, rcpcert and tests through the same generator s
+- 00068cd10 lift P3: system record, faults and privileged set are read, not typed; Wine 9.0 fault table; generated rt head
+- 29598c8e9 re-apply 7cece903a (pinned python modules: one RECORD file set, sibling *.libs mounted) on the L1 line: the L1
+- 9f5de97d4 lift: tools/sysites.py, the sites that need an undecided x86sys field (class table read from the record)
+- 701f9cb2b lift: pointsto forwards the stack-slot table in a bounded window (STKW, DEEP slot) and loads read the incoming
+- a3217cd2c lift tests: delete the Unicorn oracle (test_forms_simd.py; the emulator half of test_forms_ssefp.py)
+- 9839be31e lift: SSE min/max, CMPccPS/SS/PD/SD, COMISS/UCOMISS forms (dsl.fp ops 5..16, C helper fx_dsl_fcmp checked agai
+- f3af47b40 lift: ehtables ThrowInfo resolved path-sensitively when the paths into a throw have no common esp (resolve_sli
+- d4358714e lift: SSE/SSE2 FP arithmetic forms (add sub mul div sqrt; ss sd ps pd) on dsl.fp: lane flags ORed into the sti
+- 5dc881f74 lift: SSE FP tininess AFTER rounding (SoftFloat 8086-SSE specialize.h line 48): z3 model (unbounded-exponent r
+- f0caf48c3 lift: symform.normalize substitutes the field and eip values into the undefined-flag conditions (Form.uwhen) a
+- 1e4a51c2d lift: ONE CPUREF record: fnvl_cpuref.h, rcpref.h and the cpumodel tables are generated (tools/gen_cpuref.py) f
+- e85a3b569 lift: jtab.resolve cost accounting (calls, seconds, backward-cone sizes) on stderr
+- f67ed0ccc lift: ONE CPU fault table (fnvlift/faults.json): FNVL_* codes (rt/fnvl_faults.h), the case rows of rt/seh.cc (
+- 373c4100f lift: rttibcd.py (COL/CHD/BCD facts from the exe RTTI via contract/exefacts)
+- 426d95f81 lift: bsf/bsr: CF/OF/SF/AF/PF undefined for every source (SDM Flags Affected; ACL2 bit.lisp 3ccb342c 818-822/9
+- f32192941 lift: SIMD integer forms (MMX and SSE2 lane/bitwise/shift/shuffle/move families) in the Form builders; xmm/mm 
+- 1921b38ba lift: pointsto join is canonical (NS): the fast paths returned the raw wider operand, so a loop alternated bet
+- 8b3ab109a lift: the census decodes per entry (def_check.instructions: control flow from the entry inside its ranges), cl
+- 0ee1f9268 lift: remove the conflict markers of the w1 merge (liftgen.py, tools/tests/instest.py take int3's resolved_fla
+- f8cf8ed27 lift DSL: bsf/bsr with a zero source as the model now defines it (destination unchanged, ZF = 1, CF/OF/SF/AF/P
+- d935ecda4 lift DSL: x87, MMX and SSE state in Forms (frozen interface: fr0-7 80, ftop ftag fcw fsw fip fdp fop fcs fds, 
+- 8569a4dc0 lift roots on the L1 recipe line: stage-form lifted origin counts as lifted (origin_class uses lifted_origin),
+- 7299b4153 lift: cleared_join tool, joins the cpufeat-UD census with L3b's cleared_sites.tsv per site
+- 88721c23c contract/facts: native.tsv as a recipe product (exe, units, msvc, facts externals; exefacts, n1, objects, regi
+- cfd208a13 lift: pointsto drops the norm memo (it held 1.3 GB of wide input sets at 3M joins on binkw32); norm is a one-p
+- 4afd346d3 rt/guest from L5 fnv-l5-platform-root 7d90df67e (runtime.c, threads.c, tm.cpp, build.json)
+- 68814726d build.json of every guest root that loads fnvnx_ftoi declares its input f2i_builtins.inc (recipe PLUGIN_INPUTS
+- ff602e67b fnvnx_ftoi: every float -> integer conversion C does not fully specify (vector FIX_TRUNC, IFN_VEC_CONVERT, lri
+- 2ee60daa6 lift: pointsto OBJW is a parameter (PTOBJW) for the memory measurement of the summary-object bound
+- 1c9f04063 toolchain/f2i_check deleted: superseded by fnvnx_ftoi mode lifted (the recipe stage; f2i/1 is rejected by the 
+- c09b32e87 lift: the four mention-no-id findings under lift/ (identifiers in code spans, two wordings without a claim of 
+- 38f447b43 lift: CODEMAP.md (accounting classes, DIC kinds); docstrings say accounting breakdown, not partition
+- 286fdc939 lift: retire ASM-213/ASM-214 (FOP, FCS, FDS are stored state, struct cpu 492/496/500; declared CPU has no leaf
+- 00ef4468d dispatch plugin: a definition without a shape has no row only when static and not address-taken (t16k 37d4e27d
+- 71adaa530 lift: test_ranges and test_lock_only compile through recipe stages (plugbuild), no direct compiler call
+- 88eec8fe8 lift: test_descclass and test_defdisp onto the recipe (plugbuild stages, no direct compiler), duplicate pair d
+- 674eb006d lift: pointsto summary objects (more than OBJW distinct frame or heap objects in a set become the kind's summa
+- 1f67f32f4 lift tools: module producer fixes (jump-table evaluation monotone per site and memoised, predecessor map incre
+- ef4479a6a lift: f_x87 docstring states the ES/B argument (computed where an FSW image is produced, one function fx_esb) 
+- 4681c9634 lift: struct cpu appended fields fsw (ES/B), fop, fcs, fds (offsets 488..500, size 504) with static_asserts of
+- 468dbc865 lift: pointsto join/norm perf (subset fast path in join, memoised norm: the same wide sets were re-normalised 
+- db2449a75 exitgen: the descriptor of a native row is the object's own .fnvnx.defdisp row joined by asm name (one parser,
+- 97fc6e77c rt/cpumodel: leaf 1 EBX[23:16] and leaf 4 cores/sharing derive from FNVNX_NPROC (hostabi/include/fnvnx/placeme
+- 6cfd45645 lift: pointsto.py driver (load_image builds the image model from the PE at the facts' load base, main prints t
+- e6ffcadf1 lift: pointsto.py v1 draft (unfinished: first pass on atimgpud not yet completing; not a gate)
+- 26504f6a4 lift: writeset store census (class by operand form, query over exact writers, open stores bound the fact) with
+- bc7ee01d9 Revert "lift: w4's pointsto.py v1 draft (10226a84) and writeset.py/writesettest.py (a3fcd7fc) taken into int3 
+- 809d7e9ae lift: w4's pointsto.py v1 draft (10226a84) and writeset.py/writesettest.py (a3fcd7fc) taken into int3 as they 
+- f2a7388e4 test_rtroot: the semantic flags are read from the pin's {common, lifted_extra} (recipe.semantics_set of the ro
+- 583ccb766 lift: tools/ctlstate.py, the inventory of control-state writers (popf, iret, fldcw, ldmxcsr, DF, dr moves, CON
+- 44fab5e34 rt/cpumodel: the declared machine has 3 processors, one thread each (cpuid leaf 1 EBX[23:16] = 3 with HTT set,
+- 5c89f9c5c verify/recipe.py, unitstage.py: next3b 141b07580's sandbox_src (int3 lost it in the next3b merge; no int3 comm
+- b6f5e6fec lift: 16-bit shld/shrd Form (count > operand size: destination DEFPRIOR, flags DEF0); memory destination honou
+- 4b44569b1 shim/include/d3d9types.h restored from next3b 141b07580 (tracked there; render/d3d9 declares it as a generator
+- f41da7e10 oracle: test_nativerows cites verify/TOOLS.md (contract/nativerows.py section states the native-row rule)
+- f73a2962e native test roots: link.roots adds loader and lib/sha256
+- 3248ce817 lift: def_check reports no_form shapes by the builder that lifts them (ops module, fallback, or none)
+- db708d738 lift: fault map built from the dsl.FAULTS enum (every code a Form raises, PRIV/AV/STEP/ASSERT/DBGSRV/INTO_AT1 
+- 60b4a284c lift tests: remove guestbuild (a second build path); imp, msvcrt, exitbridge, disp back to their pre-port bodi
+- 1b4f04ea5 lift DSL: Form.undefined(when=) for a flag undefined only under an SDM condition (AF of shifts and shld/shrd: 
+- bace763dd lift tests: dsl_emit takes the declared inputs (wip, guestbuild to be removed)
+- e36079cd3 lift tests: guest code is compiled through verify/recipe.py (tools/tests/guestbuild.py: throw-away tree, pinne
+- 80cc1b885 lift tests: universe_r3_check takes the declared inputs exe and facts (inputs.json), disp takes the prelude of
+- 2daa52e62 def_check: every free output is uncertified (red, owner L3b) until the certificate of its refinement exists
+- 72813d207 lift README: undefined outputs DEF0 and DEFPRIOR
+- fa0b04d87 DEF0 / DEFPRIOR in the one emitter (Form.to_c_inline, to_c): a flag the model leaves free is 0, a free registe
+- 420a459ba native test roots: link.libs startfiles crti.o / endfiles crtn.o of the pinned runtime (_init/_fini)
+- 0e8692e85 lift: instest, instest_extra, citest, sehcodes, x87dyn, mmxtest, fmathtest move to tools/tests, importers' pat
+- d206ba904 lift: acyclic root graph: f_dsl moves to proof/lift_dsl.py, core.set_emit takes the emitter, flagagree moves t
+- fb11bd182 native test roots: link.libs adds sysbase (pthread over the rt/guest syscall-lock hooks)
+- a0995bd3a recipe: origin_class reads the stage form; plugin_cxx removed from the build.json files (derived from env.json
+- b0198f906 lift: def-descriptor without a shape only for static non-address-taken definitions; native test roots link the
+- ec3509b19 int3: lift/pack and lift/rt follow next3b's recipe (plugin_cxx is the recipe's, plugin_args(origin) is the one
+- cd456ce52 test_gate_flags: the no-Form cases take their encoding from the real Form set (first decodable instruction wit
+- a3e8f7e4f int3: selftests universe: lift/test's tests move to the root they test (lift/tools/tests 13, lift/fnvlift/test
+- 8e40a0e54 gate flags: invariance proof (two-run product program over the Forms' z3 post-states) for pushf/lahf bits the 
+- 7cece903a Pinned python modules: one file set (the wheel's RECORD) for the sandbox mount, the stage key and envcheck; si
+- 262f4d060 int3: the lifted-code flags have one list, the recipe's: liftgen.resolved_flags() = pin semantics (recipe.sema
+- 90f52d98e int3: lift/pack build.json and liftgen.recipe(): per-root flag classes only (the semantic flags come from the 
+- 6a6c2d265 guestgen: include fnvl.h from the root's include path (fnvlift.PRELUDE is gone; prelude() needs the rt dir)
+- b2fcb4394 lift test: dic_test (non-operand relocation words, lifter-outside dead tails, protect sites)
+- 206fef8b9 lift tools: data_in_code (jtab ranges), flow-decode non-operand relocation invariant, lifter-reach invariant w
+- 901c3c54e int3: ASM-233 record and citation at ehtables real(); drop test_formgate/test_fpexact/fakeext (doubles of the 
+- 760d7596f lift tools: reloc-consistency (refused candidates fixed point in modules, pointer-only entries in the exe), li
+- fdf20fe24 flags judge reads the images its facts name; the pinned image set stays the contract gate's (images_of pinned=
+- 170599ac4 gate flags: a call to a known entry takes the callee's flag summary (PASS-seeded flow, tails, recursion as lea
+- 135da9286 lift/bridges root: bridgegen stage over the descs fact, forbid .fnvnx.disp, platform include; descs excepts br
+- 2d215f16a test_gate_lift: copy lift/tools/cli.py into the toy repo (the gates import it)
+- 4115a256a int3: gate_lift test fixtures carry lift/tools/cli.py (the gate entry points declare their argv with it)
+- de360bd43 L3a integration line: resolve three conflict markers that the merge left in lift/gates (flagcause keeps the AS
+- 3b31bdc5b int3: formgate.py, gate_fpexact.py, formgate_inputs.json from 862b0708 (the verify-wired gate code; lift's cop
+- df5b1b420 int3: prove.py docstrings backtick the variable assume; shapeprove.py:15 names the certificate field assumptio
+- e6c29df27 int3: ASM-232 (fmath.c n <= 2^15 limbs), ASM-230 on the table-bound sentence; LOCK-SPLIT is a rule: ASM-231 re
+- d9c91cc0e clpod gen: stdcall, fastcall and thiscall rows (fastcall hidden pointer as push or lea ecx/edx); defdisptest r
+- 6b3cb2209 citest lifted root has no C++ units: no cxx_origin
+- 1c6c252ac lift/tests/guest: cxx_origin stage form on the lifted roots, link script guest.ld
+- ede92d4f7 clpod gen: primary classifier is the whole-PROC push rule on c1; c is the cross-check
+- bbb12d43c int3: ASM-226..231 (L1's records verbatim) registered and cited in place (unhandled.cc, ehtables.py, fpmodes.p
+- 30e749d37 int3: lift/README segment-limit record cites ASM-003 (A-FLAT), per the L3a lead and L3b
+- 50012c7ab descs: the result grammar a<N><X><Y> of DISPATCH1 (x86 side R|H, native side g|m|h<elt>) replaces a<N>[h<elt>]
+- 9e6b7421f DISPATCH1 result grammar a<N><X><Y>: the x86 side (R|H) and the native side (g|m|h<elt>) are independent field
+- 2b87b2b8f int3: gate_fpexact cites ASM-320, ASM-321 (records return from 862b0708) and ASM-801; lift/README sdm remainde
+- c482f3c4e int3: assumption words: five negations stated as the positive check (residue.py 10 and 79, modlift_closure_tes
+- 040607d50 int3: flagcause.py drops the ASM-304 citation (a certified instruction leaves the flag undefined is a fact of 
+- d1eb5fb5b int3: journal/status/l3a-lift.md from lift a6b94e4c; model_sail.py:321 comment worded as a hypothesis; journal
+- 73282014c dispatch: the hidden-pointer rule split into own (ctor, base, private/protected) and deep (copy assign, dtor, 
+- 122ce8e18 int3: ASM-800 entry dropped (the id is on the registry's retired list; no tracked file cites it)
+- 5fb69ecc2 int3: journal/inbox/l1-contract-018.md from L1 a1c125606 (no retired id; cites ASM-029)
+- 645b36a5b lift/test/clpod: no host path in the generated asm (output is a function of cl, the debs file and the toolchai
+- 125e4d80e podmatrix: classify by the structure of the fixed caller (lea frame address + push = hidden, no argument = reg
+- f27403c3f lift/test/clpod: the cl reference table of the MSVC result-return rule (245 cases: 12 features x 4 depths x 5 
+- 84ac7e2be int3: assumptions registry union (ASM-206, 207, 209, 219, 220 from L3b w2g-u; L3b 500b1f03 and ASM-225 already
+- fc728a9a2 podmatrix: depth 2, empty and non-empty base, static member and member function controls, deterministic --cl r
+- a3fcd7fc3 lift: writeset store census (class by operand form, query over exact writers, open stores bound the fact) with
+- c2f93597b defdisptest: header names the reference cl (VC 2008 SP1, 15.00.30729.01)
+- 34d664953 admit: no pack stand-in for the test lifted roots; cxx_origin stays absent until L1 defines the class (lifted 
+- 2741a5b0c int3: restore the 35 files the w5-flags merge deleted (w5's tree is partial: a deletion in it is a file it doe
+- cb8434a8d defdisptest: the hidden-pointer rule against a reference matrix (podmatrix.py: 9 features x 3 depths x 5 sizes
+- f12c75b9d lift tools: R3 refined (a displacement-only relocation is no entry site; one function residue.disp_only, fixed
+- f7d3c182f admit.json: valid JSON for the lift/tests/guest rows
+- c61d16392 lift/tests/guest: guest generators in the lift/tools root, build.json pair per test in the 862b0708 form (outp
+- 13a5a195c recipe: the dispatch plugin lists toolchain/cpweak.h as its input (it includes it); platform sample regenerate
+- f2454e0ff dispatch: the hidden-pointer rule follows cl 15.00.30729.01 (own ctor/dtor/copy/virtual/base/private members; 
+- 9b31ccf8d lift: pcsrc comment wording
+- 30da5cecd gate flags: red_flag_reads counts reads only, no_form_rows separate (certified >= 0 asserted); flagcause split
+- d77f58efb lift tools: one declared-usage CLI rule (tools/cli.py); every entry point parses its argv first, --help prints
+- cb32e9e44 lift/proof: every Form memory access goes through one address function (F2)
+- d6235c0f5 lift: lift/pack/build.json with the full plugin set (lifted args) and only per-root flag classes; checks valid
+- 54c4f2315 lift: pack recipe carries the full plugin set from recipe.py (LIFTED_ARGS for a lifted root), plugin_cxx
+- 6c58eadd2 lift: pack build.json carries only its own flag classes (-std -O -W); the semantic set is verify/guest_compile
+- 5c60b01e9 lift: pcsrc cites ASM-225 for the fresh-space premise
+- 322fb2f15 lift/rt build.json: only the per-root flag classes (-O, -W, -D, -std); the semantic set is the recipe's (guest
+- 76dff3357 modlift: restore the tool-root path line
+- fcbf319fd modlift: one tool-root path line
+- 697530961 tools: universe, ehtables and modlift import their siblings from their own tool root, so they run under python
+- df9cb8d07 ASSUMPTIONS: the three gate_eh completeness records are ASM-225..227 (L1's ids), on the union with the w3a reg
+- 9d71e6cd8 lift: pcsrc records the entries whose result rests on the fresh-space premise F (cond_fresh_entries), premise 
+- 3a992f5f4 dispatch plugin: MSVC C++03 POD rule read from the front end's declarations (no dlsym), defdisp rows for alias
+- b7b046169 lift/tools/lifted.py: the one definition of the lifted set (lift_with_instructions, lifted, is_lifted); liftge
+- 42eb326a6 env: take L1 w22 71d8cafb's env.json, envcheck.py, install_mirror.py, mirror_debs.py, setup_verdict_env.sh and
+- 46fd85fa2 lift tools: FP census (fpstate impcalls/RC rows, fpcensus per-site classes, fpreach reachability of sticky rea
+- f59b5327c dispatch plugin: .fnvnx.defdisp, one descriptor row per emitted function definition (same shape() as call site
+- 53f0ceee8 selectors: sel_es/cs/ss/ds/fs/gs in dsl.XIN (16 bits, rt SEG_* order); push sreg Form (16-bit store of the sel
+- c58b8f1a5 proof: pusha/popa by operand size (pushaw, popaw), proved; test
+- fda2d4916 proof: forms_sys taken from L3a e9124b30 (dsl.py, f_sys.py byte for byte), hooks in forms/forms_move/symform; 
+- ea446d8ed census: family computed for every instruction, red on a key with two families; prove: enc_table imported only 
+- d6f349cea model_sail: shape runs keep the 'complete' marker out of the term rewrite (CS-store shapes)
+- 524ab4e98 segment_bases.sail: header cites the ACL2 x86isa source (same body and line numbers); sail_pins.txt: initial-s
+- 0b4433a54 proof: FS/GS bases per access (segment_bases patch, new IR 70c8dc39), effective segment from the last override
+- 83cb27e6c prover python wheels pinned by sha256 (sail_pins.txt), installed only from the mirror branch tools/pywheels-pr
+- 79d273abe farm_shapeprove: install the prover's python dependencies (capstone, keystone-engine): the mirror path lacked 
+- d0a8f4df6 DSL forms: push/pop with 16-bit operand size, bound (#BR fault code 4, FNVL_BOUNDS in the emitter)
+- b489fbd42 DSL forms: address-size attribute 16 (prefix 0x67) for memory operands, string, loop, jcxz and xlat, by SDM Vo
+- 64123e9eb shape prover: certificate key is (shape, shape_sha of the current Form, IR sha) per encoding; stale records ig
+- 7a85cf41b dispatch plugin: descriptor classification by the backend's own ABI (hfa element codes, x for non-POD results)
+- 1cd6911ac lift/tools/exitgen.py: exit bridges X_<A> from the shared descriptor parser; exitbridgetest (98 descriptors, 2
+- 07638de5f admit: ports/fnv-nx/lift/test is a root of class test (selftests); liftgen no longer puts it on its path
+- 7aa52e42d lift: delete bench/ (no importer: five files, only sys.path entries named it); phf.py references point at lift
+- 82d4ca0e2 gate flags: gate_flags.py, flagcause.py, flagagree.py, gates.d/flags.json, gate_lift --gate flags, tests and V
+- 01df9e5a2 lift/test: imptest w32_raise cited from the platform source, rdtsc asserted against the platform clock (BLOCKE
+- f1ff8d4aa lift: pcsrc fresh stack space for esp loaded from a register (chkstk/alloca idiom typed from the function's ow
+- 74a9deedb gates test: the toy eh facts carry the dataflow schema keys of w2's gate_eh
+- fb17b71be liftgen finish: the kind of an entries.tsv row is the producer set of its key (texts, impgen rows, EH_KEYS), n
+- 28211f8eb lift: modlift runs pcsrc before settling the residue (same-run sources.tsv, test); pcsrc cites the facts manif
+- 0b8493dfc lift/test: citest, imptest, msvcrttest, instest define no platform, libc or runtime symbol; an undefined produ
+- 7e876ce68 README: gate_eh lives in lift/gates
+- aa4a1b772 lift: pcsrc esp slack interval for and esp,-N
+- 3425c55ef lift: pcsrc entry inputs joined over callers (unknown callers: possibly code), s4 escapes red, no step cap
+- b81f7683c lift: pcsrc s1/s4 typed code-address sources, pcsrc_s4.json interface for modlift residual, tests
+- 9104d4659 lift: pcsrc owner/block entries, jump-table successors, scratch liveness at ret, candidate/proven split; tests
+- 1eb5c9860 lift: pcsrc.py, typed PC-source dataflow (return address read as data, FPU env FIP/FDP), hooked into universe.
+- b46495e50 l3a w3: the DSL dispatch skip under LK is gone (the DSL emits LK accessors), one LK-ONLY rule for both paths
+- 0f208b127 l3a w3: tests no longer inject I-FPMASK / I-FPSTICKY (fpfacts.ASSUME uses deleted)
+- b7fc5ee75 l3a w3: shared site predicate (fnvlift/sites.py), locksites.py emits the sites facts, assumptions note by L3b 
+- c266dc884 l3a w3: LK-ONLY by construction (emitter raises in the DSL and float paths, prelude lkwin_ guard on every plai
+- 10bc9bc09 l3a w3: .fnvl.lk and .fnvl.fsw, 12-byte records (w6 final)
+- 03c4fd87a lift: delete the dead memclass code (tools/memclass.py, test/memclass_det.py, verify_r9/*); x86flow comments n
+- 249c0c382 lift: the lock and status-word ranges go into .fnvl.sites (kind, pc, start, end); the status-word store is one
+- 65d9a32a8 lift: the x87 status-word store (FSTSW m16, FNSTENV, FNSAVE) and the AX write of FSTSW AX record their one ins
+- 15eae7f41 lift: rule LK-ONLY, a guest access outside LKA<T> inside a locked instruction is a generator error; the DSL pa
+- 38a672117 lift: every locked instruction (LOCK, xchg with memory) records its exclusive commit sequence in .fnvl.lk (x86
+- c6671b5e4 lift: form_key moves to fnvlift/formkey.py; tools/formcert.py (a stage tool) no longer imports a test file
+- 06ad3cee6 liftgen: the pack manifest records its generation inputs (exe, universe, jtab facts, emit mode, lifter tree), 
+- a7b9cb75c lift: jump-table tails come from the jtab_tables facts; TAB_BIAS removed (site without a proved extent is Unsu
+- 37e3f0693 enter.cc: the guest entry's FP treatment is fixed by its kind, the import callback restores the parked state, 
+- 1de9bdbad residue: sources.tsv per image and combined (r3_reloc pcsrc export tls entry eh no_s4_arith); modlift settles 
+- 56a41e096 lift/rt: fnvl_host.h comes from the platform's headers tree through the recipe include, the copy is deleted
+- 9294a3bdc disptest: no doubles (the platform symbols are the platform root's), no allow-list in the double check; blocke
+- cd04ef49a disptest: guest-execution cases for unions, float vectors, four doubles, alignas(16), zero-width bit-field, ag
+- afb354d94 fnvnx_call_fp: one definition (platform), declaration from shim/include/fnvl_host.h in dispatch.c and the brid
+- 3d991b287 dispatch plugin: the backend's own prototypes through tm_p.h, no hand-written declaration; fnvnx_call_fp is th
+- 55fd7035d lift: locked instructions keep the LK accessor on the DSL path; a store through CS is #GP(0) as an access viol
+- cb837327d lift: cite assumptions by the L3b registry ids (L3a block 2xx) instead of the placeholder 3xx ids
+- 721e7d6c3 lift: cite assumptions by registry id (ASM-nnn) instead of L3b handoff names
+- 1c4783000 bridgegen: the x result flag, hidden pointer on the stack under fast for sizes that are no register size (Agne
+- 34fac8aba descclasstest: descriptor classes of unions, vectors, HFAs, aligned and bit-field aggregates, long double and 
+- 19801d660 bridgegen: element codes hf hd hq hh hv8 hv16 from the backend's part mode
+- 2a9138ebb dispgen: closure completeness check, a closure target with no dispatch entry is a build error
+- 32bf31a8d lift/rt: fnvnx_dispatch (DISPATCH1 runtime): native table, bridges per descriptor (tools/bridgegen.py), #UD fo
+- b58341df2 lift: jtab.exclusive argument (ASM-006, proved extent) and a negative case for a second reference into the tab
+- 6dc5d47a9 lift: jtab frame cells (no escape, killed by foreign stores and calls), signed guards, register constants, pus
+- 7788747f7 lift: generator hygiene: liftgen --emit and Pool initializer (no start-method reliance, no getattr/group), too
+- 3c0a08216 lift: fnvlift imports read no rt file; PRELUDE becomes prelude(rt_dir) called by the generator; core.set_emit 
+- 573b5dcfd lift: universe.py takes jump-table edges from jtab.py (table() pattern, trail window and scan-while-relocated 
+- 9364bbd38 gate flags: forward may-be-undefined flag liveness over the facts' CFG (entry, call and undefined origins), de
+- b75b22600 lift: jtab as one interval-domain rule (wrapped intervals, flag refinement, widening, extent check); memcpy/me
+- e6edb4118 lift/dsl: segment overrides, 16-bit addressing and operand-size push/pop as DSL classes (gs_base = FNVL_GS_BAS
+- a7c1eae94 lift: module jump-table edges by a guard rule (tools/jtab.py), red sites reported in ehtables.json jtab_red, t
+- 7358ca04f gate_order on lift/gates: indirect-branch rule, asm restores (a'), IMAGE read-only, W-form CPU copy, lifted-on
+- 22c210717 lift: ehflow frame helpers run on the caller state, save slots persist across calls under escape check, preser
+- 6c35a6cbd lift/rt build.json: drop -fpermissive (a guest root carries no flag that turns an error into a warning)
+- 5e54cf306 lift: PACK_CXX_FLAGS in liftgen.py is the one definition of the lifted-code flags; instest.FLAGS = -c + it + -
+- 76853d323 lift: the pack recipe drops -fpermissive and -w (no flag that turns an error into a warning)
+- 086326b40 lift rt: build.json names no f2i_check (folded into fnvnx_ftoi by L2); sehcodes rows follow Wine 9.0 for int3 
+- 8bf82e329 fnv-nx lift rt: review fixes of the CONTEXT batch (raise sites from the emitters, shared cpu offset, Wine 9.0 
+- 298e1ca8b lift: phf.py moves to the tool root lift/tools (a tool imports only from its own root); phf uses its own MT199
+- e0b93cd7c lift: ehtables docstring and README EH paragraph for the dataflow rules
+- 549f289ce lift: gate_eh on the dataflow facts schema (red throw sites, helpers, nonconst trylevel stores, table length),
+- 4f59ac9c2 lift: ehflow.py flow engine, ehtables R1-R4 by dataflow (wip, facts schema)
+- 86725bc92 lift/README: the exact generated-stage entry of dispgen.py (verify/RECIPE.md spelling)
+- 8834ef0ba fnv-nx lift rt: CONTEXT capture/restore as Wine 9.0 does, EFLAGS/C0-C3 flush at raise sites, world-stop LKA, d
+- 68b5c0999 verify: guest_compiler.json current with the L1 contract branch (adds the runtime external; the lift recipe de
+- 5cd467f6b revert toolchain/order and test_plugins.py to the trunk's version: plugins are L2's (ORDER-CONT + HARDREG land
+- 4f583ac6d lift: one dispatcher generator (tools/dispgen.py): disp.S is a pure function of the entry rows; liftgen --fini
+- fa7128c29 lift: recipe flags c and cxx carry -Werror=attributes (L1 w14 requirement); build.json regenerated at the prod
+- b6405749a admit: lift/tools as a tool root (the lifter named by cxx_origin.lifted_by)
+- a8b6191b4 lift: lift/pack/build.json for pack 7b2faae276b2 (dry run), compiler msvcmodel from guest_compiler.json
+- 9da763c5e ORDERING.md: object rules (a)(b)(c) replace A3 and A1 for assembler; A4 is the stop-the-world rule
+- b415aa3c1 gate_order: --asm objects preserve x19-x30 and sp on every path to every exit (rule c); STT_FUNC ranges by sym
+- e20e689fe gate_order: writes of x19-x27 are decided from the encoding's destination fields too (gprwrites), with tests o
+- aef9b84ae lift/rt: seh.c, msvcrt_eh.c compile with the GM accessors (explicit read-modify-write, no P())
+- e9c717ac7 gate_order: rows() gives one row per universe item (object, FUNC+0xOFF, reason); the verdict is computed from 
+- 8d6de5c97 lift: liftgen writes shapes_K.tsv per shard and sums them into pack shapes.tsv (shape_key/family from proof/sh
+- 20b4949a7 lift/rt: two compound assignments on the memory proxy rewritten as a plain assignment (they did not compile ag
+- 1fb13833d l3b w1: census of direct toolchain calls and test doubles over lift/ at 6385fff6
+- b7614306c fnvnx_order: a global register variable is a register, not shared memory
+- 7b2faae27 verify: the trunk's declared environment (env.json, envcheck.py) and CLAUDE.md (night: first frame in this bud
+- b7f53b595 fnvnx_order: no acquire fence after a noreturn builtin call (__builtin_longjmp); rt root drops -w (fnvnx_names
+- a3c6485ba lift: pack recipe reads the guest compiler from verify/guest_compiler.json; admit entry of the lift/pack produ
+- 76240e69e lift/rt: product root (build.json, admit.json), liftgen.pack_flags as the one definition of the lifted flags, 
+- c0d18b768 lift: delete R9 form A (rt/fnvl_mem.h, fnvlift/memclass.py emission, r9test/addrwrap/r9equal tests, r9report);
+- 0febaeb54 lift/rt: C++ units are .cc by name (seh enter unhandled msvcrt_ci msvcrt_eh msvcrt_fp); references fixed
+- 9b935a816 verify: take env.json, envcheck.py and its test from fnv-l1-contract-w4 (merge left conflict markers)
+- fd8f0e119 farm_shapeprove.sh: lock around input fetch so shards started together on one machine do not race
+- e51bc9ecc wip: EH facts (ThrowInfo constant resolution by cone dataflow, SEH trylevel scan, stub liveness); gate_eh.py a
+- 160438e5e lift: R9 on the objects: asm-template accessors, gates order/addrwrap/align, lock-site counts
+- bd83e31f2 farm: shape-prover shard worker publishes the jsonl to fnv-nx-build (l3b-lift/shapeprove/<id>/<K>of<N>), shape
+- c265b22d5 dsl_emit_test: read the exe's shapes.tsv instead of a pickle (no pickle left in the lift tree); a builder prec
+- 5464196c8 proof: close the shape-prover timeouts: fetch-offset zext identity, one query per output, power-of-two multipl
+- ce152aa29 lift: assumptions handoff, three entries of tools/fpstate.py that the first pass missed (A-START, A-SYS, A-CTX
+- eb6f0b2bf forms gate: dsl_sha is symform.shape_sha, the function the prover writes the field with (hash of the symbolic 
+- ae510bbef lift: fpexact docstring cites the registered assumption ids; CLAUDE.md updated copy
+- 276384adf lift: assumptions handoff, dispositions after the orchestrator's decisions (decoder agreement gate, callee fac
+- 1a45a59b3 lift: gates forms and fpexact take declared externals through the trunk loader
+- afe464f0f lift: assumptions of stream L3b for the registry verify/ASSUMPTIONS.json (39 entries: file, statement, disposi
+- 5b76d5674 proof: Sail patch for BT m,r with a negative bit offset (bit = offset - 8*floor(offset/8)); host test bthost.p
+- 96e04227d lift: gate fpexact (rcp/rsqrt table certificate, no estimate instructions, float-to-int conversions only in ma
+- 49f16df24 addrwrap: prelude from instest.STUBX after the merge
+- e397bbe2d proof: the Sail toolchain and farm shell scripts live in ports/fnv-nx/farm (shell is outside the purity-gated 
+- af4379592 lift: gate eh, every EH/SEH table entry of every image needs a lifted landing in the pack
+- aa62a54ab addrwrap: decide the 32-bit address wrap from decoded AArch64 operands
+- 1bb8d0d19 lift: R9 memory order: every guest access ordered (ldar/stlr, dmb path when unaligned); locked instructions co
+- c1840319f proof: one package name (from proof import ...), explicit imports instead of import * and sys.modules, no cloc
+- ac65f537c dsl: nodes carry a construction serial; the intern and SMT tables are keyed by it, not by id()
+- 915dff1dc memclass: a stack access is plain only with a proved coordinate
+- cda6ff73d lift tests: fixed seeds, declared work dirs, drop timing and host labels, ordered pool map, explicit member ta
+- 52b6e42ed lift tools/r9test: remove tempfile, unsorted walk and getattr; resolve instest/r9report imports as project mod
+- 862e64a46 instest: the call event of the one-instruction tests is declared with its CALLX definition (the product header
+- 16ad274b2 lift: instest takes its encodings from the pack (encs.tsv), not from a second decoder
+- 60e9b6b7c lift: FNVL_STUBX and the PoC lifter are gone
+- 73a708c62 lift: the lifter only generates C++; forms gate; no stub-call path in the prelude
+- b9e21d7eb lift: generate-only driver (liftgen), pack copy stage and farm scripts for the recipe build
+- bf497fc95 farm_liftall: exact numpy for the packer, union with the published cache before publishing
+- c698e3d27 lift: farm_liftall takes the declared verdict environment; the object cache is namespaced by env_id
+- c21abcdb4 lift: every compile of the packer goes through the exact object cache
+- 126570648 verify: take the declared verdict environment from trunk (env.json, envcheck.py, setup_verdict_env.sh)
+- 443269dc0 lift/modlift: the range of a module entry is the span of what it reaches, not the byte sum
+- ed649cfb4 lift: module closure can trace which entry names each new target (FNVNX_CLOSURE_TRACE)
+- c7684608b lift: module universe closure runs to its fixed point (no round cap)
+- 3bcfae12a lift: control flow is classified by the instruction under its prefix words
+- 9caa340c7 fnv-nx lift: farm_collect_all checks the import slots of the modules too (FNVNX_NEED)
+- 05e78c7a9 fnv-nx l3a-lift: pack README carries the bridge, platform and facts heads
+- 2b839411e fnv-nx l3a-lift: collect script for the exe and module shards (one dispatcher table, one pack)
+- 977dacc95 fnv-nx l3a-lift: a lifted body is exactly its range (no copy of the code that follows: falling past the end is
+- 0be741a43 fnv-nx l3a-lift: finish builds one dispatcher table over the exe and module packs (--also); inbox note l3a-lif
+- 68a29647c fnv-nx l3b: shape runs with symbolic eip: rewrite zext(eip + K) to zext(eip) + K under the eip range domain (z
+- f7d6d3cd4 fnv-nx l3b: fwait lifts under the owner's recorded assumption A-FPMASK (exceptions stay masked as in the threa
+- 4898278b9 fnv-nx l3b R9: total rule for LOCK / xchg at any address (split-lock path), no lift error
+- 67187692b fnv-nx l3b C4a/B4: CPUID-UD rule keeps the SDM aliases (tzcnt = bsf, lzcnt = bsr, prefetch / prefetchw reserve
+- 6f0f353c3 fnv-nx l3b C4a/B2: sticky exception flags as two shadow sets over one host FPSR (owner rule: FOWN_X87 / FOWN_S
+- fd7404275 fnv-nx l3b C4a/A+B1: tools/fpstate.py (whole-program facts: FCW/MXCSR loads, sticky-status readers, wait/MMX/a
+- d0405fef4 fnv-nx l3b-lift: R9 atomics by static alignment proof (xchg-mem, LOCK RMW); r9test links again in both emitter
+- df2f9739a fnv-nx l3b C4a/B3 (rt/fnvl.h, lead L3a's file, minimal): the separate MM register file is gone: rename mm[8] t
+- 4205d7526 fnv-nx l3b-lift: test/instest.py: runtime_objects(work, lifter) (the one list of ARM-side test objects, reused
+- 57712f8fb fnv-nx l3b-lift: memclass determinism (R12): one strong slot update with every condition; FNVNX_FACTS/PROCS kn
+- d63e721c2 fnv-nx l3a-lift: the 15 msvcrt _CI* entries and correctly rounded acos, asin, atan, cosh, sinh, tanh, exp, log
+- a45cff0dd fnv-nx l3b C4a/B5: the fldcw..fistp..fldcw bracket is exact without a fold (FIST reads RC from c->fcw at the i
+- 0a4b719d7 fnv-nx l3b C4a/B4: core.dispatch consults f_cpufeat.missing before any handler (one call: a form the model's C
+- a43f58173 fnv-nx l3b C4a/B4: CPUID-gated forms, one table (f_cpufeat.py: feature bits of the reference CPU, capstone gro
+- fcb039ef9 fnv-nx l3a-lift: wip checkpoint of worker files, not yet gated
+- 56f4ea162 fnv-nx l3a-lift: msvcrt runtime entries on the guest state: _except_handler3, __CxxFrameHandler, _CxxThrowExce
+- 1c405c665 fnv-nx l3a-lift: wip checkpoint of worker files, not yet gated
+- 16bb360ca fnv-nx l3a-lift: import entries for variadic rows (fixed slots + guest address of the variadic words); imptest
+- a5e77a7bb fnv-nx l3a-lift: wip checkpoint of worker files, not yet gated
+- 3d620de90 fnv-nx l3b: shape proofs with symbolic immediate/displacement/eip: field variables in the DSL (F nodes), symfo
+- a560d8ee2 fnv-nx l3b: forms gate (an x86 shape without a certificate is red), pins, tests; dsl_emit_test catches the spe
+- aa9dc7315 fnv-nx l3a-lift: module universes at the loader's assigned bases (Image rebasing, modlift with R3 + closure, l
+- 07b8a44cf fnv-nx l3b: encoding shapes (shape.py) and the per-module census (census.py)
+- acd7aaf6f fnv-nx l3a-lift: msvcrt!_adjust_fdiv object of the reference CPU (0); wip worker files
+- 1f4ec23d0 fnv-nx l3a-lift: wip checkpoint of worker files, not yet gated
+- a307d6a1e fnv-nx l3a-lift: a bridge row bound to a runtime symbol that has no body is blocked (a build that needs it fai
+- 9b37c90a9 proof: one-command Sail/isla toolchain build with pins and offline mirror
+- 20ad2f5b7 fnv-nx l3a-lift: an entry with an empty range lifts to the #UD body at its address (the one entry the 64-shard
+- 8a20c1fb9 fnv-nx l3a-lift: fnvnx_guest_current (guest esp and TEB of the calling thread) for the platform; collect scrip
+- f76478663 fnv-nx l3a-lift: every entry of the closed universe lifts (99,927 / 99,927): x87 state forms from the L3b bran
+- e05c432b7 fnv-nx l3b-x1: fnstenv and fnsave with the x87 last-instruction pointers (closes Q-FIP)
+- 2d9ed67e1 temp: fip/fdp fields
+- cb13c06a6 fnv-nx l3a-lift: wip checkpoint of worker files, not yet gated
+- 2c909cc82 fnv-nx l3b C1a: dsl_emit_test sets cx.uent (entry vs dispatcher transfer paths)
+- 5ee17e7a5 fnv-nx l3a-lift: wip checkpoint of worker files, not yet gated
+- c29a469fd fnv-nx l3b-x1: lifted bodies for fldenv, frstor, fbld, fbstp, fstpnce; fnstenv/fnsave stay blocked on Q-FIP
+- 385dcdbc0 fnv-nx l3a-lift: wip checkpoint of worker files, not yet gated
+- 0f106b47d fnv-nx l3a-lift: bodies for the segment, far-transfer, privileged and absent-extension forms by ring-3 class r
+- 68dcd142f fnv-nx l3a-lift: inbox note l3a-lift-002 (state, two workers stopped to save the account limit); wip worker fi
+- 3706017d4 fnv-nx l3b C1a: FNVL_EMIT=dsl hook in core.dispatch; f_flow transfer helpers (call_xfer, jump_to, jmp_indirect
+- 7cac47e76 fnv-nx l3b C1a: f_dsl.emit_form emits integer instructions from the proven DSL forms (Form.to_c_inline, dsl_em
+- f09bc7080 fnv-nx l3a-lift: wip checkpoint of worker files, not yet gated
+- d045dad16 fnv-nx l3a-lift: wip checkpoint of worker files, not yet gated
+- 76de56f56 fnv-nx l3a-lift: wip checkpoint of worker files, not yet gated
+- db2b9adac fnv-nx l3a-lift: wip checkpoint of worker files, not yet gated
+- 702401eaa fnv-nx l3a-lift: x87 transcendentals, fscale, fprem/fprem1, fxtract (rt/fmath.c: Ziv on integer big floats, co
+- 5022f505c fnv-nx l3b R9: lifter hook (core.MEMCLASS) and the fnvl_mem.h include
+- 305da8f86 fnv-nx l3b R9: ordered guest-memory accessors by C++ scope, memclass export of all-plain instructions, r9 test
+- 8ff7365dc fnv-nx l3a-lift: wip checkpoint of worker files, not yet gated
+- 0e86df767 fnv-nx l3a-lift: wip checkpoint of worker files, not yet gated
+- 5026c2ab4 fnv-nx l3a-lift: no swallowed failures in the tools (broad except removed), no lift retry without the owned la
+- 5bf777f9a fnv-nx l3a-lift: chain oracle takes the reference CPU's rcp/rsqrt results; an entry whose first byte does not 
+- 7a5769530 fnv-nx l3a-lift: wip checkpoint of worker files, not yet gated
+- 4076f5018 fnv-nx l3a-lift: universe closed under direct targets (99,927 entries); a direct call/jump to an address that 
+- 1f1c5acf9 fnv-nx l3a-lift: runtime without bench hooks: rt.c is the one dispatcher (weak no-op hooks, the miss no-op and
+- 2701c91f7 fnv-nx l3a-lift: wip checkpoint of worker files, not yet gated
+- 19667b837 fnv-nx l3a-lift: dispatcher table carries its hash parameters and sizes (one source), softfloat.tsv for the in
+- e65242e95 fnv-nx l3a-lift: wip checkpoint of worker files, not yet gated
+- 0503dbe33 fnv-nx l3a-lift: import keys by the one rule of L1 (sorted non-data rows, table_id), DebugBreak entry, platfor
+- ee1d0c74e fnv-nx l3a-lift: wip checkpoint of worker files, not yet gated (x87 math, rcp/rsqrt generator, universe closur
+- bf57de40d fnv-nx l3a-lift: farm job and collect scripts of the packer; dispatcher miss raises #UD through the SEH runtim
+- 95bd99a12 fnv-nx l3a-lift: chain gate 690 equal / 0 different (table targets outside the extent join the bench closure; 
+- 05af7589f fnv-nx l3a-lift: start runtime: import entries from the bridge table (tools/impgen.py), thread entry/attach, n
+- 1e758f38c fnv-nx l3a-lift: exe universe under R3 (every relocated pointer into executable bytes is an entry), check univ
+- 540456cf1 fnv-nx l3-lift: second stop by owner word; wip as is, inbox note l3-lift-003 (gates on head, half-done package
+- 1ba1b41d3 fnv-nx l3-lift: stop by owner order; wip as is, inbox note l3-lift-002 (state, half-done work, next step)
+- 14eb1bfdd fnv-nx l3-lift: wip checkpoint of worker files, not yet gated
+- f79319848 fnv-nx l3-lift: wip checkpoint of worker files, not yet gated
+- d1d1466f1 fnv-nx l3-lift: wip checkpoint of worker files, not yet gated
+- 4b1d17dda fnv-nx l3-lift: wip checkpoint of worker files, not yet gated
+- d46370851 fnv-nx l3-lift: wip checkpoint of worker files, not yet gated
+- 0a2f1bce7 fnv-nx l3-lift: wip checkpoint of worker files, not yet gated
+- 441730345 fnv-nx l3-lift: wip checkpoint of worker files, not yet gated
+- bd62f65c0 fnv-nx l3-lift: wip checkpoint of worker files, not yet gated
+- 623d59f7e fnv-nx l3-lift: wip checkpoint of worker files (exception runtime, x87 rewrite in progress), not yet gated
+- 6079b5461 fnv-nx l3-lift: local patch of two Sail model defects (ROR carry, rotate count modulo width), exhaustive host 
+- 06c570031 fnv-nx l3-lift: wip checkpoint of worker files, not yet gated
+- a215e0157 fnv-nx l3-lift: per-entry byte ranges and never-returning entries as outputs of the code map
+- 968ceb73d fnv-nx l3-lift: wip checkpoint of worker files, not yet gated
+- 0f4c74149 fnv-nx l3-lift: wip checkpoint of worker files, not yet gated
+- 80ca7f4ac fnv-nx l3-lift: never-returning callees end a path (least fixed point); vtable consumer rule tightened
+- 492eead68 fnv-nx l3-lift: control-transfer rule in the lifter (guest registers in x19-x27, return check, non-local loop)
+- 2963fcfdb fnv-nx l3-lift: wip checkpoint of worker files, not yet gated
+- 77b8256b6 fnv-nx l3-lift: wip checkpoint of worker files, not yet gated
+- fe95e08fd fnv-nx l3-lift: form references per class (Sail / FP-SMT / K / SDM / table) in the design; wip worker files
+- 937130817 fnv-nx l3-lift: wip checkpoint of worker files, not yet gated
+- aff0389e3 fnv-nx l3-lift: Sail x86 model as the proof reference (isla driver, compatibility mode = IA-32 flat), first ce
+- 8796cea79 fnv-nx l3-lift: wip checkpoint of worker files, not yet gated
+- 1be8a60d6 fnv-nx l3-lift: wip checkpoint of worker files, not yet gated
+- 9b7eb6232 fnv-nx l3-lift: module code maps by the dispatcher rule (every relocated pointer target is an entry, #UD-exact
+- c548fd6c5 fnv-nx l3-lift: wip checkpoint of worker files, not yet gated
+- c34ed0b81 fnv-nx l3-lift: FP control state rule (rc_split, shadow sticky flags per class) in the design; wip worker file
+- 23e196c1d fnv-nx l3-lift: control-transfer rule (fixed guest registers, return check, non-local loop); fp-mode and memor
+- 48271095e fnv-nx l3-lift: code pointers stay image addresses, every indirect transfer goes through the dispatcher (R3 re
+- 38f5879ec fnv-nx l3-lift: wip checkpoint of worker files, not yet gated
+- be9d38d7a fnv-nx l3-lift: universe/codemap pipeline for any PE module (six DLLs run, all red: undetermined pointer targe
+- dfe62f5f0 fnv-nx l3-lift: wip checkpoint of worker files, not yet gated
+- 6c1f868e1 fnv-nx l3-lift: wip checkpoint of worker files, not yet gated
+- 4e27999a3 fnv-nx l3-lift: wip checkpoint of worker files, not yet gated
+- 99d42e9dc fnv-nx l3-lift: wip checkpoint of worker files, not yet gated
+- 910591b6e fnv-nx l3-lift: tail targets are entries, gate verdict fnvnx-gate/1 for the code map, tools pass the purity ch
+- add8b3158 fnv-nx l3-lift: wip checkpoint of worker files, not yet gated
+- 1b55017f4 fnv-nx l3-lift: code map of .text is total (R3): every byte is an entry instruction, padding, relocation-named
+- c1326c1f2 fnv-nx l3-lift: wip checkpoint of worker files, not yet gated
+- d4d74804b fnv-nx l3-lift: wip checkpoint of worker files, not yet gated
+- 316ecd371 fnv-nx l3-lift: EH table parser (FuncInfo, scope tables, ThrowInfo), code pointers classified by use site
+- beafa1e32 fnv-nx l3-lift: the Sail x86 model is the only form reference (owner decision); wip worker files
+- 8d4506df9 fnv-nx l3-lift: wip checkpoint of worker files, not yet gated
+- 0808b7762 fnv-nx l3-lift: form reference is SDM pseudo-code by an independent author plus VEX (owner decision); wip work
+- e466b3549 fnv-nx l3-lift: wip checkpoint of worker files, not yet gated
+- 00a992c1e fnv-nx l3-lift: 80-bit x87 core matches the host CPU (native oracle), BCD and tbyte forms
+- afba068d4 fnv-nx l3-lift: design follows MASTER_PLAN4 (form certificates, IEEE floating point, memory-order classes); wi
+- 34b3a05c7 fnv-nx l3-lift: inbox note l3-lift-001 (gate numbers); wip worker files
+- 01e5c7e3d fnv-nx l3-lift: per-instruction test against Unicorn; guest addresses wrap at 2^32 (GCC ILP32 folds constants 
+- c336f405e fnv-nx l3-lift: exact 80-bit x87 core (integer-only C) and its test against Unicorn
+- 2b48d4a1f fnv-nx l3-lift: wip checkpoint of worker files, not yet gated
+- df8744297 fnv-nx l3-lift: one reference CPU model in the design (owner decision 2026-11-10); wip worker files
+- 20847c885 fnv-nx l3-lift: tools/universe.py, every entry and every .text byte classified (first pass)
+- 18563e68c fnv-nx l3-lift: lifter as a package by instruction family (output identical to the PoC), flags-in-state mode f
+- 708f0e33d fnv-nx l3-lift: wip checkpoint of worker files (universe tool, x87 core), not yet gated
+- d5dd62e01 fnv-nx l3-lift: design follows the owner order of 2026-11-10 (no trap paths, full SEH/C++ EH, total call table
+- 4975fadc0 fnv-nx l3-lift: wip checkpoint of worker files (package refactor, runtime header), not yet gated
+- 3e73b1d59 fnv-nx l3-lift: lift/ skeleton, design contract, golden digest gate, PoC lifter as reference
+- 723b14c19 fnv-nx journal: J-0149 all farms and fuzzing stopped
+- e1ca6b02d fnv-nx fnv-s1-rules: adopt the stream work at e1ec633ab (3-way: 1 files taken, 0 merged line-wise, 0 left to t
+- be5512ab6 fnv-nx fnv-s1-rules: adopt the stream work at 8140d45f0 (3-way: 2 files taken, 1 merged line-wise, 0 left to t
+- ba1ad7dc8 fnv-nx fnv-s1-rules: adopt the stream work at 61a6865e4 (3-way: 0 files taken, 1 merged line-wise, 0 left to t
+
+## Tests on this branch (head before this note: 52d92bd54)
+
+- test_archive_sources: exit 0, all PASS.
+- test_recipe: 6 FAIL, all environmental in this container, none touched by these commits: the toy root's env check wants cargo/rustc 1.75.0+dfsg0ubuntu1-0ubuntu7.4 (not installed), python module pycparser (sha256 differs) and the cargo dependency closure. env.json's cargo/rustc/pycparser rows are c5's own; the 14 picks change env.json only in an unrelated hunk. Run on a farm with the pinned env to confirm.
+- Fixed on the branch: the coremath/gmp/mpfr admit entries (52d92bd54 drops them) pointed at build.json files that live in platform/{coremath,gmp,mpfr}, outside the universe; they stay on the overlay branch.
+- d9995de2d superseded (c5's produce() runs run_all); recipe.py archive code re-inserted by hand at c5's insertion points.
