@@ -1,452 +1,2003 @@
-# cand5 candcheck result (w28)
+# cand5 candcheck, owner-directed (w28)
 
-Candidate 9bd09cfee (c5), trunk fac693694. Per-step base: git merge-base G_i G_1..G_{i-1}, per file; files under a cut root out of Expected.
+candidate 9bd09cfee; stats: `{"candidate": "9bd09cfee41e3191043b1ed5a4241788e19220fa", "files": 2102, "not_in_owner": 1918, "owner_equal": 2097, "owner_red": 4, "pairs": {"04f1e5dfb<-88a506c7d": 118, "407914779<-04f1e5dfb": 183, "407914779<-88a506c7d": 63, "407914779<-a3d039bf0": 181, "407914779<-da0e4ff78": 182, "88a506c7d<-04f1e5dfb": 1, "88a506c7d<-407914779": 1, "88a506c7d<-a3d039bf0": 1, "88a506c7d<-da0e4ff78": 1, "a36b3c8f2<-04f1e5dfb": 2, "a36b3c8f2<-88a506c7d": 38, "a36b3c8f2<-a3d039bf0": 18, "a36b3c8f2<-da0e4ff78": 18, "a3d039bf0<-407914779": 27, "a3d039bf0<-88a506c7d": 44, "a3d039bf0<-da0e4ff78": 4, "da0e4ff78<-407914779": 42, "da0e4ff78<-88a506c7d": 130, "self<-04f1e5dfb": 247, "self<-407914779": 98, "self<-88a506c7d": 136, "self<-a36b3c8f2": 219, "self<-a3d039bf0": 75, "self<-da0e4ff78": 89}, "red": 1923, "roots_checked": 233, "sources": 7, "superseded": 0, "trunk": "fac693694b526b60af747f75bf201b7f2ee354bc", "unowned": 1}`
 
-stats: `{"candidate": "9bd09cfee41e3191043b1ed5a4241788e19220fa", "clean_equal": 948, "clean_red": 138, "conflict_recorded": 0, "conflicts": 269, "files": 1355, "lost": 140, "red": 407, "roots_checked": 244, "sources": 6, "trunk": "fac693694b526b60af747f75bf201b7f2ee354bc"}`
+layers: `{"self": "L1 (w28)", "407914779": "L3a", "a3d039bf0": "L5", "da0e4ff78": "L6", "04f1e5dfb": "L4", "a36b3c8f2": "L2", "88a506c7d": "orchestrator"}`
 
-## merge-red (138): candidate differs from the clean merge; heads = the changers
+## self<-04f1e5dfb (247)
 
-by changer set:
-- 48: a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3
-- 22: 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3
-- 17: 407914779
-- 11: a3d039bf0,da0e4ff78,04f1e5dfb,cdf3ba3b3
-- 10: 04f1e5dfb
-- 9: a3d039bf0,da0e4ff78
-- 5: 407914779,cdf3ba3b3
-- 5: 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779
-- 3: a3d039bf0,da0e4ff78,04f1e5dfb,407914779
-- 3: 40c639d16,a3d039bf0,da0e4ff78,407914779
-- 2: a3d039bf0,da0e4ff78,04f1e5dfb
-- 1: 04f1e5dfb,cdf3ba3b3
-- 1: a3d039bf0,04f1e5dfb
-- 1: cdf3ba3b3
+- contract/argflow.py
+- contract/bind.py
+- contract/bodysel.py
+- contract/bridgegen.py
+- contract/bridgetable.py
+- contract/exefacts.py
+- contract/exportgen.py
+- contract/gate_call.py
+- contract/gate_data.py
+- contract/gate_pcrel.py
+- contract/gate_reach.py
+- contract/gate_rtti.py
+- contract/gate_vcall.py
+- contract/gate_xc.py
+- contract/gate_xunit.py
+- contract/gpa_names.py
+- contract/iat.py
+- contract/imagerec.py
+- contract/images.py
+- contract/include/fnvnx_export.h
+- contract/l2sections.py
+- contract/memfx.py
+- contract/mkidentity.py
+- contract/modules.py
+- contract/n1.py
+- contract/nativerows.py
+- contract/nobinding.py
+- contract/objfacts.py
+- contract/objfacts_dir.py
+- contract/objfacts_merge.py
+- contract/objfacts_one.py
+- contract/proto.py
+- contract/reachreq.py
+- contract/registry.py
+- contract/relocs_in_runs.py
+- contract/tests/test_bind.py
+- contract/tests/test_bridgetable.py
+- contract/tests/test_exepin.py
+- contract/tests/test_exportgen.py
+- contract/tests/test_gate_call_decl.py
+- contract/tests/test_gate_data_nolink.py
+- contract/tests/test_gate_reach.py
+- contract/tests/test_gatecert.py
+- contract/tests/test_gates.py
+- contract/tests/test_gpa_names.py
+- contract/tests/test_hive.py
+- contract/tests/test_iat.py
+- contract/tests/test_imagerec.py
+- contract/tests/test_images.py
+- contract/tests/test_imports.py
+- contract/tests/test_l2sections.py
+- contract/tests/test_memfx.py
+- contract/tests/test_modules.py
+- contract/tests/test_n1_objects.py
+- contract/tests/test_nativerows.py
+- contract/tests/test_nobinding.py
+- contract/tests/test_objfacts_dir.py
+- contract/tests/test_objmerge.py
+- contract/tests/test_proto.py
+- contract/tests/test_store.py
+- contract/tests/test_treehash.py
+- contract/vtid.py
+- farm/boot_job.sh
+- farm/install_mirror.py
+- farm/mirror_debs.py
+- journal/inbox/l3-lift-001.md
+- journal/inbox/l3-lift-002.md
+- journal/inbox/l3-lift-003.md
+- journal/inbox/l3a-int3-assumption-blocks.md
+- journal/inbox/l3a-lift-001.md
+- journal/inbox/l3a-lift-002.md
+- journal/inbox/l3a-lift-003.md
+- journal/inbox/l3a-lift-004.md
+- journal/inbox/l3a-lift-handoff-opus.md
+- journal/inbox/l3a-lift-w4-001.md
+- journal/inbox/l3a-lift-w8-001.md
+- journal/inbox/l3a-w3-assumptions.md
+- journal/inbox/l3a-w6-reftable.md
+- journal/inbox/l3a-w7-fpexc.md
+- journal/inbox/l3a-w7-simd.md
+- journal/inbox/l3a-w8-compilecalls.md
+- journal/inbox/l3a-w8-l4-tests-to-restore.md
+- journal/inbox/l3a-w8-native-fp.md
+- journal/inbox/l3b-lift-001.md
+- journal/inbox/l3b-lift-002.md
+- journal/inbox/l3b-lift-handoff-opus.md
+- journal/inbox/l3b-w1-census.md
+- journal/inbox/l3b-w2-rtroot.md
+- journal/inbox/l3b-w3-r9.md
+- journal/inbox/l3b-w4-forms.md
+- journal/status/l3a-lift.md
+- journal/status/l3b-lift.md
+- journal/status/l4-verify.md
+- journal/status/l5-verdict-e8e54dcea/README.md
+- journal/status/l5-verdict-e8e54dcea/abi.tsv
+- journal/status/l5-verdict-e8e54dcea/imports.tsv
+- journal/status/l5-verdict-e8e54dcea/linkstrict.tsv
+- journal/status/l5-verdict-e8e54dcea/machine.tsv
+- journal/status/l5-verdict-e8e54dcea/objstub.tsv
+- journal/status/l5-verdict-e8e54dcea/pure.tsv
+- journal/status/l5-verdict-e8e54dcea/rtasm.tsv
+- journal/status/l5-verdict-e8e54dcea/selftests.tsv
+- journal/status/l6-render-construction.md
+- link/abi.py
+- link/abi_native.py
+- link/ctypes_compat.py
+- link/exevft.py
+- link/gate_abs.py
+- link/gate_addr.py
+- link/gate_disp.py
+- link/gate_names.py
+- link/gate_order.py
+- link/ldcheck.py
+- link/milestones.py
+- link/odr.py
+- link/tables.py
+- link/tests/abi_fixture.py
+- link/tests/abi_gaterun.py
+- link/tests/oracle.json
+- link/tests/realobj.py
+- link/tests/test_abi.py
+- link/tests/test_dispatch_order.py
+- link/tests/test_exevft.py
+- link/tests/test_gate_abs.py
+- link/tests/test_gate_disp.py
+- link/tests/test_gate_names.py
+- link/tests/test_order_local.py
+- link/tests/test_order_tags.py
+- link/tests/test_sdd_order.py
+- link/tests/test_thisadj.py
+- link/tests/test_vslots.py
+- link/tests/test_vtables.py
+- link/thisadj.py
+- link/unitpairs.py
+- link/vslots.py
+- link/vtables.py
+- verify/RECIPE.md
+- verify/admit.json
+- verify/boot.py
+- verify/bootdecl.py
+- verify/bootfacts.py
+- verify/bootgpu.py
+- verify/boothost.py
+- verify/bootinput.py
+- verify/bootinputs.py
+- verify/bootlayout.py
+- verify/bootmachine.py
+- verify/bootmiles.py
+- verify/bootpath.py
+- verify/bootsock.py
+- verify/bootstart.py
+- verify/cas.py
+- verify/cpuid_model.json
+- verify/env.json
+- verify/envcheck.py
+- verify/gate_abi.py
+- verify/gate_abspath.py
+- verify/gate_admit.py
+- verify/gate_assumptions.py
+- verify/gate_contract.py
+- verify/gate_datamodel.py
+- verify/gate_hostapi.py
+- verify/gate_imports.py
+- verify/gate_l2native.py
+- verify/gate_liftfacts.py
+- verify/gate_linkstrict.py
+- verify/gate_machine.py
+- verify/gate_namegate.py
+- verify/gate_objstub.py
+- verify/gate_onedef.py
+- verify/gate_pure.py
+- verify/gate_rawrite.py
+- verify/gates.d/abi.json
+- verify/gates.d/addr32.json
+- verify/gates.d/argordergate.json
+- verify/gates.d/order.json
+- verify/gatesdir.py
+- verify/genlaunch.py
+- verify/guest_flags.py
+- verify/hostabirec.py
+- verify/l1.py
+- verify/linkset.py
+- verify/objstub.py
+- verify/pathflow.py
+- verify/plugsem.py
+- verify/recipe.py
+- verify/runtime.py
+- verify/tests/oracle.json
+- verify/tests/test_abi_linkage.py
+- verify/tests/test_abi_va.py
+- verify/tests/test_admit.py
+- verify/tests/test_boot.py
+- verify/tests/test_boot_job.py
+- verify/tests/test_bootcores.py
+- verify/tests/test_bootfacts.py
+- verify/tests/test_bootgpu.py
+- verify/tests/test_bootheap.py
+- verify/tests/test_bootinputs.py
+- verify/tests/test_bootlayout.py
+- verify/tests/test_bootmachine.py
+- verify/tests/test_bootmiles.py
+- verify/tests/test_bootpath.py
+- verify/tests/test_bootrt.py
+- verify/tests/test_bootstart.py
+- verify/tests/test_bootthreadcpu.py
+- verify/tests/test_bootunmap.py
+- verify/tests/test_callrefs.py
+- verify/tests/test_datamodel.py
+- verify/tests/test_deb_tree.py
+- verify/tests/test_elffacts.py
+- verify/tests/test_external_of.py
+- verify/tests/test_extpaths.py
+- verify/tests/test_foreach.py
+- verify/tests/test_foreach_dynamic.py
+- verify/tests/test_gamedata_fetch.py
+- verify/tests/test_gate_abspath.py
+- verify/tests/test_gate_assumptions.py
+- verify/tests/test_gate_imports.py
+- verify/tests/test_gate_liftfacts.py
+- verify/tests/test_gate_machine.py
+- verify/tests/test_gate_pure.py
+- verify/tests/test_gate_rawrite.py
+- verify/tests/test_genimports.py
+- verify/tests/test_gl4_cursor.py
+- verify/tests/test_glmin.py
+- verify/tests/test_header_root.py
+- verify/tests/test_hostabirec.py
+- verify/tests/test_l2gates.py
+- verify/tests/test_linkset.py
+- verify/tests/test_missingrecipe.py
+- verify/tests/test_n3wiring.py
+- verify/tests/test_oracle.py
+- verify/tests/test_pathflow_defaults.py
+- verify/tests/test_pertarget.py
+- verify/tests/test_plugin_compiler.py
+- verify/tests/test_plugsem_lazy.py
+- verify/tests/test_recipe_cli.py
+- verify/tests/test_rootsrc.py
+- verify/tests/test_runinsrc.py
+- verify/tests/test_runpython.py
+- verify/tests/test_sha256_isa.py
+- verify/tests/test_targets.py
+- verify/tests/test_toolexec.py
+- verify/tests/test_toolext.py
+- verify/tests/test_toolflags.py
+- verify/toolflags.py
+- verify/wine_fixme.tsv
 
-| file | heads | candidate / expected |
-|---|---|---|
-| CLAUDE.md | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 | candidate a8075ead2, expected 75e8f863d |
-| contract/include/fnvnx_export.h | 04f1e5dfb,cdf3ba3b3 | candidate -, expected e6078c192 |
-| contract/tests/test_bridgetable.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected a4880110d |
-| contract/tests/test_gate_data_nolink.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected 83158d1a4 |
-| contract/tests/test_n1_objects.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected fe0b19e39 |
-| contract/tests/test_nativerows.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected b5b87d5b1 |
-| contract/tests/test_nobinding.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected 95ee97a3f |
-| contract/tests/test_objfacts_dir.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected afbb4994c |
-| contract/tests/test_store.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate 6d673f1d7, expected ab7cdbf3a |
-| farm/aggregate_certs.sh | 407914779 | candidate -, expected 56145b5da |
-| farm/boot_job.sh | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate bdcadcf92, expected f8e3766af |
-| farm/sail_toolchain.sh | 407914779 | candidate -, expected a186356e6 |
-| journal/inbox/l3-lift-001.md | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected e74ac0167 |
-| journal/inbox/l3-lift-002.md | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected 199fbd4a2 |
-| journal/inbox/l3-lift-003.md | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected ae14d46b8 |
-| journal/inbox/l3a-int3-assumption-blocks.md | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected 371624f1d |
-| journal/inbox/l3a-lift-001.md | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected 95d70d18a |
-| journal/inbox/l3a-lift-002.md | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected 9996ac190 |
-| journal/inbox/l3a-lift-003.md | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected d2b4712c9 |
-| journal/inbox/l3a-lift-004.md | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected d2a150c7d |
-| journal/inbox/l3a-lift-handoff-opus.md | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected b38eff928 |
-| journal/inbox/l3a-lift-w4-001.md | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected 8451c3ea7 |
-| journal/inbox/l3a-lift-w8-001.md | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected fb52e3a22 |
-| journal/inbox/l3a-w3-assumptions.md | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected e988c4e38 |
-| journal/inbox/l3a-w6-reftable.md | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected 86dec00d7 |
-| journal/inbox/l3a-w7-fpexc.md | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected 38df66f53 |
-| journal/inbox/l3a-w7-simd.md | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected 2de77c032 |
-| journal/inbox/l3a-w8-compilecalls.md | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected e693afaa7 |
-| journal/inbox/l3a-w8-l4-tests-to-restore.md | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected 822aa288a |
-| journal/inbox/l3a-w8-native-fp.md | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected 624d42335 |
-| journal/inbox/l3b-lift-001.md | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected 4d1d5d845 |
-| journal/inbox/l3b-lift-002.md | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected 077aeb311 |
-| journal/inbox/l3b-lift-handoff-opus.md | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected 7a33f0846 |
-| journal/inbox/l3b-lift-w4-bump-hunks.md | 407914779 | candidate -, expected 48a668bfb |
-| journal/inbox/l3b-w1-census.md | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected cee6b1a4e |
-| journal/inbox/l3b-w11-form-mapping.tsv | 407914779 | candidate -, expected 39bd987f2 |
-| journal/inbox/l3b-w2-rtroot.md | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected b3d9115e5 |
-| journal/inbox/l3b-w3-byconstruction.md | 407914779 | candidate -, expected 9b0f6c153 |
-| journal/inbox/l3b-w3-doubles-census.md | 407914779 | candidate -, expected e59bb23b1 |
-| journal/inbox/l3b-w3-noref.md | 407914779 | candidate -, expected 5d93dc396 |
-| journal/inbox/l3b-w3-r9.md | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected 7d940131b |
-| journal/inbox/l3b-w4-builders-design.md | 407914779 | candidate -, expected 4ae9abd08 |
-| journal/inbox/l3b-w9-ctx.md | 407914779 | candidate -, expected cb0793f05 |
-| journal/inbox/l3b-w9-eh-oracle.md | 407914779 | candidate -, expected 1d4d879cf |
-| journal/inbox/l3b-w9-simd.md | 407914779 | candidate -, expected 293008ca0 |
-| journal/inbox/l3b-w9-to-l1.md | 407914779 | candidate -, expected d681baf74 |
-| journal/inbox/l3b-w9-x87-cite.md | 407914779 | candidate -, expected de59464e2 |
-| journal/inbox/l3b-w9-x87-list.md | 407914779 | candidate -, expected b1727f9bc |
-| journal/status/l4-verify.md | 04f1e5dfb | candidate 34a626735, expected 480d433ee |
-| journal/status/l5-verdict-e8e54dcea/README.md | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected e319b47ab |
-| journal/status/l5-verdict-e8e54dcea/abi.tsv | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected 9ff31346e |
-| journal/status/l5-verdict-e8e54dcea/imports.tsv | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected 525093a38 |
-| journal/status/l5-verdict-e8e54dcea/linkstrict.tsv | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected 57823cf37 |
-| journal/status/l5-verdict-e8e54dcea/machine.tsv | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected 38948ec5f |
-| journal/status/l5-verdict-e8e54dcea/objstub.tsv | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected 50c5881c8 |
-| journal/status/l5-verdict-e8e54dcea/pure.tsv | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected 95f784991 |
-| journal/status/l5-verdict-e8e54dcea/rtasm.tsv | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected 4dfff1f27 |
-| journal/status/l5-verdict-e8e54dcea/selftests.tsv | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected 5cd768930 |
-| journal/status/l6-render-construction.md | a3d039bf0,da0e4ff78,04f1e5dfb | candidate 6175dc88c, expected 4c20ed1f1 |
-| lift/fnvlift/tests/test_cpufeat_sdm.py | a3d039bf0,da0e4ff78,04f1e5dfb,cdf3ba3b3 | candidate -, expected 4dfb89362 |
-| lift/liftsrc/README | a3d039bf0,da0e4ff78,04f1e5dfb,cdf3ba3b3 | candidate -, expected 33814fdde |
-| lift/liftsrc/certs/README | a3d039bf0,da0e4ff78,04f1e5dfb,cdf3ba3b3 | candidate -, expected 37d289926 |
-| lift/proof/enc_table.py | a3d039bf0,da0e4ff78,04f1e5dfb,cdf3ba3b3 | candidate -, expected 50e7e592e |
-| lift/proof/tests/fpc_host.py | a3d039bf0,da0e4ff78,04f1e5dfb,cdf3ba3b3 | candidate -, expected a839f189d |
-| lift/proof/tests/test_forms_mem.py | a3d039bf0,da0e4ff78,04f1e5dfb,cdf3ba3b3 | candidate -, expected 3a3fe9b5c |
-| lift/proof/tests/test_symform.py | a3d039bf0,da0e4ff78,04f1e5dfb,cdf3ba3b3 | candidate -, expected 19918bd4e |
-| lift/tools/cleared_join.py | a3d039bf0,da0e4ff78,04f1e5dfb,cdf3ba3b3 | candidate -, expected 5472ba384 |
-| lift/tools/funcsfacts.py | a3d039bf0,da0e4ff78,04f1e5dfb,cdf3ba3b3 | candidate -, expected 18b56db09 |
-| lift/tools/reconcile.py | a3d039bf0,da0e4ff78,04f1e5dfb,cdf3ba3b3 | candidate -, expected fa8504d10 |
-| lift/tools/tests/test_dsl_emit.py | a3d039bf0,da0e4ff78,04f1e5dfb,cdf3ba3b3 | candidate -, expected cd69f8b7b |
-| link/ctypes_compat.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate 4d1d6bbce, expected 9eddefa04 |
-| link/tests/oracle.json | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate e529be60f, expected b5f29a6b1 |
-| render/total/tools/count_stage_evals.py | 407914779 | candidate -, expected 9a299ad59 |
-| shim/include/fnvnx_win32.h | a3d039bf0,04f1e5dfb | candidate 426e6208d, expected f1bb8d348 |
-| tests/d3d9_attach/test_attach.cpp | a3d039bf0,da0e4ff78,04f1e5dfb | candidate -, expected 9fea0dcdd |
-| toolchain/tests/oracle.json | a3d039bf0,da0e4ff78 | candidate -, expected 2fcde1502 |
-| toolchain/tests/test_cc1.py | a3d039bf0,da0e4ff78 | candidate f472650bd, expected 6da8aabfa |
-| toolchain/tests/test_frame.py | a3d039bf0,da0e4ff78 | candidate 6146eb6d1, expected bf02fd267 |
-| toolchain/tests/test_ftoi.py | a3d039bf0,da0e4ff78 | candidate f4efae133, expected 00aead9a7 |
-| toolchain/tests/test_ftoi_sse2neon.py | a3d039bf0,da0e4ff78 | candidate 4f1513335, expected 07ddc2957 |
-| toolchain/tests/test_names.py | a3d039bf0,da0e4ff78 | candidate aa1f374be, expected 6992ad321 |
-| toolchain/tests/test_odrdef.py | a3d039bf0,da0e4ff78 | candidate 3fcb3bd0f, expected 60cd9366e |
-| toolchain/tests/test_pi.py | a3d039bf0,da0e4ff78 | candidate f9893cfb7, expected 5917d0dee |
-| toolchain/tests/test_sdd.py | a3d039bf0,da0e4ff78 | candidate b960694c4, expected 899d09a3e |
-| verify/ASSUMPTIONS.json | 407914779,cdf3ba3b3 | candidate 2e187e3c7, expected fcf242742 |
-| verify/RECIPE.md | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate 2e276371e, expected 588e4cca5 |
-| verify/bootfacts.py | 04f1e5dfb | candidate -, expected a4665f820 |
-| verify/boothost.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779 | candidate aa7c6cffb, expected 17ad4278e |
-| verify/bootinput.py | 04f1e5dfb | candidate ccf27fe90, expected a6b34b762 |
-| verify/bootlayout.py | 04f1e5dfb | candidate 700f00b1e, expected a1668310c |
-| verify/bootmiles.py | 04f1e5dfb | candidate bbc5fb63f, expected 1869ad4e5 |
-| verify/bootpath.py | 04f1e5dfb | candidate 477ad293d, expected a7112542c |
-| verify/bootsock.py | 04f1e5dfb | candidate 60faa2d4b, expected 65fadea89 |
-| verify/contract_inputs.json | 407914779 | candidate e67bcc3e5, expected ceb9c06e2 |
-| verify/env.json | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate b81259daa, expected c9852d9c5 |
-| verify/gate_admit.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate 387aa4322, expected e78905f74 |
-| verify/gate_assumptions.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate 11b00d867, expected d291ccfa5 |
-| verify/gate_datamodel.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate 8108898dd, expected a06b9dc73 |
-| verify/gate_objstub.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate 6cf335e7d, expected 602af047c |
-| verify/guest_compiler.json | cdf3ba3b3 | candidate 81fe32446, expected c18ecd3e8 |
-| verify/guest_flags.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate 16a48a567, expected ffb9a120b |
-| verify/hostabirec.py | 04f1e5dfb | candidate -, expected aacbda35b |
-| verify/objstub.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate e14c1d983, expected 9980b02de |
-| verify/pathflow.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate 3e1e7b5c1, expected a6d82b2e4 |
-| verify/producers.py | 40c639d16,a3d039bf0,da0e4ff78,407914779 | candidate 091ec9320, expected c7f50ea92 |
-| verify/tests/test_admit.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate 1d1dbeef1, expected b519c8a71 |
-| verify/tests/test_archive_sources.py | 407914779,cdf3ba3b3 | candidate -, expected 61bffe6b0 |
-| verify/tests/test_bootcores.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779 | candidate f1e8275da, expected 1fd0bd50d |
-| verify/tests/test_bootfacts.py | 04f1e5dfb | candidate -, expected 98e1627a4 |
-| verify/tests/test_bootgpu.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779 | candidate 2c5870827, expected e0c082e63 |
-| verify/tests/test_bootlayout.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779 | candidate b483fb880, expected 61c106e83 |
-| verify/tests/test_bridgefacts.py | 407914779,cdf3ba3b3 | candidate -, expected 211a91e39 |
-| verify/tests/test_compilerstage.py | 40c639d16,a3d039bf0,da0e4ff78,407914779 | candidate 3b15190f4, expected e3d984910 |
-| verify/tests/test_descs.py | 407914779,cdf3ba3b3 | candidate -, expected 43488a67e |
-| verify/tests/test_extpaths.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected c5f913a23 |
-| verify/tests/test_gamedata_fetch.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate 0bab1b69a, expected 8d75c7c2d |
-| verify/tests/test_gate_abspath.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected e2bcff7d0 |
-| verify/tests/test_gate_assumptions.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate dd7d0da9c, expected e7311512c |
-| verify/tests/test_gate_liftfacts.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected 0c4032134 |
-| verify/tests/test_gate_pure.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate 835fec960, expected 83eaf25e9 |
-| verify/tests/test_gate_rawrite.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 | candidate -, expected 2216a7988 |
-| verify/tests/test_genimports.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected 661e990e1 |
-| verify/tests/test_gl4_cursor.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 | candidate -, expected 302355348 |
-| verify/tests/test_guest.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate 71b292dc4, expected 63bf30f57 |
-| verify/tests/test_guest_link.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate 959b3c7de, expected 418de2905 |
-| verify/tests/test_hostabirec.py | 04f1e5dfb | candidate -, expected 6a94104bf |
-| verify/tests/test_loader.py | 407914779 | candidate -, expected 2b23efc40 |
-| verify/tests/test_loader_tables.py | 407914779,cdf3ba3b3 | candidate -, expected 09c63e20f |
-| verify/tests/test_missingrecipe.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected 0cba7a980 |
-| verify/tests/test_objstub.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate d24dbd595, expected 68ef29e72 |
-| verify/tests/test_pathflow_defaults.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected 10d9daac3 |
-| verify/tests/test_plugin_compiler.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779 | candidate 7ad88ec5f, expected 44b323d31 |
-| verify/tests/test_plugsem_lazy.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected eaf69dd93 |
-| verify/tests/test_recipe_cli.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected f56941342 |
-| verify/tests/test_runinsrc.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate -, expected 03fc9fbff |
-| verify/tests/test_runpython.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate 65c3cd387, expected 4d68c135f |
-| verify/tests/test_selftests_universe.py | 40c639d16,a3d039bf0,da0e4ff78,407914779 | candidate 2ca3ef17b, expected 7ebb31c03 |
-| verify/unitstage.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 | candidate f9095ae22, expected 925c74370 |
+## self<-a36b3c8f2 (219)
 
-## conflicts needing a merged record (269, none recorded)
+- contract/argflow.py
+- contract/bind.py
+- contract/bodysel.py
+- contract/bridgegen.py
+- contract/bridgetable.py
+- contract/exefacts.py
+- contract/exportgen.py
+- contract/gate_call.py
+- contract/gate_data.py
+- contract/gate_pcrel.py
+- contract/gate_reach.py
+- contract/gate_rtti.py
+- contract/gate_vcall.py
+- contract/gate_xc.py
+- contract/gate_xunit.py
+- contract/gpa_names.py
+- contract/iat.py
+- contract/imagerec.py
+- contract/images.py
+- contract/include/fnvnx_export.h
+- contract/l2sections.py
+- contract/memfx.py
+- contract/mkidentity.py
+- contract/modules.py
+- contract/n1.py
+- contract/nativerows.py
+- contract/nobinding.py
+- contract/objfacts.py
+- contract/objfacts_dir.py
+- contract/objfacts_merge.py
+- contract/objfacts_one.py
+- contract/proto.py
+- contract/reachreq.py
+- contract/registry.py
+- contract/relocs_in_runs.py
+- contract/tests/test_bind.py
+- contract/tests/test_bridgetable.py
+- contract/tests/test_exepin.py
+- contract/tests/test_exportgen.py
+- contract/tests/test_gate_call_decl.py
+- contract/tests/test_gate_data_nolink.py
+- contract/tests/test_gate_reach.py
+- contract/tests/test_gatecert.py
+- contract/tests/test_gates.py
+- contract/tests/test_gpa_names.py
+- contract/tests/test_hive.py
+- contract/tests/test_iat.py
+- contract/tests/test_imagerec.py
+- contract/tests/test_images.py
+- contract/tests/test_imports.py
+- contract/tests/test_l2sections.py
+- contract/tests/test_memfx.py
+- contract/tests/test_modules.py
+- contract/tests/test_n1_objects.py
+- contract/tests/test_nativerows.py
+- contract/tests/test_nobinding.py
+- contract/tests/test_objfacts_dir.py
+- contract/tests/test_objmerge.py
+- contract/tests/test_proto.py
+- contract/tests/test_store.py
+- contract/tests/test_treehash.py
+- contract/vtid.py
+- farm/gamedata_fetch.sh
+- farm/install_mirror.py
+- farm/mirror_debs.py
+- journal/inbox/l3-lift-001.md
+- journal/inbox/l3-lift-002.md
+- journal/inbox/l3-lift-003.md
+- journal/inbox/l3a-int3-assumption-blocks.md
+- journal/inbox/l3a-lift-001.md
+- journal/inbox/l3a-lift-002.md
+- journal/inbox/l3a-lift-003.md
+- journal/inbox/l3a-lift-004.md
+- journal/inbox/l3a-lift-handoff-opus.md
+- journal/inbox/l3a-lift-w4-001.md
+- journal/inbox/l3a-lift-w8-001.md
+- journal/inbox/l3a-w3-assumptions.md
+- journal/inbox/l3a-w6-reftable.md
+- journal/inbox/l3a-w7-fpexc.md
+- journal/inbox/l3a-w7-simd.md
+- journal/inbox/l3a-w8-compilecalls.md
+- journal/inbox/l3a-w8-l4-tests-to-restore.md
+- journal/inbox/l3a-w8-native-fp.md
+- journal/inbox/l3b-lift-001.md
+- journal/inbox/l3b-lift-002.md
+- journal/inbox/l3b-lift-handoff-opus.md
+- journal/inbox/l3b-w1-census.md
+- journal/inbox/l3b-w2-rtroot.md
+- journal/inbox/l3b-w3-r9.md
+- journal/inbox/l3b-w4-forms.md
+- journal/status/l3a-lift.md
+- journal/status/l3b-lift.md
+- journal/status/l5-verdict-e8e54dcea/README.md
+- journal/status/l5-verdict-e8e54dcea/abi.tsv
+- journal/status/l5-verdict-e8e54dcea/imports.tsv
+- journal/status/l5-verdict-e8e54dcea/linkstrict.tsv
+- journal/status/l5-verdict-e8e54dcea/machine.tsv
+- journal/status/l5-verdict-e8e54dcea/objstub.tsv
+- journal/status/l5-verdict-e8e54dcea/pure.tsv
+- journal/status/l5-verdict-e8e54dcea/rtasm.tsv
+- journal/status/l5-verdict-e8e54dcea/selftests.tsv
+- link/abi.py
+- link/abi_native.py
+- link/ctypes_compat.py
+- link/exevft.py
+- link/gate_abs.py
+- link/gate_addr.py
+- link/gate_disp.py
+- link/gate_names.py
+- link/gate_order.py
+- link/ldcheck.py
+- link/milestones.py
+- link/odr.py
+- link/tables.py
+- link/tests/abi_fixture.py
+- link/tests/abi_gaterun.py
+- link/tests/oracle.json
+- link/tests/realobj.py
+- link/tests/test_abi.py
+- link/tests/test_dispatch_order.py
+- link/tests/test_exevft.py
+- link/tests/test_gate_abs.py
+- link/tests/test_gate_disp.py
+- link/tests/test_gate_names.py
+- link/tests/test_order_local.py
+- link/tests/test_order_tags.py
+- link/tests/test_sdd_order.py
+- link/tests/test_thisadj.py
+- link/tests/test_vslots.py
+- link/tests/test_vtables.py
+- link/thisadj.py
+- link/unitpairs.py
+- link/vslots.py
+- link/vtables.py
+- verify/ASSUMPTIONS.json
+- verify/RECIPE.md
+- verify/admit.json
+- verify/bootinputs.py
+- verify/cas.py
+- verify/cpuid_model.json
+- verify/env.json
+- verify/envcheck.py
+- verify/gate_abi.py
+- verify/gate_abspath.py
+- verify/gate_admit.py
+- verify/gate_assumptions.py
+- verify/gate_contract.py
+- verify/gate_datamodel.py
+- verify/gate_hostapi.py
+- verify/gate_imports.py
+- verify/gate_l2native.py
+- verify/gate_liftfacts.py
+- verify/gate_linkstrict.py
+- verify/gate_machine.py
+- verify/gate_namegate.py
+- verify/gate_objstub.py
+- verify/gate_onedef.py
+- verify/gate_pure.py
+- verify/gates.d/abi.json
+- verify/gates.d/addr32.json
+- verify/gates.d/argordergate.json
+- verify/gates.d/order.json
+- verify/gatesdir.py
+- verify/genlaunch.py
+- verify/guest_compiler.json
+- verify/guest_flags.py
+- verify/l1.py
+- verify/linkset.py
+- verify/objstub.py
+- verify/pathflow.py
+- verify/plugsem.py
+- verify/recipe.py
+- verify/runtime.py
+- verify/tests/oracle.json
+- verify/tests/test_abi_va.py
+- verify/tests/test_admit.py
+- verify/tests/test_archive_sources.py
+- verify/tests/test_boot_job.py
+- verify/tests/test_bootinputs.py
+- verify/tests/test_bootpath.py
+- verify/tests/test_bootstart.py
+- verify/tests/test_bridgefacts.py
+- verify/tests/test_callrefs.py
+- verify/tests/test_datamodel.py
+- verify/tests/test_deb_tree.py
+- verify/tests/test_descs.py
+- verify/tests/test_elffacts.py
+- verify/tests/test_external_of.py
+- verify/tests/test_extpaths.py
+- verify/tests/test_gamedata_fetch.py
+- verify/tests/test_gate_abspath.py
+- verify/tests/test_gate_assumptions.py
+- verify/tests/test_gate_imports.py
+- verify/tests/test_gate_liftfacts.py
+- verify/tests/test_gate_machine.py
+- verify/tests/test_gate_pure.py
+- verify/tests/test_genimports.py
+- verify/tests/test_glmin.py
+- verify/tests/test_header_root.py
+- verify/tests/test_l2gates.py
+- verify/tests/test_linkset.py
+- verify/tests/test_loader_tables.py
+- verify/tests/test_missingrecipe.py
+- verify/tests/test_n3wiring.py
+- verify/tests/test_oracle.py
+- verify/tests/test_pathflow_defaults.py
+- verify/tests/test_pertarget.py
+- verify/tests/test_plugins.py
+- verify/tests/test_plugsem_lazy.py
+- verify/tests/test_recipe_cli.py
+- verify/tests/test_rootsrc.py
+- verify/tests/test_runinsrc.py
+- verify/tests/test_runpython.py
+- verify/tests/test_sha256_isa.py
+- verify/tests/test_targets.py
+- verify/tests/test_toolexec.py
+- verify/tests/test_toolext.py
+- verify/tests/test_toolflags.py
+- verify/toolflags.py
 
-by changer set:
-- 181: a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3
-- 37: a3d039bf0,da0e4ff78,04f1e5dfb,407914779
-- 15: 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3
-- 13: 40c639d16,a3d039bf0,407914779
-- 10: 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779
-- 5: 40c639d16,a3d039bf0,04f1e5dfb,407914779,cdf3ba3b3
-- 3: 04f1e5dfb,407914779,cdf3ba3b3
-- 1: 40c639d16,a3d039bf0
-- 1: a3d039bf0,da0e4ff78,407914779
-- 1: a3d039bf0,04f1e5dfb,407914779,cdf3ba3b3
-- 1: a3d039bf0,da0e4ff78,407914779,cdf3ba3b3
-- 1: 04f1e5dfb,407914779
+## 407914779<-04f1e5dfb (183)
 
-| file | heads |
-|---|---|
-| bridgefacts/crossing.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| bridgefacts/d3d9/d3d9_smwalk.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| bridgefacts/d3d9/d3d9_spec.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| bridgefacts/test_crossing.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| contract/tests/test_exportgen.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| contract/tests/test_imagerec.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| journal/inbox/l3b-w4-forms.md | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| journal/status/l3a-lift.md | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| journal/status/l3b-lift.md | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/ASSUMPTIONS.l3b.json | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/README.md | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/facts/build.json | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/factsimg/atimgpud/build.json | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/factsimg/binkw32/build.json | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/factsimg/d3dx9_31/build.json | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/factsimg/d3dx9_38/build.json | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/factsimg/exe/build.json | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/factsimg/gdffalloutnv/build.json | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/factsimg/libvorbis/build.json | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/factsimg/libvorbisfile/build.json | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/fnvlift/core.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/fnvlift/cpumodel_bits.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/fnvlift/dsl.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/fnvlift/f_cpufeat.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/fnvlift/f_int.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/fnvlift/f_sys.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/fnvlift/f_x87_ctl.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/fnvlift/inputs.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/fnvlift/tests/_inputs.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/fnvlift/tests/test_cs_store.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/fnvlift/tests/test_int_vectors.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/fnvlift/tests/test_jtab_facts.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/fnvlift/tests/test_null_seg.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/fnvlift/tests/test_sites.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/fnvlift/tests/test_ud_gap.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/fnvlift/x86sys.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/gates/def_check.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/gates/flagagree.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/gates/gate_eh.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/gates/gate_flags.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/gates/gate_order.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/gates/invariance.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/gates/tests/test_gate_flags.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/gates/tests/test_gate_lift.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/liftsrc/build.json | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/pack/build.json | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/README.md | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/census.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/certs_build.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/defects.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/formgate_inputs.json | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/forms.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/forms_alu.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/forms_flow.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/forms_move.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/forms_simd.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/forms_ssefp.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/forms_sys.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/lift_dsl.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/model_sail.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/privset.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/prove.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/rewrite.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/sail_pins.txt | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/sdmfeat.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/sdmpriv.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/shapeprove.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/symcheck.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/symform.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/tests/oracle.json | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/tests/test_certs_build.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/tests/test_dsl_int_classes.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/tests/test_dsl_lock.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/tests/test_dsl_xsimd.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/tests/test_formgate_real.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/tests/test_forms_cmpimm.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/tests/test_forms_far.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/tests/test_forms_immsel.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/tests/test_forms_simdclass.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/tests/test_forms_ssefp.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/tests/test_gate_fpexact.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/tests/test_model_patches.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/tests/test_rewrite.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/tests/test_rtroot.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/tests/test_sdmfeat.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/tests/test_sdmpriv.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/tests/test_shape.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/tests/test_simdspec.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/tests/test_symbranch.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/tests/test_udsail.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/proof/udsail.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/rcpcert/build.json | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/rcphost/build.json | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/rt/build.json | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/rt/cpumodel.c | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/rt/enter.cc | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/rt/fnvl.h | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/rt/fnvl_x87.h | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/rt/imp.h | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/rt/msvcrt.h | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/rt/msvcrt_ci.cc | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/rt/msvcrt_eh.cc | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/rt/msvcrt_fp.cc | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/rt/seh.cc | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/sdm/build.json | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/test/dic_test.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/test/ehslice_test.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/test/import_reads_no_rt_test.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/test/modlift_closure_test.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/test/pcsrctest.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/test/r3_refine_test.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/test/writesettest.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tests/guest/citest/lifted/build.json | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tests/guest/citest/native/build.json | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tests/guest/citest/native/main.cc | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tests/guest/imptest/lifted/build.json | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tests/guest/imptest/native/build.json | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tests/guest/imptest/native/main.cc | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tests/guest/msvcrttest/lifted/build.json | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tests/guest/msvcrttest/native/build.json | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tests/guest/msvcrttest/native/main.cc | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/CODEMAP.md | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/codemap.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/cpufeat_diff.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/ctlstate.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/dispgen.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/ehflow.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/ehtables.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/factsassemble.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/formcert.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/fpmodes.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/fpreach.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/fpstate.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/gen_cpuref.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/gen_faults.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/guestgen_citest.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/guestgen_imptest.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/guestgen_msvcrttest.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/hostbuild.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/impgen.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/lifted.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/liftgen.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/liftrecipe.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/liftsrcgen.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/locksites.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/modlift.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/msvcrtnative.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/packcopy.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/packentries.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/packstage.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/pointsto.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/rcpgen.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/residue.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/retnfacts.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/rttibcd.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/sdmrows_stage.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/segwrites.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/sysites.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/tests/inputs.json | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/tests/test_bridgegen.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/tests/test_defdisp.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/tests/test_descclass.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/tests/test_dispgen.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/tests/test_ehflow.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/tests/test_fixpoint_cycle.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/tests/test_jtab.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/tests/test_jtab_cases.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/tests/test_jtab_fixpoint.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/tests/test_lifted_vs_shapes.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/tests/test_liftgen_recipe.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/tests/test_lock_only.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/tests/test_modules_check.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/tests/test_pack_modtable.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/tests/test_prelude.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/tests/test_ranges.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/tests/test_segwrites.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/tests/test_universe_r3_check.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/universe.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/writeset.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| lift/tools/x86flow.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| link/tests/test_dispatch_order.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| link/tests/test_order_local.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| link/tests/test_sdd_order.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| manifest/check_filesites.py | 40c639d16,a3d039bf0,407914779 |
-| manifest/check_funcfacts.py | 40c639d16,a3d039bf0,407914779 |
-| manifest/check_galaxy.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| manifest/check_gen_fontmachine.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| manifest/check_hostapi.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| manifest/check_regsites.py | 40c639d16,a3d039bf0,407914779 |
-| manifest/filesites.py | 40c639d16,a3d039bf0,407914779 |
-| manifest/fontfaces.py | 40c639d16,a3d039bf0,407914779 |
-| manifest/funcfacts.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| manifest/gen_defwndproc.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| manifest/gen_fontmachine.py | 40c639d16,a3d039bf0,407914779 |
-| manifest/gen_registry_seed.py | 40c639d16,a3d039bf0,407914779 |
-| manifest/gen_sysmetrics.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| manifest/gen_wine_colors.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| manifest/import_escape.py | 40c639d16,a3d039bf0,407914779 |
-| manifest/pemanifest.py | 40c639d16,a3d039bf0,407914779 |
-| manifest/prefs_settings.py | 40c639d16,a3d039bf0,407914779 |
-| manifest/regclass.py | 40c639d16,a3d039bf0,407914779 |
-| manifest/regsites.py | 40c639d16,a3d039bf0,407914779 |
-| manifest/sys_names.py | 40c639d16,a3d039bf0,407914779 |
-| platform/build.json | 40c639d16,a3d039bf0,04f1e5dfb,407914779,cdf3ba3b3 |
-| platform/com/gen_combridge.py | 40c639d16,a3d039bf0,04f1e5dfb,407914779,cdf3ba3b3 |
-| platform/com/test_gen_cxx.py | 40c639d16,a3d039bf0,04f1e5dfb,407914779,cdf3ba3b3 |
-| platform/declared_machine.tsv | 40c639d16,a3d039bf0 |
-| platform/include/fnvnx_win32_ext.h | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| platform/win32/crt_kernel32.cpp | 40c639d16,a3d039bf0,04f1e5dfb,407914779,cdf3ba3b3 |
-| platform/win32/services.cpp | 40c639d16,a3d039bf0,04f1e5dfb,407914779,cdf3ba3b3 |
-| render/d3d9/build.json | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| render/d3d9/dev/README.md | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| render/d3d9/dev/const_fixme.h | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| render/d3d9/dev/copy_misc.cpp | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| render/d3d9/dev/d3d9_exports.cpp | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| render/d3d9/dev/d5a_fixme.tsv | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| render/d3d9/dev/draw_core.h | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| render/d3d9/dev/m1_misc.cpp | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| render/d3d9/dev/platform_hooks.tsv | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| render/d3d9/dev/pv_exit.cpp | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| render/d3d9/dev/pvw.h | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| render/d3d9/dev/pvw_fixme.tsv | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| render/d3d9/dev/state_model.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| render/d3d9/dev/x1_validator.cpp | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| render/d3d9/env/envq.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| render/d3d9/env/gen_enums.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| render/d3d9/env/gen_env.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| render/d3d9/gen/gen_bridge.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| render/d3d9/gen/gen_expr.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| render/d3d9/gen/gen_meth.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| render/d3d9/gen/gen_replay.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| render/d3d9/gen/gen_tab.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| render/d3d9/gen/gen_wine_ids.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| render/d3d9/gen/gen_wrap.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| render/pair/build.host.json | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| render/shaders/sm_link_sum/build.json | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| render/shaders/total/build.json | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| render/shaders/total/gen_opsyntax.py | a3d039bf0,da0e4ff78,407914779 |
-| render/shaders/total/sm_legacy.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| render/shaders/total/sm_rules2.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| render/shaders/total/sm_table.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| render/smscan/build.host.json | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| render/total/d3d9total/build.json | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| render/total/d3d9total/stage.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| render/total/gate_d3d9total.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| render/total/gate_sm_link.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| render/total/tests/test_d3d9total.py | a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| rt/guest_main/build.json | a3d039bf0,04f1e5dfb,407914779,cdf3ba3b3 |
-| toolchain/tests/test_dispatch_entry.py | a3d039bf0,da0e4ff78,407914779,cdf3ba3b3 |
-| verify/admit.json | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| verify/boot.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| verify/bootdecl.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| verify/bootgpu.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| verify/bootinputs.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| verify/bootmachine.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| verify/bootstart.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| verify/recipe.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| verify/tests/test_boot.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| verify/tests/test_boot_job.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779,cdf3ba3b3 |
-| verify/tests/test_bootheap.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| verify/tests/test_bootinputs.py | 04f1e5dfb,407914779,cdf3ba3b3 |
-| verify/tests/test_bootmachine.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| verify/tests/test_bootmiles.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| verify/tests/test_bootpath.py | 04f1e5dfb,407914779,cdf3ba3b3 |
-| verify/tests/test_bootrt.py | 04f1e5dfb,407914779 |
-| verify/tests/test_bootstart.py | 04f1e5dfb,407914779,cdf3ba3b3 |
-| verify/tests/test_bootthreadcpu.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| verify/tests/test_bootunmap.py | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
-| verify/wine_fixme.tsv | 40c639d16,a3d039bf0,da0e4ff78,04f1e5dfb,407914779 |
+- lift/ASSUMPTIONS.l3b.json
+- lift/README.md
+- lift/facts/build.json
+- lift/factsimg/atimgpud/build.json
+- lift/factsimg/binkw32/build.json
+- lift/factsimg/d3dx9_31/build.json
+- lift/factsimg/d3dx9_38/build.json
+- lift/factsimg/exe/build.json
+- lift/factsimg/gdffalloutnv/build.json
+- lift/factsimg/libvorbis/build.json
+- lift/factsimg/libvorbisfile/build.json
+- lift/fnvlift/core.py
+- lift/fnvlift/cpumodel_bits.py
+- lift/fnvlift/dsl.py
+- lift/fnvlift/f_cpufeat.py
+- lift/fnvlift/f_int.py
+- lift/fnvlift/f_sys.py
+- lift/fnvlift/f_x87_ctl.py
+- lift/fnvlift/inputs.py
+- lift/fnvlift/tests/_inputs.py
+- lift/fnvlift/tests/test_cpufeat_sdm.py
+- lift/fnvlift/tests/test_cs_store.py
+- lift/fnvlift/tests/test_int_vectors.py
+- lift/fnvlift/tests/test_jtab_facts.py
+- lift/fnvlift/tests/test_null_seg.py
+- lift/fnvlift/tests/test_sites.py
+- lift/fnvlift/tests/test_ud_gap.py
+- lift/fnvlift/x86sys.py
+- lift/gates/def_check.py
+- lift/gates/flagagree.py
+- lift/gates/gate_eh.py
+- lift/gates/gate_flags.py
+- lift/gates/gate_order.py
+- lift/gates/invariance.py
+- lift/gates/tests/test_gate_flags.py
+- lift/gates/tests/test_gate_lift.py
+- lift/liftsrc/README
+- lift/liftsrc/build.json
+- lift/liftsrc/certs/README
+- lift/pack/build.json
+- lift/proof/README.md
+- lift/proof/census.py
+- lift/proof/certs_build.py
+- lift/proof/defects.py
+- lift/proof/enc_table.py
+- lift/proof/formgate.py
+- lift/proof/formgate_inputs.json
+- lift/proof/forms.py
+- lift/proof/forms_alu.py
+- lift/proof/forms_flow.py
+- lift/proof/forms_move.py
+- lift/proof/forms_simd.py
+- lift/proof/forms_ssefp.py
+- lift/proof/forms_sys.py
+- lift/proof/gate_fpexact.py
+- lift/proof/lift_dsl.py
+- lift/proof/model_sail.py
+- lift/proof/privset.py
+- lift/proof/prove.py
+- lift/proof/rewrite.py
+- lift/proof/sail_pins.txt
+- lift/proof/sdmfeat.py
+- lift/proof/sdmpriv.py
+- lift/proof/shapeprove.py
+- lift/proof/symcheck.py
+- lift/proof/symform.py
+- lift/proof/tests/fpc_host.py
+- lift/proof/tests/oracle.json
+- lift/proof/tests/test_certs_build.py
+- lift/proof/tests/test_dsl_int_classes.py
+- lift/proof/tests/test_dsl_lock.py
+- lift/proof/tests/test_dsl_xsimd.py
+- lift/proof/tests/test_formgate_real.py
+- lift/proof/tests/test_forms_cmpimm.py
+- lift/proof/tests/test_forms_far.py
+- lift/proof/tests/test_forms_immsel.py
+- lift/proof/tests/test_forms_mem.py
+- lift/proof/tests/test_forms_simdclass.py
+- lift/proof/tests/test_forms_ssefp.py
+- lift/proof/tests/test_gate_fpexact.py
+- lift/proof/tests/test_model_patches.py
+- lift/proof/tests/test_rewrite.py
+- lift/proof/tests/test_rtroot.py
+- lift/proof/tests/test_sdmfeat.py
+- lift/proof/tests/test_sdmpriv.py
+- lift/proof/tests/test_shape.py
+- lift/proof/tests/test_simdspec.py
+- lift/proof/tests/test_symbranch.py
+- lift/proof/tests/test_symform.py
+- lift/proof/tests/test_udsail.py
+- lift/proof/udsail.py
+- lift/rcpcert/build.json
+- lift/rcphost/build.json
+- lift/rt/build.json
+- lift/rt/enter.cc
+- lift/rt/fnvl.h
+- lift/rt/fnvl_x87.h
+- lift/rt/imp.h
+- lift/rt/msvcrt.h
+- lift/rt/msvcrt_ci.cc
+- lift/rt/msvcrt_eh.cc
+- lift/rt/msvcrt_fp.cc
+- lift/rt/seh.cc
+- lift/sdm/build.json
+- lift/test/dic_test.py
+- lift/test/ehslice_test.py
+- lift/test/import_reads_no_rt_test.py
+- lift/test/modlift_closure_test.py
+- lift/test/pcsrctest.py
+- lift/test/r3_refine_test.py
+- lift/test/writesettest.py
+- lift/tests/guest/citest/lifted/build.json
+- lift/tests/guest/citest/native/build.json
+- lift/tests/guest/citest/native/main.cc
+- lift/tests/guest/imptest/lifted/build.json
+- lift/tests/guest/imptest/native/build.json
+- lift/tests/guest/imptest/native/main.cc
+- lift/tests/guest/msvcrttest/lifted/build.json
+- lift/tests/guest/msvcrttest/native/build.json
+- lift/tests/guest/msvcrttest/native/main.cc
+- lift/tools/CODEMAP.md
+- lift/tools/cleared_join.py
+- lift/tools/codemap.py
+- lift/tools/cpufeat_diff.py
+- lift/tools/ctlstate.py
+- lift/tools/dispgen.py
+- lift/tools/ehflow.py
+- lift/tools/ehtables.py
+- lift/tools/factsassemble.py
+- lift/tools/formcert.py
+- lift/tools/fpmodes.py
+- lift/tools/fpreach.py
+- lift/tools/fpstate.py
+- lift/tools/funcsfacts.py
+- lift/tools/gen_cpuref.py
+- lift/tools/gen_faults.py
+- lift/tools/guestgen_citest.py
+- lift/tools/guestgen_imptest.py
+- lift/tools/guestgen_msvcrttest.py
+- lift/tools/hostbuild.py
+- lift/tools/impgen.py
+- lift/tools/lifted.py
+- lift/tools/liftgen.py
+- lift/tools/liftrecipe.py
+- lift/tools/liftsrcgen.py
+- lift/tools/locksites.py
+- lift/tools/modlift.py
+- lift/tools/msvcrtnative.py
+- lift/tools/packcopy.py
+- lift/tools/packentries.py
+- lift/tools/packstage.py
+- lift/tools/pointsto.py
+- lift/tools/rcpgen.py
+- lift/tools/reconcile.py
+- lift/tools/residue.py
+- lift/tools/retnfacts.py
+- lift/tools/rttibcd.py
+- lift/tools/sdmrows_stage.py
+- lift/tools/segwrites.py
+- lift/tools/sysites.py
+- lift/tools/tests/inputs.json
+- lift/tools/tests/test_bridgegen.py
+- lift/tools/tests/test_defdisp.py
+- lift/tools/tests/test_descclass.py
+- lift/tools/tests/test_dispgen.py
+- lift/tools/tests/test_dsl_emit.py
+- lift/tools/tests/test_ehflow.py
+- lift/tools/tests/test_fixpoint_cycle.py
+- lift/tools/tests/test_jtab.py
+- lift/tools/tests/test_jtab_cases.py
+- lift/tools/tests/test_jtab_fixpoint.py
+- lift/tools/tests/test_lifted_vs_shapes.py
+- lift/tools/tests/test_liftgen_recipe.py
+- lift/tools/tests/test_lock_only.py
+- lift/tools/tests/test_modules_check.py
+- lift/tools/tests/test_pack_modtable.py
+- lift/tools/tests/test_prelude.py
+- lift/tools/tests/test_ranges.py
+- lift/tools/tests/test_segwrites.py
+- lift/tools/tests/test_universe_r3_check.py
+- lift/tools/universe.py
+- lift/tools/writeset.py
+- lift/tools/x86flow.py
+
+## 407914779<-da0e4ff78 (182)
+
+- lift/ASSUMPTIONS.l3b.json
+- lift/README.md
+- lift/facts/build.json
+- lift/factsimg/atimgpud/build.json
+- lift/factsimg/binkw32/build.json
+- lift/factsimg/d3dx9_31/build.json
+- lift/factsimg/d3dx9_38/build.json
+- lift/factsimg/exe/build.json
+- lift/factsimg/gdffalloutnv/build.json
+- lift/factsimg/libvorbis/build.json
+- lift/factsimg/libvorbisfile/build.json
+- lift/fnvlift/core.py
+- lift/fnvlift/cpumodel_bits.py
+- lift/fnvlift/dsl.py
+- lift/fnvlift/f_cpufeat.py
+- lift/fnvlift/f_int.py
+- lift/fnvlift/f_sys.py
+- lift/fnvlift/f_x87_ctl.py
+- lift/fnvlift/inputs.py
+- lift/fnvlift/tests/_inputs.py
+- lift/fnvlift/tests/test_cpufeat_sdm.py
+- lift/fnvlift/tests/test_cs_store.py
+- lift/fnvlift/tests/test_int_vectors.py
+- lift/fnvlift/tests/test_jtab_facts.py
+- lift/fnvlift/tests/test_null_seg.py
+- lift/fnvlift/tests/test_sites.py
+- lift/fnvlift/tests/test_ud_gap.py
+- lift/fnvlift/x86sys.py
+- lift/gates/def_check.py
+- lift/gates/flagagree.py
+- lift/gates/gate_eh.py
+- lift/gates/gate_flags.py
+- lift/gates/gate_order.py
+- lift/gates/invariance.py
+- lift/gates/tests/test_gate_flags.py
+- lift/gates/tests/test_gate_lift.py
+- lift/liftsrc/README
+- lift/liftsrc/build.json
+- lift/liftsrc/certs/README
+- lift/pack/build.json
+- lift/proof/README.md
+- lift/proof/census.py
+- lift/proof/certs_build.py
+- lift/proof/defects.py
+- lift/proof/enc_table.py
+- lift/proof/formgate_inputs.json
+- lift/proof/forms.py
+- lift/proof/forms_alu.py
+- lift/proof/forms_flow.py
+- lift/proof/forms_move.py
+- lift/proof/forms_simd.py
+- lift/proof/forms_ssefp.py
+- lift/proof/forms_sys.py
+- lift/proof/lift_dsl.py
+- lift/proof/model_sail.py
+- lift/proof/privset.py
+- lift/proof/prove.py
+- lift/proof/rewrite.py
+- lift/proof/sail_pins.txt
+- lift/proof/sdmfeat.py
+- lift/proof/sdmpriv.py
+- lift/proof/shapeprove.py
+- lift/proof/symcheck.py
+- lift/proof/symform.py
+- lift/proof/tests/fpc_host.py
+- lift/proof/tests/oracle.json
+- lift/proof/tests/test_certs_build.py
+- lift/proof/tests/test_dsl_int_classes.py
+- lift/proof/tests/test_dsl_lock.py
+- lift/proof/tests/test_dsl_xsimd.py
+- lift/proof/tests/test_formgate_real.py
+- lift/proof/tests/test_forms_cmpimm.py
+- lift/proof/tests/test_forms_far.py
+- lift/proof/tests/test_forms_immsel.py
+- lift/proof/tests/test_forms_mem.py
+- lift/proof/tests/test_forms_simdclass.py
+- lift/proof/tests/test_forms_ssefp.py
+- lift/proof/tests/test_gate_fpexact.py
+- lift/proof/tests/test_model_patches.py
+- lift/proof/tests/test_rewrite.py
+- lift/proof/tests/test_rtroot.py
+- lift/proof/tests/test_sdmfeat.py
+- lift/proof/tests/test_sdmpriv.py
+- lift/proof/tests/test_shape.py
+- lift/proof/tests/test_simdspec.py
+- lift/proof/tests/test_symbranch.py
+- lift/proof/tests/test_symform.py
+- lift/proof/tests/test_udsail.py
+- lift/proof/udsail.py
+- lift/rcpcert/build.json
+- lift/rcphost/build.json
+- lift/rt/build.json
+- lift/rt/cpumodel.c
+- lift/rt/enter.cc
+- lift/rt/fnvl.h
+- lift/rt/fnvl_x87.h
+- lift/rt/imp.h
+- lift/rt/msvcrt.h
+- lift/rt/msvcrt_ci.cc
+- lift/rt/msvcrt_eh.cc
+- lift/rt/msvcrt_fp.cc
+- lift/rt/seh.cc
+- lift/sdm/build.json
+- lift/test/dic_test.py
+- lift/test/ehslice_test.py
+- lift/test/import_reads_no_rt_test.py
+- lift/test/modlift_closure_test.py
+- lift/test/pcsrctest.py
+- lift/test/r3_refine_test.py
+- lift/test/writesettest.py
+- lift/tests/guest/citest/lifted/build.json
+- lift/tests/guest/citest/native/build.json
+- lift/tests/guest/citest/native/main.cc
+- lift/tests/guest/imptest/lifted/build.json
+- lift/tests/guest/imptest/native/build.json
+- lift/tests/guest/imptest/native/main.cc
+- lift/tests/guest/msvcrttest/lifted/build.json
+- lift/tests/guest/msvcrttest/native/build.json
+- lift/tests/guest/msvcrttest/native/main.cc
+- lift/tools/CODEMAP.md
+- lift/tools/cleared_join.py
+- lift/tools/codemap.py
+- lift/tools/cpufeat_diff.py
+- lift/tools/ctlstate.py
+- lift/tools/dispgen.py
+- lift/tools/ehflow.py
+- lift/tools/ehtables.py
+- lift/tools/factsassemble.py
+- lift/tools/formcert.py
+- lift/tools/fpmodes.py
+- lift/tools/fpreach.py
+- lift/tools/fpstate.py
+- lift/tools/funcsfacts.py
+- lift/tools/gen_cpuref.py
+- lift/tools/gen_faults.py
+- lift/tools/guestgen_citest.py
+- lift/tools/guestgen_imptest.py
+- lift/tools/guestgen_msvcrttest.py
+- lift/tools/hostbuild.py
+- lift/tools/impgen.py
+- lift/tools/lifted.py
+- lift/tools/liftgen.py
+- lift/tools/liftrecipe.py
+- lift/tools/liftsrcgen.py
+- lift/tools/locksites.py
+- lift/tools/modlift.py
+- lift/tools/msvcrtnative.py
+- lift/tools/packcopy.py
+- lift/tools/packentries.py
+- lift/tools/packstage.py
+- lift/tools/pointsto.py
+- lift/tools/rcpgen.py
+- lift/tools/reconcile.py
+- lift/tools/residue.py
+- lift/tools/retnfacts.py
+- lift/tools/rttibcd.py
+- lift/tools/sdmrows_stage.py
+- lift/tools/segwrites.py
+- lift/tools/sysites.py
+- lift/tools/tests/inputs.json
+- lift/tools/tests/test_bridgegen.py
+- lift/tools/tests/test_defdisp.py
+- lift/tools/tests/test_descclass.py
+- lift/tools/tests/test_dispgen.py
+- lift/tools/tests/test_dsl_emit.py
+- lift/tools/tests/test_ehflow.py
+- lift/tools/tests/test_fixpoint_cycle.py
+- lift/tools/tests/test_jtab.py
+- lift/tools/tests/test_jtab_cases.py
+- lift/tools/tests/test_jtab_fixpoint.py
+- lift/tools/tests/test_lifted_vs_shapes.py
+- lift/tools/tests/test_liftgen_recipe.py
+- lift/tools/tests/test_lock_only.py
+- lift/tools/tests/test_modules_check.py
+- lift/tools/tests/test_pack_modtable.py
+- lift/tools/tests/test_prelude.py
+- lift/tools/tests/test_ranges.py
+- lift/tools/tests/test_segwrites.py
+- lift/tools/tests/test_universe_r3_check.py
+- lift/tools/universe.py
+- lift/tools/writeset.py
+- lift/tools/x86flow.py
+
+## 407914779<-a3d039bf0 (181)
+
+- lift/ASSUMPTIONS.l3b.json
+- lift/README.md
+- lift/facts/build.json
+- lift/factsimg/atimgpud/build.json
+- lift/factsimg/binkw32/build.json
+- lift/factsimg/d3dx9_31/build.json
+- lift/factsimg/d3dx9_38/build.json
+- lift/factsimg/exe/build.json
+- lift/factsimg/gdffalloutnv/build.json
+- lift/factsimg/libvorbis/build.json
+- lift/factsimg/libvorbisfile/build.json
+- lift/fnvlift/core.py
+- lift/fnvlift/cpumodel_bits.py
+- lift/fnvlift/dsl.py
+- lift/fnvlift/f_cpufeat.py
+- lift/fnvlift/f_int.py
+- lift/fnvlift/f_sys.py
+- lift/fnvlift/f_x87_ctl.py
+- lift/fnvlift/inputs.py
+- lift/fnvlift/tests/_inputs.py
+- lift/fnvlift/tests/test_cpufeat_sdm.py
+- lift/fnvlift/tests/test_cs_store.py
+- lift/fnvlift/tests/test_int_vectors.py
+- lift/fnvlift/tests/test_jtab_facts.py
+- lift/fnvlift/tests/test_null_seg.py
+- lift/fnvlift/tests/test_sites.py
+- lift/fnvlift/tests/test_ud_gap.py
+- lift/fnvlift/x86sys.py
+- lift/gates/def_check.py
+- lift/gates/flagagree.py
+- lift/gates/gate_eh.py
+- lift/gates/gate_flags.py
+- lift/gates/gate_order.py
+- lift/gates/invariance.py
+- lift/gates/tests/test_gate_flags.py
+- lift/gates/tests/test_gate_lift.py
+- lift/liftsrc/README
+- lift/liftsrc/build.json
+- lift/liftsrc/certs/README
+- lift/pack/build.json
+- lift/proof/README.md
+- lift/proof/census.py
+- lift/proof/certs_build.py
+- lift/proof/defects.py
+- lift/proof/enc_table.py
+- lift/proof/formgate_inputs.json
+- lift/proof/forms.py
+- lift/proof/forms_alu.py
+- lift/proof/forms_flow.py
+- lift/proof/forms_move.py
+- lift/proof/forms_simd.py
+- lift/proof/forms_ssefp.py
+- lift/proof/forms_sys.py
+- lift/proof/lift_dsl.py
+- lift/proof/model_sail.py
+- lift/proof/privset.py
+- lift/proof/prove.py
+- lift/proof/rewrite.py
+- lift/proof/sail_pins.txt
+- lift/proof/sdmfeat.py
+- lift/proof/sdmpriv.py
+- lift/proof/shapeprove.py
+- lift/proof/symcheck.py
+- lift/proof/symform.py
+- lift/proof/tests/fpc_host.py
+- lift/proof/tests/oracle.json
+- lift/proof/tests/test_certs_build.py
+- lift/proof/tests/test_dsl_int_classes.py
+- lift/proof/tests/test_dsl_lock.py
+- lift/proof/tests/test_dsl_xsimd.py
+- lift/proof/tests/test_formgate_real.py
+- lift/proof/tests/test_forms_cmpimm.py
+- lift/proof/tests/test_forms_far.py
+- lift/proof/tests/test_forms_immsel.py
+- lift/proof/tests/test_forms_mem.py
+- lift/proof/tests/test_forms_simdclass.py
+- lift/proof/tests/test_forms_ssefp.py
+- lift/proof/tests/test_gate_fpexact.py
+- lift/proof/tests/test_model_patches.py
+- lift/proof/tests/test_rewrite.py
+- lift/proof/tests/test_rtroot.py
+- lift/proof/tests/test_sdmfeat.py
+- lift/proof/tests/test_sdmpriv.py
+- lift/proof/tests/test_shape.py
+- lift/proof/tests/test_simdspec.py
+- lift/proof/tests/test_symbranch.py
+- lift/proof/tests/test_symform.py
+- lift/proof/tests/test_udsail.py
+- lift/proof/udsail.py
+- lift/rcpcert/build.json
+- lift/rcphost/build.json
+- lift/rt/build.json
+- lift/rt/enter.cc
+- lift/rt/fnvl.h
+- lift/rt/fnvl_x87.h
+- lift/rt/imp.h
+- lift/rt/msvcrt.h
+- lift/rt/msvcrt_ci.cc
+- lift/rt/msvcrt_eh.cc
+- lift/rt/msvcrt_fp.cc
+- lift/rt/seh.cc
+- lift/sdm/build.json
+- lift/test/dic_test.py
+- lift/test/ehslice_test.py
+- lift/test/import_reads_no_rt_test.py
+- lift/test/modlift_closure_test.py
+- lift/test/pcsrctest.py
+- lift/test/r3_refine_test.py
+- lift/test/writesettest.py
+- lift/tests/guest/citest/lifted/build.json
+- lift/tests/guest/citest/native/build.json
+- lift/tests/guest/citest/native/main.cc
+- lift/tests/guest/imptest/lifted/build.json
+- lift/tests/guest/imptest/native/build.json
+- lift/tests/guest/imptest/native/main.cc
+- lift/tests/guest/msvcrttest/lifted/build.json
+- lift/tests/guest/msvcrttest/native/build.json
+- lift/tests/guest/msvcrttest/native/main.cc
+- lift/tools/CODEMAP.md
+- lift/tools/cleared_join.py
+- lift/tools/codemap.py
+- lift/tools/cpufeat_diff.py
+- lift/tools/ctlstate.py
+- lift/tools/dispgen.py
+- lift/tools/ehflow.py
+- lift/tools/ehtables.py
+- lift/tools/factsassemble.py
+- lift/tools/formcert.py
+- lift/tools/fpmodes.py
+- lift/tools/fpreach.py
+- lift/tools/fpstate.py
+- lift/tools/funcsfacts.py
+- lift/tools/gen_cpuref.py
+- lift/tools/gen_faults.py
+- lift/tools/guestgen_citest.py
+- lift/tools/guestgen_imptest.py
+- lift/tools/guestgen_msvcrttest.py
+- lift/tools/hostbuild.py
+- lift/tools/impgen.py
+- lift/tools/lifted.py
+- lift/tools/liftgen.py
+- lift/tools/liftrecipe.py
+- lift/tools/liftsrcgen.py
+- lift/tools/locksites.py
+- lift/tools/modlift.py
+- lift/tools/msvcrtnative.py
+- lift/tools/packcopy.py
+- lift/tools/packentries.py
+- lift/tools/packstage.py
+- lift/tools/pointsto.py
+- lift/tools/rcpgen.py
+- lift/tools/reconcile.py
+- lift/tools/residue.py
+- lift/tools/retnfacts.py
+- lift/tools/rttibcd.py
+- lift/tools/sdmrows_stage.py
+- lift/tools/segwrites.py
+- lift/tools/sysites.py
+- lift/tools/tests/inputs.json
+- lift/tools/tests/test_bridgegen.py
+- lift/tools/tests/test_defdisp.py
+- lift/tools/tests/test_descclass.py
+- lift/tools/tests/test_dispgen.py
+- lift/tools/tests/test_dsl_emit.py
+- lift/tools/tests/test_ehflow.py
+- lift/tools/tests/test_fixpoint_cycle.py
+- lift/tools/tests/test_jtab.py
+- lift/tools/tests/test_jtab_cases.py
+- lift/tools/tests/test_jtab_fixpoint.py
+- lift/tools/tests/test_lifted_vs_shapes.py
+- lift/tools/tests/test_liftgen_recipe.py
+- lift/tools/tests/test_lock_only.py
+- lift/tools/tests/test_modules_check.py
+- lift/tools/tests/test_pack_modtable.py
+- lift/tools/tests/test_prelude.py
+- lift/tools/tests/test_ranges.py
+- lift/tools/tests/test_segwrites.py
+- lift/tools/tests/test_universe_r3_check.py
+- lift/tools/universe.py
+- lift/tools/writeset.py
+- lift/tools/x86flow.py
+
+## self<-88a506c7d (136)
+
+- JOURNAL.md
+- contract/bind.py
+- contract/bodysel.py
+- contract/exefacts.py
+- contract/gate_call.py
+- contract/gate_data.py
+- contract/gate_pcrel.py
+- contract/gate_rtti.py
+- contract/gate_vcall.py
+- contract/gate_xc.py
+- contract/gate_xunit.py
+- contract/gatefile.py
+- contract/l2sections.py
+- contract/n1.py
+- contract/objfacts.py
+- contract/objfacts_merge.py
+- contract/objfacts_one.py
+- contract/proto.py
+- contract/registry.py
+- contract/store.py
+- contract/tests/test_bind.py
+- contract/tests/test_gates.py
+- contract/tests/test_l2sections.py
+- contract/tests/test_objmerge.py
+- contract/tests/test_proto.py
+- contract/tests/test_store.py
+- contract/verdict.py
+- contract/vtid.py
+- docs/DIFFFUZZ.md
+- docs/HANDOFF2.md
+- docs/PLAN_FIRST_ELF.md
+- docs/handoff2/LEAD_BRIEF_COMMON.md
+- docs/handoff2/MERGER.md
+- docs/handoff2/SETTINGS_ALLOW.json
+- docs/handoff2/START_PROMPT.md
+- farm/brepro_job.sh
+- farm/cltree_job.sh
+- farm/fontstate_job.sh
+- farm/reccert_job.sh
+- farm/setup_verdict_env.sh
+- journal/inbox/l2-source-001.md
+- journal/inbox/l2-source-002.md
+- journal/inbox/l2-source-003.md
+- journal/inbox/l3-lift-001.md
+- journal/inbox/l3-lift-002.md
+- journal/inbox/l3-lift-003.md
+- journal/inbox/opus-briefs/l1-contract.md
+- journal/inbox/opus-briefs/l2-source.md
+- journal/inbox/opus-briefs/l3a-lift.md
+- journal/inbox/opus-briefs/l3b-lift.md
+- journal/inbox/opus-briefs/l4-verify.md
+- journal/inbox/opus-briefs/l5-platform.md
+- journal/inbox/opus-briefs/l6-render.md
+- journal/inbox/opus-briefs/l6a-deko.md
+- journal/inbox/orch-gates.md
+- journal/inbox/orch-open.md
+- journal/status/ALL.md
+- link/tables.py
+- patches/certs.json
+- patches/va-tables.external.json
+- tools/compare/scene_stats.py
+- tools/compare/sweep_report.py
+- tools/equiv/build_tree.py
+- tools/equiv/equiv.py
+- tools/equiv/msvc/fnvnx_equiv_fi.h
+- tools/equiv/unitcache.py
+- tools/farm/README.md
+- tools/farm/compile_job.sh
+- tools/farm/fetch_tree.sh
+- tools/farm/gates_job.sh
+- tools/farm/link_key.sh
+- tools/farm/quick_job.sh
+- tools/farm/quick_plan.py
+- tools/farm/ratchet.py
+- tools/farm/runner.sh
+- tools/farm/s5boot_job.sh
+- tools/farm/v1_job.sh
+- tools/gates/ready.py
+- tools/gates/thresholds.json
+- tools/link/argordergate.py
+- tools/link/compile.sh
+- tools/link/namegate.py
+- tools/link/overrides/quat_from_matrix_00a6df40.c
+- tools/link/overrides/slerp_00a6e330.c
+- tools/link/overrides/sphere_plane_004b6100.c
+- tools/lockstep/README.md
+- tools/orch/README.md
+- tools/perf/a57model/funcmodel.py
+- tools/perf/flagdiff.py
+- tools/perf/frame_budget.py
+- tools/perf/hotspot_metric.py
+- tools/pipeline/build.py
+- tools/pipeline/check_rebind.py
+- tools/report/zero_targets.py
+- tools/rules/reccert.py
+- tools/rules/s1_compile.py
+- tools/rules/s1b_patches.py
+- tools/static/fnvcheck.cpp
+- tools/static/report.py
+- tools/x86fallback/census.py
+- verify/cas.py
+- verify/coffnorm.py
+- verify/env.json
+- verify/envcheck.py
+- verify/gate_pure.py
+- verify/gate_tests.py
+- verify/gates.json
+- verify/graph.py
+- verify/icount.py
+- verify/l1.py
+- verify/l1graph.py
+- verify/opentrace.py
+- verify/puregate.py
+- verify/puregate_policy.py
+- verify/runtime.py
+- verify/sandbox.py
+- verify/tests/test_cas.py
+- verify/tests/test_coffnorm.py
+- verify/tests/test_envcheck.py
+- verify/tests/test_fpbound.py
+- verify/tests/test_gates.py
+- verify/tests/test_graph.py
+- verify/tests/test_icount.py
+- verify/tests/test_l1graph.py
+- verify/tests/test_puregate.py
+- verify/tests/test_runtime.py
+- verify/tests/test_sandbox.py
+- verify/tests/test_sdcheck.py
+- verify/tests/test_toolflags.py
+- verify/tests/test_unitstage.py
+- verify/tests/test_verdict.py
+- verify/toolflags.py
+- verify/toolflags_policy.py
+- verify/unitstage.py
+- verify/unitview.py
+- verify/verdict.py
+
+## da0e4ff78<-88a506c7d (130)
+
+- render/d3d9/QUEUE.md
+- render/d3d9/backend/nxgpu4.h
+- render/d3d9/cmp/README.md
+- render/d3d9/cmp/d9cmp.py
+- render/d3d9/cmp/d9replay_rt.cpp
+- render/d3d9/cmp/d9replay_rt.h
+- render/d3d9/cmp/d9s1.py
+- render/d3d9/dev/README.md
+- render/d3d9/dev/d3d9_adapter.cpp
+- render/d3d9/dev/d3d9_adapter.h
+- render/d3d9/dev/d9impl_hooks.h
+- render/d3d9/dev/obj.cpp
+- render/d3d9/dev/obj.h
+- render/d3d9/dev/res_buf.cpp
+- render/d3d9/dev/res_core.h
+- render/d3d9/dev/res_decl.cpp
+- render/d3d9/dev/res_fvf.cpp
+- render/d3d9/dev/res_hooks.h
+- render/d3d9/dev/res_query.cpp
+- render/d3d9/dev/res_shader.cpp
+- render/d3d9/dev/res_sm.h
+- render/d3d9/dev/res_smcheck.cpp
+- render/d3d9/dev/res_smgen.py
+- render/d3d9/dev/state_ext.cpp
+- render/d3d9/dev/state_gen.py
+- render/d3d9/dev/state_model.py
+- render/d3d9/dev/state_rt.cpp
+- render/d3d9/dev/state_rt.h
+- render/d3d9/env/ENV_PIN.txt
+- render/d3d9/env/README.md
+- render/d3d9/env/env_rules.cpp.in
+- render/d3d9/env/gen_env.py
+- render/d3d9/ffp/README.md
+- render/d3d9/ffp/ffp.frag.glsl
+- render/d3d9/ffp/ffp.vert.glsl
+- render/d3d9/ffp/ffp_ps_ref.c
+- render/d3d9/ffp/ffp_ps_ref.h
+- render/d3d9/ffp/ffp_state.c
+- render/d3d9/ffp/ffp_state.h
+- render/d3d9/ffp/ffp_vs_README.md
+- render/d3d9/ffp/ffp_vs_ref.c
+- render/d3d9/ffp/ffp_vs_ref.h
+- render/d3d9/ffp/ffp_vs_state.c
+- render/d3d9/ffp/ffp_vs_state.h
+- render/d3d9/gen/README.md
+- render/d3d9/gen/STREAM.md
+- render/d3d9/gen/d9stream.cpp
+- render/d3d9/gen/d9stream.h
+- render/d3d9/gen/d9wrap_port.h
+- render/d3d9/gen/gen_expr.py
+- render/d3d9/gen/gen_impl.py
+- render/d3d9/gen/gen_meth.py
+- render/d3d9/gen/gen_replay.py
+- render/d3d9/gen/gen_tab.py
+- render/d3d9/gen/gen_wrap.py
+- render/d3d9/rec/README.md
+- render/d3d9/rec/build.sh
+- render/d3d9/rec/d9wrap_port.h
+- render/d3d9/rec/farm/README.md
+- render/d3d9/rec/farm/d9rec_job.sh
+- render/d3d9/rec/farm/d9rec_stats.py
+- render/d3d9/rec/gen_ids.py
+- render/d3d9/rec/rec_dc.cpp
+- render/d3d9/rec/rec_main.cpp
+- render/d3d9/spec/README.md
+- render/d3d9/spec/d3d9_cls.py
+- render/d3d9/spec/d3d9_exports.py
+- render/d3d9/spec/d3d9_expr.py
+- render/d3d9/spec/d3d9_rules.py
+- render/d3d9/spec/d3d9_spec.json
+- render/d3d9/spec/d3d9_spec.py
+- render/d3d9/spec/d3d9_structs.py
+- render/d3d9/spec/d3d9_tables.py
+- render/native/CLAIMS.md
+- render/native/STATUS.md
+- render/native/capture/d3d9_exec.cpp
+- render/native/capture/d3d9_exec.h
+- render/native/capture/nx_render.cpp
+- render/native/n0/scenes.cpp
+- render/shaders/README.md
+- render/shaders/include/fnvnx_dk_layout.h
+- render/shaders/include/fnvnx_shaders.h
+- render/shaders/mojoshader.patch
+- render/shaders/src/backend.h
+- render/shaders/src/backend_mojoshader.c
+- render/shaders/src/frontend.c
+- render/shaders/src/sdp2dksh.c
+- render/shaders/src/translate.c
+- render/shaders/total/README.md
+- render/shaders/total/sm_classes.py
+- render/shaders/total/sm_docs.py
+- render/shaders/total/sm_emit.py
+- render/shaders/total/sm_hand.py
+- render/shaders/total/sm_illegal.tsv
+- render/shaders/total/sm_legacy.py
+- render/shaders/total/sm_legacy.tsv
+- render/shaders/total/sm_rules2.py
+- render/shaders/total/sm_run.py
+- render/shaders/total/sm_table.json
+- render/shaders/total/sm_table.py
+- render/shaders/total/sm_total.tsv
+- render/shaders/total/sm_universe.py
+- render/shaders/total/sm_universe2.py
+- render/shaders/total/sm_xref.py
+- render/total/VERDICT_PROPOSAL.md
+- render/total/census/enum_README.md
+- render/total/census/enum_cov.py
+- render/total/census/enum_coverage.tsv
+- render/total/census/enum_coverage_sv.tsv
+- render/total/census/enum_probe.c
+- render/total/census/enum_run.sh
+- render/total/census/enum_skips.tsv
+- render/total/census/enum_spec.py
+- render/total/census/enum_state_domain.tsv
+- render/total/census/enum_summary.tsv
+- render/total/census/enum_universe.tsv
+- render/total/census/method_README.md
+- render/total/census/method_cov.py
+- render/total/census/method_coverage.tsv
+- render/total/census/method_spec.py
+- render/total/census/method_state_semantics.md
+- render/total/census/method_universe.tsv
+- render/total/census/sm_README.md
+- render/total/census/sm_cases.py
+- render/total/census/sm_census.py
+- render/total/census/sm_hand.py
+- render/total/census/sm_ops.tsv
+- render/total/census/sm_static_fails.tsv
+- render/total/gate_l6.py
+- render/total/no_old_stack.sh
+
+## 04f1e5dfb<-88a506c7d (118)
+
+- tests/gates/fixtures/port/thresholds.json
+- tests/gates/fixtures/ready/_published.json
+- tests/gates/test_ready.py
+- tests/l6/cmp/test_cmp.py
+- tests/l6/conf/build.sh
+- tests/l6/conf/run.py
+- tests/l6/dev/t_blocks.cpp
+- tests/l6/dev/t_common.h
+- tests/l6/dev/t_defaults.cpp
+- tests/l6/dev/t_factory.cpp
+- tests/l6/dev/t_refs.cpp
+- tests/l6/dev/t_tables.h
+- tests/l6/dev/t_valid.cpp
+- tests/l6/dev/test_dev.cpp
+- tests/l6/dev/test_dev.py
+- tests/l6/env/envdev.h
+- tests/l6/env/envprobe2.c
+- tests/l6/env/envq.py
+- tests/l6/env/envrun.h
+- tests/l6/env/hostenv.cpp
+- tests/l6/env/make_env.py
+- tests/l6/env/test_env.py
+- tests/l6/ffp_ps/ffp_driver.c
+- tests/l6/ffp_ps/ffp_test_common.h
+- tests/l6/ffp_ps/flatten.py
+- tests/l6/ffp_ps/gl_driver.c
+- tests/l6/ffp_ps/oracle.py
+- tests/l6/ffp_ps/test_ffp_ps.py
+- tests/l6/ffp_vs/gen.py
+- tests/l6/ffp_vs/oracle.py
+- tests/l6/ffp_vs/test_ffp_vs.py
+- tests/l6/ffp_vs/vs_common.h
+- tests/l6/ffp_vs/vs_driver.c
+- tests/l6/ffp_vs/vs_gl.c
+- tests/l6/ffp_vs/vsrec.py
+- tests/l6/rec/dump_env.py
+- tests/l6/rec/envprobe.c
+- tests/l6/rec/test_rec.py
+- tests/l6/rec/wine_llvmpipe_env.tsv
+- tests/l6/rec/wine_llvmpipe_env_nxd9play.tsv
+- tests/l6/recjob/test_recjob.py
+- tests/l6/res/d9impl_hooks.h
+- tests/l6/res/t_buf.cpp
+- tests/l6/res/t_common.h
+- tests/l6/res/t_decl.cpp
+- tests/l6/res/t_env.cpp
+- tests/l6/res/t_fvf.cpp
+- tests/l6/res/t_query.cpp
+- tests/l6/res/t_shader.cpp
+- tests/l6/res/test_res.py
+- tests/l6/sm_fix/gl_run.c
+- tests/l6/sm_fix/gl_vs_run.c
+- tests/l6/sm_fix/smlib.py
+- tests/l6/sm_fix/test_al.py
+- tests/l6/sm_fix/test_layout.py
+- tests/l6/sm_fix/test_ps1x.py
+- tests/l6/sm_fix/test_sink.py
+- tests/l6/sm_fix/test_sm_ops.py
+- tests/l6/test_sm_total.py
+- tests/l6/test_spec.py
+- tests/l6/wrap/d9s1_read.py
+- tests/l6/wrap/enc.py
+- tests/l6/wrap/gen_echo.py
+- tests/l6/wrap/plan.py
+- tests/l6/wrap/pyfn.py
+- tests/l6/wrap/test_wrap.py
+- tests/loader/test_identity.c
+- tests/s1/test_equiv_gendir.py
+- tests/s1/test_reccert.py
+- tests/s1/test_rules.py
+- tests/s12/order/run.py
+- tests/s12/order/units.cpp
+- tests/s12/run.py
+- tests/s12/test_compile_flags.sh
+- tests/s15/test_zero_targets.py
+- tests/s1b/gcc_check.py
+- tests/s1b/msvc_check.py
+- tests/s1b/test_patches.py
+- tests/s2d/test_bodies.py
+- tests/s2d/test_vslot_match.py
+- tests/s4/Makefile
+- tests/s4/backends/backends.tsv
+- tests/s4/m32/main.cpp
+- tests/s4/m32/test_modules.cpp
+- tests/s4/test_crt_kernel32.cpp
+- tests/s4/test_file_contract.cpp
+- tests/s4/test_gdi.cpp
+- tests/s4/test_heap.cpp
+- tests/s4/test_imports.cpp
+- tests/s4/test_misc.cpp
+- tests/s4/test_msgqueue.cpp
+- tests/s4/test_msvcrt_exports.cpp
+- tests/s4/test_nls.cpp
+- tests/s4/test_plat.cpp
+- tests/s4/test_registry.cpp
+- tests/s4/test_resource.cpp
+- tests/s4/test_sync_contract.cpp
+- tests/s4/test_thread_contract.cpp
+- tests/s4/test_win_conf.cpp
+- tests/s4/test_window_tree.cpp
+- tests/s4/test_winsock.cpp
+- tests/s4/trapcheck.sh
+- tests/s5/boot_trace.py
+- tests/s5/emu_guest.py
+- tests/s6b/shaders.s6b
+- tests/s6n/Makefile
+- tests/s6n/test_front.cpp
+- tests/s6n/test_nx_render.py
+- tests/s7/test_audio.cpp
+- tests/s7/test_dshow_contract.cpp
+- tests/s7/test_dsound_contract.cpp
+- tests/s7/test_input_contract.cpp
+- tests/s7/test_waveout.cpp
+- tests/t1/test_quick.sh
+- tests/t1/test_ratchet.py
+- tests/v1/ftoi/ref.c
+- tests/v1/ftoi/target.cpp
+- tests/v1/test_ftoi_fuzz.py
+
+## self<-407914779 (98)
+
+- contract/tests/test_bridgetable.py
+- contract/tests/test_exportgen.py
+- contract/tests/test_gate_data_nolink.py
+- contract/tests/test_n1_objects.py
+- contract/tests/test_nativerows.py
+- contract/tests/test_nobinding.py
+- contract/tests/test_objfacts_dir.py
+- farm/aggregate_certs.sh
+- farm/sail_toolchain.sh
+- journal/inbox/l3-lift-001.md
+- journal/inbox/l3-lift-002.md
+- journal/inbox/l3-lift-003.md
+- journal/inbox/l3a-int3-assumption-blocks.md
+- journal/inbox/l3a-lift-001.md
+- journal/inbox/l3a-lift-002.md
+- journal/inbox/l3a-lift-003.md
+- journal/inbox/l3a-lift-004.md
+- journal/inbox/l3a-lift-handoff-opus.md
+- journal/inbox/l3a-lift-w4-001.md
+- journal/inbox/l3a-lift-w8-001.md
+- journal/inbox/l3a-w3-assumptions.md
+- journal/inbox/l3a-w6-reftable.md
+- journal/inbox/l3a-w7-fpexc.md
+- journal/inbox/l3a-w7-simd.md
+- journal/inbox/l3a-w8-compilecalls.md
+- journal/inbox/l3a-w8-l4-tests-to-restore.md
+- journal/inbox/l3a-w8-native-fp.md
+- journal/inbox/l3b-lift-001.md
+- journal/inbox/l3b-lift-002.md
+- journal/inbox/l3b-lift-handoff-opus.md
+- journal/inbox/l3b-lift-w4-bump-hunks.md
+- journal/inbox/l3b-w1-census.md
+- journal/inbox/l3b-w11-form-mapping.tsv
+- journal/inbox/l3b-w2-rtroot.md
+- journal/inbox/l3b-w3-byconstruction.md
+- journal/inbox/l3b-w3-doubles-census.md
+- journal/inbox/l3b-w3-noref.md
+- journal/inbox/l3b-w3-r9.md
+- journal/inbox/l3b-w4-builders-design.md
+- journal/inbox/l3b-w4-forms.md
+- journal/inbox/l3b-w9-ctx.md
+- journal/inbox/l3b-w9-eh-oracle.md
+- journal/inbox/l3b-w9-simd.md
+- journal/inbox/l3b-w9-to-l1.md
+- journal/inbox/l3b-w9-x87-cite.md
+- journal/inbox/l3b-w9-x87-list.md
+- journal/status/l3a-lift.md
+- journal/status/l3b-lift.md
+- journal/status/l5-verdict-e8e54dcea/README.md
+- journal/status/l5-verdict-e8e54dcea/abi.tsv
+- journal/status/l5-verdict-e8e54dcea/imports.tsv
+- journal/status/l5-verdict-e8e54dcea/linkstrict.tsv
+- journal/status/l5-verdict-e8e54dcea/machine.tsv
+- journal/status/l5-verdict-e8e54dcea/objstub.tsv
+- journal/status/l5-verdict-e8e54dcea/pure.tsv
+- journal/status/l5-verdict-e8e54dcea/rtasm.tsv
+- journal/status/l5-verdict-e8e54dcea/selftests.tsv
+- link/tests/oracle.json
+- link/tests/test_dispatch_order.py
+- link/tests/test_order_local.py
+- link/tests/test_sdd_order.py
+- verify/ASSUMPTIONS.json
+- verify/RECIPE.md
+- verify/admit.json
+- verify/contract_inputs.json
+- verify/gate_admit.py
+- verify/gate_assumptions.py
+- verify/guest_flags.py
+- verify/objstub.py
+- verify/pathflow.py
+- verify/recipe.py
+- verify/tests/test_admit.py
+- verify/tests/test_archive_sources.py
+- verify/tests/test_bootinputs.py
+- verify/tests/test_bootpath.py
+- verify/tests/test_bootrt.py
+- verify/tests/test_bootstart.py
+- verify/tests/test_bridgefacts.py
+- verify/tests/test_descs.py
+- verify/tests/test_extpaths.py
+- verify/tests/test_gamedata_fetch.py
+- verify/tests/test_gate_abspath.py
+- verify/tests/test_gate_assumptions.py
+- verify/tests/test_gate_liftfacts.py
+- verify/tests/test_gate_pure.py
+- verify/tests/test_gate_rawrite.py
+- verify/tests/test_genimports.py
+- verify/tests/test_gl4_cursor.py
+- verify/tests/test_loader.py
+- verify/tests/test_loader_tables.py
+- verify/tests/test_missingrecipe.py
+- verify/tests/test_pathflow_defaults.py
+- verify/tests/test_plugin_compiler.py
+- verify/tests/test_plugsem_lazy.py
+- verify/tests/test_recipe_cli.py
+- verify/tests/test_runinsrc.py
+- verify/tests/test_runpython.py
+- verify/tests/test_selftests_universe.py
+
+## self<-da0e4ff78 (89)
+
+- contract/modules.py
+- contract/reached.py
+- contract/tests/test_bridgetable.py
+- contract/tests/test_exportgen.py
+- contract/tests/test_gate_data_nolink.py
+- contract/tests/test_imagerec.py
+- contract/tests/test_n1_objects.py
+- contract/tests/test_nativerows.py
+- contract/tests/test_nobinding.py
+- contract/tests/test_objfacts_dir.py
+- contract/tests/test_reached.py
+- journal/inbox/l3-lift-001.md
+- journal/inbox/l3-lift-002.md
+- journal/inbox/l3-lift-003.md
+- journal/inbox/l3a-int3-assumption-blocks.md
+- journal/inbox/l3a-lift-001.md
+- journal/inbox/l3a-lift-002.md
+- journal/inbox/l3a-lift-003.md
+- journal/inbox/l3a-lift-004.md
+- journal/inbox/l3a-lift-handoff-opus.md
+- journal/inbox/l3a-lift-w4-001.md
+- journal/inbox/l3a-lift-w8-001.md
+- journal/inbox/l3a-w3-assumptions.md
+- journal/inbox/l3a-w6-reftable.md
+- journal/inbox/l3a-w7-fpexc.md
+- journal/inbox/l3a-w7-simd.md
+- journal/inbox/l3a-w8-compilecalls.md
+- journal/inbox/l3a-w8-l4-tests-to-restore.md
+- journal/inbox/l3a-w8-native-fp.md
+- journal/inbox/l3b-lift-001.md
+- journal/inbox/l3b-lift-002.md
+- journal/inbox/l3b-lift-handoff-opus.md
+- journal/inbox/l3b-w1-census.md
+- journal/inbox/l3b-w2-rtroot.md
+- journal/inbox/l3b-w3-r9.md
+- journal/inbox/l3b-w4-forms.md
+- journal/status/l3a-lift.md
+- journal/status/l3b-lift.md
+- journal/status/l5-verdict-e8e54dcea/README.md
+- journal/status/l5-verdict-e8e54dcea/abi.tsv
+- journal/status/l5-verdict-e8e54dcea/imports.tsv
+- journal/status/l5-verdict-e8e54dcea/linkstrict.tsv
+- journal/status/l5-verdict-e8e54dcea/machine.tsv
+- journal/status/l5-verdict-e8e54dcea/objstub.tsv
+- journal/status/l5-verdict-e8e54dcea/pure.tsv
+- journal/status/l5-verdict-e8e54dcea/rtasm.tsv
+- journal/status/l5-verdict-e8e54dcea/selftests.tsv
+- journal/status/l6-render-construction.md
+- link/tests/oracle.json
+- link/tests/test_dispatch_order.py
+- link/tests/test_order_local.py
+- link/tests/test_sdd_order.py
+- verify/RECIPE.md
+- verify/TOOLS.md
+- verify/admit.json
+- verify/cpuid_model.json
+- verify/gate_admit.py
+- verify/gate_assumptions.py
+- verify/gate_contract.py
+- verify/gate_hostapi.py
+- verify/gates.d/abi.json
+- verify/gates.d/addr32.json
+- verify/gates.d/argordergate.json
+- verify/gates.d/order.json
+- verify/gatesdir.py
+- verify/guest_flags.py
+- verify/objstub.py
+- verify/pathflow.py
+- verify/recipe.py
+- verify/tests/test_admit.py
+- verify/tests/test_extpaths.py
+- verify/tests/test_gamedata_fetch.py
+- verify/tests/test_gate_abspath.py
+- verify/tests/test_gate_assumptions.py
+- verify/tests/test_gate_liftfacts.py
+- verify/tests/test_gate_pure.py
+- verify/tests/test_gate_rawrite.py
+- verify/tests/test_genimports.py
+- verify/tests/test_gl4_cursor.py
+- verify/tests/test_missingrecipe.py
+- verify/tests/test_pathflow_defaults.py
+- verify/tests/test_plugin_compiler.py
+- verify/tests/test_plugsem_lazy.py
+- verify/tests/test_recipe_cli.py
+- verify/tests/test_runinsrc.py
+- verify/tests/test_runpython.py
+- verify/tests/test_selftests_universe.py
+- verify/tests/test_toolflags.py
+- verify/toolflags.py
+
+## self<-a3d039bf0 (75)
+
+- contract/tests/test_bridgetable.py
+- contract/tests/test_exportgen.py
+- contract/tests/test_gate_data_nolink.py
+- contract/tests/test_n1_objects.py
+- contract/tests/test_nativerows.py
+- contract/tests/test_nobinding.py
+- contract/tests/test_objfacts_dir.py
+- journal/inbox/l3-lift-001.md
+- journal/inbox/l3-lift-002.md
+- journal/inbox/l3-lift-003.md
+- journal/inbox/l3a-int3-assumption-blocks.md
+- journal/inbox/l3a-lift-001.md
+- journal/inbox/l3a-lift-002.md
+- journal/inbox/l3a-lift-003.md
+- journal/inbox/l3a-lift-004.md
+- journal/inbox/l3a-lift-handoff-opus.md
+- journal/inbox/l3a-lift-w4-001.md
+- journal/inbox/l3a-lift-w8-001.md
+- journal/inbox/l3a-w3-assumptions.md
+- journal/inbox/l3a-w6-reftable.md
+- journal/inbox/l3a-w7-fpexc.md
+- journal/inbox/l3a-w7-simd.md
+- journal/inbox/l3a-w8-compilecalls.md
+- journal/inbox/l3a-w8-l4-tests-to-restore.md
+- journal/inbox/l3a-w8-native-fp.md
+- journal/inbox/l3b-lift-001.md
+- journal/inbox/l3b-lift-002.md
+- journal/inbox/l3b-lift-handoff-opus.md
+- journal/inbox/l3b-w1-census.md
+- journal/inbox/l3b-w2-rtroot.md
+- journal/inbox/l3b-w3-r9.md
+- journal/inbox/l3b-w4-forms.md
+- journal/status/l3a-lift.md
+- journal/status/l3b-lift.md
+- journal/status/l5-verdict-e8e54dcea/README.md
+- journal/status/l5-verdict-e8e54dcea/abi.tsv
+- journal/status/l5-verdict-e8e54dcea/imports.tsv
+- journal/status/l5-verdict-e8e54dcea/linkstrict.tsv
+- journal/status/l5-verdict-e8e54dcea/machine.tsv
+- journal/status/l5-verdict-e8e54dcea/objstub.tsv
+- journal/status/l5-verdict-e8e54dcea/pure.tsv
+- journal/status/l5-verdict-e8e54dcea/rtasm.tsv
+- journal/status/l5-verdict-e8e54dcea/selftests.tsv
+- journal/status/l6-render-construction.md
+- link/tests/oracle.json
+- link/tests/test_dispatch_order.py
+- link/tests/test_order_local.py
+- link/tests/test_sdd_order.py
+- verify/RECIPE.md
+- verify/admit.json
+- verify/cpuid_model.json
+- verify/gate_admit.py
+- verify/gate_assumptions.py
+- verify/guest_flags.py
+- verify/objstub.py
+- verify/pathflow.py
+- verify/recipe.py
+- verify/tests/test_admit.py
+- verify/tests/test_extpaths.py
+- verify/tests/test_gamedata_fetch.py
+- verify/tests/test_gate_abspath.py
+- verify/tests/test_gate_assumptions.py
+- verify/tests/test_gate_liftfacts.py
+- verify/tests/test_gate_pure.py
+- verify/tests/test_gate_rawrite.py
+- verify/tests/test_genimports.py
+- verify/tests/test_gl4_cursor.py
+- verify/tests/test_missingrecipe.py
+- verify/tests/test_pathflow_defaults.py
+- verify/tests/test_plugin_compiler.py
+- verify/tests/test_plugsem_lazy.py
+- verify/tests/test_recipe_cli.py
+- verify/tests/test_runinsrc.py
+- verify/tests/test_runpython.py
+- verify/tests/test_selftests_universe.py
+
+## 407914779<-88a506c7d (63)
+
+- lift/README.md
+- lift/bench/chain.py
+- lift/bench/chrun.py
+- lift/bench/ehtest.py
+- lift/bench/nltest.py
+- lift/bench/phf.py
+- lift/fnvlift/__init__.py
+- lift/fnvlift/core.py
+- lift/fnvlift/dsl.py
+- lift/fnvlift/f_flow.py
+- lift/fnvlift/f_int.py
+- lift/fnvlift/f_simd_int.py
+- lift/fnvlift/f_sse.py
+- lift/fnvlift/f_string.py
+- lift/fnvlift/f_sys.py
+- lift/fnvlift/f_x87.py
+- lift/fnvlift/f_x87_ctl.py
+- lift/fnvlift/image.py
+- lift/fnvlift/universe.py
+- lift/poc/lifter.py
+- lift/proof/README.md
+- lift/proof/backends.py
+- lift/proof/defects.py
+- lift/proof/enc_table.py
+- lift/proof/forms.py
+- lift/proof/forms_alu.py
+- lift/proof/forms_flow.py
+- lift/proof/forms_move.py
+- lift/proof/model_sail.py
+- lift/proof/prove.py
+- lift/proof/rewrite.py
+- lift/proof/sail_build.sh
+- lift/proof/universe.py
+- lift/proof/x86_code_regs.sail
+- lift/rt/cpumodel.c
+- lift/rt/enter.c
+- lift/rt/fnvl.h
+- lift/rt/fnvl_x87.h
+- lift/rt/rt.c
+- lift/rt/seh.c
+- lift/rt/x87.c
+- lift/test/addrwrap.py
+- lift/test/golden.py
+- lift/test/instest.py
+- lift/test/instest_extra.py
+- lift/test/liftall_check.py
+- lift/test/rothost.py
+- lift/test/x87dyn.py
+- lift/test/x87test.py
+- lift/tools/codemap.py
+- lift/tools/ehtables.py
+- lift/tools/formcert.py
+- lift/tools/fpmodes.py
+- lift/tools/liftall.py
+- lift/tools/memclass.py
+- lift/tools/modlift.py
+- lift/tools/pemod.py
+- lift/tools/reconcile.py
+- lift/tools/universe.py
+- lift/tools/x86flow.py
+- lift/verify_r9/compare.py
+- lift/verify_r9/frameesc2.py
+- lift/verify_r9/hunt.py
+
+## a3d039bf0<-88a506c7d (44)
+
+- loader/Makefile
+- loader/include/fnvnx_identity.h
+- loader/src/identity.c
+- platform/audio/ds3d.cpp
+- platform/audio/dshow.cpp
+- platform/audio/dshow_filters.cpp
+- platform/audio/dshow_int.h
+- platform/audio/dsound.cpp
+- platform/audio/mixer.cpp
+- platform/audio/waveout.cpp
+- platform/crt/MSVCRT_EXPORTS.tsv
+- platform/crt/crt_symbols.tsv
+- platform/crt/fnvnx_iobuf.h
+- platform/crt/iob.c
+- platform/crt/msvcrt_exports.cpp
+- platform/crt/string.c
+- platform/input/dinput.cpp
+- platform/input/register.cpp
+- platform/input/xinput.cpp
+- platform/manifest/ENV_TRUTH.md
+- platform/manifest/bridgetable.py
+- platform/manifest/check_constants.py
+- platform/manifest/pemanifest.py
+- platform/win32/crt_kernel32.cpp
+- platform/win32/exports.cpp
+- platform/win32/file.cpp
+- platform/win32/gdi32.cpp
+- platform/win32/memory.cpp
+- platform/win32/msgqueue.cpp
+- platform/win32/nls.cpp
+- platform/win32/platstat.cpp
+- platform/win32/registry.cpp
+- platform/win32/resource.cpp
+- platform/win32/services.cpp
+- platform/win32/sync.cpp
+- platform/win32/thread.cpp
+- platform/win32/time.cpp
+- platform/win32/tools/gen_nls.py
+- platform/win32/waitgraph.cpp
+- platform/win32/window.cpp
+- platform/win32/window_int.h
+- platform/win32/winsock.cpp
+- shim/include/fnvnx_rawvt.h
+- shim/include/fnvnx_vtm.h
+
+## da0e4ff78<-407914779 (42)
+
+- bridgefacts/crossing.py
+- bridgefacts/d3d9/d3d9_smwalk.py
+- bridgefacts/d3d9/d3d9_spec.py
+- bridgefacts/test_crossing.py
+- render/d3d9/build.json
+- render/d3d9/dev/README.md
+- render/d3d9/dev/const_fixme.h
+- render/d3d9/dev/copy_misc.cpp
+- render/d3d9/dev/d3d9_exports.cpp
+- render/d3d9/dev/d5a_fixme.tsv
+- render/d3d9/dev/draw_core.h
+- render/d3d9/dev/m1_misc.cpp
+- render/d3d9/dev/platform_hooks.tsv
+- render/d3d9/dev/pv_exit.cpp
+- render/d3d9/dev/pvw.h
+- render/d3d9/dev/pvw_fixme.tsv
+- render/d3d9/dev/state_model.py
+- render/d3d9/dev/x1_validator.cpp
+- render/d3d9/env/envq.py
+- render/d3d9/env/gen_enums.py
+- render/d3d9/env/gen_env.py
+- render/d3d9/gen/gen_bridge.py
+- render/d3d9/gen/gen_expr.py
+- render/d3d9/gen/gen_meth.py
+- render/d3d9/gen/gen_replay.py
+- render/d3d9/gen/gen_tab.py
+- render/d3d9/gen/gen_wine_ids.py
+- render/d3d9/gen/gen_wrap.py
+- render/pair/build.host.json
+- render/shaders/sm_link_sum/build.json
+- render/shaders/total/build.json
+- render/shaders/total/gen_opsyntax.py
+- render/shaders/total/sm_legacy.py
+- render/shaders/total/sm_rules2.py
+- render/shaders/total/sm_table.py
+- render/smscan/build.host.json
+- render/total/d3d9total/build.json
+- render/total/d3d9total/stage.py
+- render/total/gate_d3d9total.py
+- render/total/gate_sm_link.py
+- render/total/tests/test_d3d9total.py
+- render/total/tools/count_stage_evals.py
+
+## a36b3c8f2<-88a506c7d (38)
+
+- toolchain/addr/build.sh
+- toolchain/addr/fnvnx_addr.cc
+- toolchain/addr/test_addr.cpp
+- toolchain/addr/test_addr.py
+- toolchain/dispatch/build.sh
+- toolchain/dispatch/fnvnx_dispatch.cc
+- toolchain/dispatch/test_dispatch.cpp
+- toolchain/dispatch/test_dispatch.py
+- toolchain/ftoi/fnvnx_ftoi.cc
+- toolchain/game/build.sh
+- toolchain/game/pcrel_abs.py
+- toolchain/gcc/build.sh
+- toolchain/msvcmodel/build.sh
+- toolchain/msvcmodel/msvcmodel.patch
+- toolchain/msvcmodel/test_msvcmodel.cpp
+- toolchain/msvcmodel/test_msvcmodel.py
+- toolchain/names/build.sh
+- toolchain/names/fnvnx_names.cc
+- toolchain/names/test_names.cpp
+- toolchain/names/test_names.expect
+- toolchain/names/test_names.py
+- toolchain/order/fnvnx_order.cc
+- toolchain/order/measure.py
+- toolchain/pi/build.sh
+- toolchain/pi/fnvnx_pi.cc
+- toolchain/pi/test_pi.cpp
+- toolchain/pi/test_pi.py
+- toolchain/sdd/build.sh
+- toolchain/sdd/fnvnx_sdd.cc
+- toolchain/sdd/test_sdd.cpp
+- toolchain/sdd/test_sdd.py
+- toolchain/vtnames/build.sh
+- toolchain/vtnames/fnvnx_names_pre.h
+- toolchain/vtnames/fnvnx_vtnames.cc
+- toolchain/vtnames/names_pass.py
+- toolchain/vtnames/test_sympair.cpp
+- toolchain/vtnames/test_vtnames.cpp
+- toolchain/vtnames/test_vtnames.py
+
+## a3d039bf0<-407914779 (27)
+
+- manifest/check_filesites.py
+- manifest/check_funcfacts.py
+- manifest/check_galaxy.py
+- manifest/check_gen_fontmachine.py
+- manifest/check_hostapi.py
+- manifest/check_regsites.py
+- manifest/filesites.py
+- manifest/fontfaces.py
+- manifest/funcfacts.py
+- manifest/gen_defwndproc.py
+- manifest/gen_fontmachine.py
+- manifest/gen_registry_seed.py
+- manifest/gen_sysmetrics.py
+- manifest/gen_wine_colors.py
+- manifest/import_escape.py
+- manifest/pemanifest.py
+- manifest/prefs_settings.py
+- manifest/regclass.py
+- manifest/regsites.py
+- manifest/sys_names.py
+- platform/build.json
+- platform/com/gen_combridge.py
+- platform/com/test_gen_cxx.py
+- platform/include/fnvnx_win32_ext.h
+- platform/win32/crt_kernel32.cpp
+- platform/win32/services.cpp
+- rt/guest_main/build.json
+
+## a36b3c8f2<-a3d039bf0 (18)
+
+- toolchain/msvcmodel/datamodel/s23_codeview.py
+- toolchain/msvcmodel/stamp.py
+- toolchain/tests/oracle.json
+- toolchain/tests/plugbuild.py
+- toolchain/tests/test_cc1.py
+- toolchain/tests/test_dispatch.py
+- toolchain/tests/test_dispatch_defdisp_ns.py
+- toolchain/tests/test_dispatch_entry.py
+- toolchain/tests/test_exitgen_defdisp.py
+- toolchain/tests/test_frame.py
+- toolchain/tests/test_ftoi.py
+- toolchain/tests/test_ftoi_sse2neon.py
+- toolchain/tests/test_layout.py
+- toolchain/tests/test_ldbl.py
+- toolchain/tests/test_names.py
+- toolchain/tests/test_odrdef.py
+- toolchain/tests/test_pi.py
+- toolchain/tests/test_sdd.py
+
+## a36b3c8f2<-da0e4ff78 (18)
+
+- toolchain/msvcmodel/datamodel/s23_codeview.py
+- toolchain/msvcmodel/stamp.py
+- toolchain/tests/oracle.json
+- toolchain/tests/plugbuild.py
+- toolchain/tests/test_cc1.py
+- toolchain/tests/test_dispatch.py
+- toolchain/tests/test_dispatch_defdisp_ns.py
+- toolchain/tests/test_dispatch_entry.py
+- toolchain/tests/test_exitgen_defdisp.py
+- toolchain/tests/test_frame.py
+- toolchain/tests/test_ftoi.py
+- toolchain/tests/test_ftoi_sse2neon.py
+- toolchain/tests/test_layout.py
+- toolchain/tests/test_ldbl.py
+- toolchain/tests/test_names.py
+- toolchain/tests/test_odrdef.py
+- toolchain/tests/test_pi.py
+- toolchain/tests/test_sdd.py
+
+## a3d039bf0<-da0e4ff78 (4)
+
+- manifest/check_galaxy.py
+- manifest/check_gen_fontmachine.py
+- manifest/check_hostapi.py
+- manifest/funcfacts.py
+
+## a36b3c8f2<-04f1e5dfb (2)
+
+- toolchain/tests/plugbuild.py
+- toolchain/tests/test_ldbl.py
+
+## 88a506c7d<-407914779 (1)
+
+- CLAUDE.md
+
+## 88a506c7d<-a3d039bf0 (1)
+
+- CLAUDE.md
+
+## 88a506c7d<-da0e4ff78 (1)
+
+- CLAUDE.md
+
+## 88a506c7d<-04f1e5dfb (1)
+
+- CLAUDE.md
+
+## other reds
+
+- owner-red CLAUDE.md (88a506c7d): candidate a8075ead2, owner version 3af0e6920
+- owner-red ports/fnv-nx/docs/ORCHESTRATION.md (88a506c7d): candidate c4e5eb10d, owner version 521d581df
+- owner-red ports/fnv-nx/shim/include/fnvnx_win32.h (a3d039bf0): candidate 426e6208d, owner version f1bb8d348
+- owner-red ports/fnv-nx/tests/d3d9_attach/test_attach.cpp (04f1e5dfb): candidate -, owner version 9fea0dcdd
+- unowned ports/fnvnx (407914779,a3d039bf0,da0e4ff78,a36b3c8f2): in no source row's trees
