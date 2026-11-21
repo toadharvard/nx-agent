@@ -35,3 +35,7 @@ __attribute__((noinline)) int plain(int a) { return opaque(a) + 1; }
 struct Big { int a; int b; int c[4]; };
 static __attribute__((noinline)) int split_f(const Big *p) { return opaque(p->b) + 5; }
 int use_split(const Big *p) { return split_f(p) + split_f(p + 1); }
+
+// 7. a clone of a clone: IPA-CP makes chain_f.constprop.0 (parameter 1 is the constant 9); in it the struct pointer is read at one field, so IPA-SRA clones that clone
+static __attribute__((noinline)) int chain_f(const Big *p, int c) { return opaque(p->b) * c; }
+int use_chain(const Big *p) { return chain_f(p, 9) + chain_f(p + 1, 9); }

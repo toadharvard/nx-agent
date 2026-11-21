@@ -153,6 +153,8 @@ CLONES = {   # clone symbol -> (origin, root, kind, params): what the cgraph say
                            [{'origin': 0, 'op': 'removed'}]),
     '_ZL7split_fPK3Big.isra.0': ('_ZL7split_fPK3Big', '_ZL7split_fPK3Big', 'isra',   # 6. IPA-SRA split: the int at byte 4 of parameter 0, passed by value
                                  [{'j': 0, 'origin': 0, 'op': 'split', 'offset': 4, 'size': 4}]),
+    '_ZL7chain_fPK3Bigi.constprop.0.isra.0': ('_ZL7chain_fPK3Bigi.constprop.0', '_ZL7chain_fPK3Bigi', 'isra',   # 7. a clone of a clone: the origin is the constprop clone
+                                              [{'j': 0, 'origin': 0, 'op': 'split', 'offset': 4, 'size': 4}]),     # (it has no body of its own in the object, so no row), the root is chain_f
 }
 
 
@@ -169,7 +171,7 @@ def clones(td, so):
         f = l.split('\t')
         check('clones: a row has 5 fields', len(f) == 5, l)
         rows[f[0]] = tuple(f[1:4]) + (json.loads(f[4]),)
-    check('clones: exactly the five clones have a row (a function that is no clone has none)', set(rows) == set(CLONES), sorted(set(rows) ^ set(CLONES)))
+    check('clones: exactly the clones of the fixture have a row (a function that is no clone has none)', set(rows) == set(CLONES), sorted(set(rows) ^ set(CLONES)))
     for sym, want in sorted(CLONES.items()):
         check('clones: %s' % sym, rows.get(sym) == want, (rows.get(sym), want))
     st = pb.symbols_of(o)
