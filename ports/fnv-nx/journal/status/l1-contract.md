@@ -3118,3 +3118,4 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - cand5 head moves to 9b95ef5a5.
 - Reported to L3a: lift/sdm uses pdftotext over the SDM PDF, which the 07:40Z decision forbids. SDMROWS must come from XED. Status: blocked on L3a.
 - c5 8d7436ded: a uses of a declared output that its green producer does not write is a named red (uses:<root>), from w8's report. The cand5 head is 8d7436ded; w8 retakes verify/ onto base3.
+- cand6, L5 source: claude/fnv-l5-platform-c6 5b2618d66 (c5 563e1273f + w29-c5 6d228dada; gen_env_const on FNVNX_CONST/_IDENT). platform root green at 5b2618d66: 112 objects; 100 .fnvnx.const + 2 .fnvnx.ident records for 102 rows; 0 records in allocated sections; 0 .init_array relocations to a record (L5's run).
