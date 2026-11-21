@@ -577,6 +577,14 @@ is a declared input passed by path in `args`; nothing is found through `PATH` ou
 in its own network namespace with no interface (already so for every step), so a tool that wants to fetch fails instead of reading the world; vendored sources are declared inputs.
 Tests: `tests/test_toolexec.py` (ELF resolution and the check forms; the sandboxed green run of an external tool is the `test_toolext.py` pattern, not run on a host without busybox).
 
+## Archive inputs (`{"archive": ROOT}`)
+An input of a tool step (`exec`) may be `{"archive": ROOT}`: the built objects of guest product root ROOT as one `ar` archive (`recipe.ar_bytes`, members in unit order), mounted
+at `/in/N/lib.a`. It is how a configure stage links against a library of another root (autoconf's link probes) without taking a prebuilt artifact: the key is the content of the
+archive, so a changed unit of ROOT is a changed input and a changed stage key. ROOT is built objects-only through the same stage cache a link uses. Red: a ref of another shape, ROOT
+is the root itself, is not an admitted root, is not in this recipe's `uses`, has no units, has another compiler record than this root (the objects of another compiler are no
+libraries of this one), is itself red (blocked, never an empty archive); a non-tool step (`artifact`) or any CC stage never takes it. The configure probes of the step may compile and
+link only: a probe that runs a built binary is a stage failure (a cross build has no host execution), never an answer from a cache. Test: `tests/test_archive_sources.py`.
+
 ## An external of another root
 
 `{"external_of": ROOT, "name": EXTERNAL, "path": SUB}` is an input of a `run`, `exec` or `generated` step. It names a path inside an external that the recipe of ANOTHER admitted root declares (a fetched commit, never a root's built output). The pin is that root's own (commit and `tree_sha256`), so the stage key holds the owner's tree and a changed owner pin is a changed key. The one validator `recipe.external_of_errors` serves check, key and mount; `resolve_input` is the one reader.
