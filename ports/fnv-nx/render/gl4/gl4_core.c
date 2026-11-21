@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <fnvnx/const.h>
 
 #define NXGL4_VERSION NXGPU_VERSION4
 
@@ -42,6 +43,8 @@ uint64_t gl4_api_mem_create(uint64_t a) {
     return id;
 }
 uint64_t gl4_api_mem_gpu_addr(uint64_t id) { (void)id; return 0; }
+/* ports/fnv-nx/render/nxgpu/include/nx/gpu_abi.h:mem_gpu_addr */
+FNVNX_CONST(gl4_api_mem_gpu_addr, uint64_t, 0)
 
 uint64_t gl4_api_mem_destroy(uint64_t id) {
     if (id >= g4.nMem || !gl4_mem((uint32_t)id)) { gl4_err("mem_destroy: %llu is not a live block", (unsigned long long)id); return NXGPU_BAD_CALL; }

@@ -7,6 +7,7 @@
 #include "gl4.h"
 #include <string.h>
 #include <time.h>
+#include <fnvnx/const.h>
 
 typedef struct { NxFrameStats* stats; int done; } Ctx;
 typedef void (*OpFn)(const uint32_t* a, uint32_t argc, Ctx* c);
@@ -203,3 +204,5 @@ uint64_t gl4_api_submit(uint64_t a) {
 }
 
 uint64_t gl4_api_wait_frame(uint64_t f) { (void)f; return 0; }   /* submit is synchronous: glFinish before it returns */
+/* ports/fnv-nx/render/nxgpu/include/nx/gpu_abi.h:wait_frame */
+FNVNX_CONST(gl4_api_wait_frame, uint64_t, 0)

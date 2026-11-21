@@ -35,7 +35,8 @@
   "ports/fnv-nx/render/shaders/translator/gen",
   "ports/fnv-nx/render/shaders/translator/include",
   "/ext/mojoshader",
-  "/ext/mojoshader/profiles"
+  "/ext/mojoshader/profiles",
+  "ports/fnv-nx/hostabi/include"
  ],
  "units": "all",
  "generated": [
@@ -57,8 +58,8 @@
    "name": "mojoshader",
    "repo": "fnv-nx-build",
    "ref": "tools/mojoshader-glsldk",
-   "commit": "7693847e3ba4fc85c51aad2ddd19bf795c608daf",
-   "tree_sha256": "bc0ea3c1432f5ab3739e15de8040a23bf5bba5c433c8005901a6f44649a38097",
+   "commit": "839fa4f95e89b63901217abc5bfe344a2c6006de",
+   "tree_sha256": "8a71ba6667a8130713538cd2b70c72084da04a2a3c5b9fc26d2044899bcf441c",
    "at": "/ext/mojoshader"
   }
  ],
@@ -74,6 +75,10 @@
   {
    "root": "ports/fnv-nx/render/shaders/total",
    "output": "sm_rows"
+  },
+  {
+   "root": "ports/fnv-nx/hostabi",
+   "output": "INCLUDE"
   }
  ],
  "include_uses": [
@@ -81,6 +86,5 @@
    "root": "ports/fnv-nx/render/shaders/total",
    "output": "sm_rows"
   }
- ],
- "constants": "constants.tsv"
+ ]
 }
