@@ -41,7 +41,8 @@
    "args": [
     "cc",
     "/out/records.sh",
-    "/in/ports/fnv-nx/verify"
+    "/in/ports/fnv-nx/verify",
+   "/in/ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json"
    ],
    "inputs": [
     "ports/fnv-nx/verify",

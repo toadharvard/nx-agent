@@ -40,7 +40,7 @@ def main():
     ap.add_argument('--tmtexi')
     ap.add_argument('--subset', help='write the mirror tree (the pages facts.json names, tm.texi, MANIFEST.json) from --docs/--tmtexi into this directory, then stop')
     ap.add_argument('--check', action='store_true', help='compare with the committed --out (and its .md), never write')
-    ap.add_argument('--facts', default=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'facts.json'))
+    ap.add_argument('--facts', required=True, help='facts.json (a declared input of the caller; no default beside this file)')
     ap.add_argument('--out', required=True)
     a = ap.parse_args()
     F = json.load(open(a.facts, encoding='utf-8'))

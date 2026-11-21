@@ -453,7 +453,7 @@ def crossing(obj):
 
 
 def crossing_inc_current():
-    r = subprocess.run([sys.executable, '-I', os.path.join(HERE, '..', 'layout', 'gen_crossing.py'), '--check'], capture_output=True, text=True)
+    r = subprocess.run([sys.executable, '-I', os.path.join(HERE, '..', 'layout', 'gen_crossing.py'), '--check', os.path.join(HERE, '..', 'msvcmodel', 'DATAMODEL.json'), os.path.join(HERE, '..', 'layout', 'crossing_terms.inc')], capture_output=True, text=True)
     check('crossing_terms.inc is what gen_crossing.py makes of DATAMODEL.json', r.returncode == 0, r.stdout + r.stderr)
 
 
