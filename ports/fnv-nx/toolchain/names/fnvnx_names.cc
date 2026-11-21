@@ -76,6 +76,10 @@ FNVNX_CXX_ONLY(uses_template_parms);
 #include "stringpool.h"
 #include "attribs.h"
 #include "cgraph.h"
+#include "alloc-pool.h"
+#include "symbol-summary.h"
+#include "symtab-clones.h"
+#include "ipa-param-manipulation.h"
 #include "varasm.h"
 #include "target.h"
 #include "output.h"
@@ -1393,6 +1397,136 @@ static std::vector<tree> sdd_slot_decls()
   return out;
 }
 
+/* ---- .fnvnx.clones: the clone-origin fact of every cgraph clone that has a body in the output
+ *
+ * RULE. Every fact is read from the call graph's own fields; no suffix is parsed and no name is compared.
+ *   Where, two creation points of GCC 13.3.0 (gcc/cgraphclones.cc):
+ *     create_clone / create_virtual_clone (IPA-SRA, IPA-CP, any later pass that changes parameters or constants): the cgraph duplication hook
+ *       (symbol_table::call_cgraph_duplication_hooks), called once the clone's clone_of, clone_info (param_adjustments, tree_map) and decl are set.
+ *       The fields are copied at that moment because materialization (cgraph_node::materialize_clone) drops clone_of and the clone_info afterwards.
+ *       An inline clone shares its origin's decl (create_clone with the same decl): it has no body of its own, so it is not a record.
+ *     create_version_clone_with_body (ipa-split `part`, ipa-split.cc split_function): no clone_of, no clone_info, no duplication hook. The function
+ *       being split is cfun's function (the pass runs on it); the cgraph insertion hook, called at the end of create_version_clone_with_body, sees the new
+ *       node with DECL_ABSTRACT_ORIGIN == DECL_ORIGIN (current_function_decl) (tree-inline.cc tree_function_versioning sets exactly that), and the node's
+ *       decl differs from current_function_decl. That pair is the origin candidate; ipa-split sets node->split_part right after the call, so the candidate
+ *       becomes a record in finish_unit when the node has split_part. A part has no parameter map: ipa-split's adjustments are not stored on the node
+ *       (params null).
+ *   Origin: the node the clone was made from (`src` of the hook = clone_of). Root: the origin followed through this table to the first function that is
+ *   no clone. Both are assembler names of the declarations (asmname), as the rows of .fnvnx.sympair use them.
+ *   Kind (the field that decides, in this order):
+ *     part       node->split_part on a node that has an origin candidate (above);
+ *     constprop  clone_info::tree_map is not empty (IPA-CP replaced a parameter by a constant);
+ *     isra       clone_info::param_adjustments is not NULL (IPA-SRA, or any pass that changes the signature, described the new parameters);
+ *     clone      none of these: a clone that changes neither parameters nor constants (a version, an ICF wrapper...).
+ *   Parameter map, relative to the ORIGIN's parameters (the clone's immediate origin, which for a clone of a clone is the previous clone): one entry per
+ *   (origin index, clone index) pair, from param_adjustments (ipa-param-manipulation.h): an adjusted parameter j with op COPY or SPLIT is the origin's
+ *   parameter prev_clone_index (the index in the previous clone; base_index is the index in the root); every origin parameter at or after
+ *   m_always_copy_start is copied behind the adjusted ones, in order (clone index = |m_adj_params| + k - m_always_copy_start); an origin parameter that
+ *   appears in none of these is "removed". A tree_map entry (parm_num k) makes k "const": the clone's body takes the value from the constant, whether or not the
+ *   clone still has the parameter. With neither param_adjustments nor tree_map the map is null.
+ *   Written once per clone symbol whose body the unit writes (TREE_ASM_WRITTEN, not external; a clone is static, so sym_emitted's TREE_PUBLIC does not apply).
+ */
+struct CloneRec {
+  UidKey origin_uid;       /* the GC invariant above: a uid and a name, never the origin's tree (its node may be removed and the tree freed) */
+  std::string origin;      /* asmname of the origin */
+  std::string kind;
+  bool has_map;
+  std::vector<std::pair<int, std::string> > map;   /* origin index -> clone index, "removed" or "const" */
+};
+static std::map<UidKey, CloneRec> clone_recs;   /* by uid_decl of the clone's decl */
+
+struct PartCand { UidKey origin_uid; std::string origin; };
+static std::map<UidKey, PartCand> part_cands;   /* by uid_decl of the version clone's decl */
+
+static void clone_inserted(cgraph_node *n, void *)
+{
+  tree cur = current_function_decl;
+  if (!cur || n->decl == cur || !DECL_ABSTRACT_ORIGIN(n->decl) || DECL_ABSTRACT_ORIGIN(n->decl) != DECL_ORIGIN(cur)) return;
+  PartCand c; c.origin_uid = uid_decl(cur); c.origin = asmname(cur);
+  part_cands[uid_decl(n->decl)] = c;
+}
+
+static int param_count(tree fndecl)
+{
+  int n = 0;
+  for (tree a = TYPE_ARG_TYPES(TREE_TYPE(fndecl)); a && a != void_list_node; a = TREE_CHAIN(a)) n++;
+  return n;
+}
+
+static void clone_dup(cgraph_node *src, cgraph_node *dst, void *)
+{
+  if (dst->decl == src->decl) return;   /* an inline clone: the origin's own decl, no body of its own */
+  CloneRec r;
+  r.origin_uid = uid_decl(src->decl);
+  r.origin = asmname(src->decl);
+  clone_info *ci = clone_info::get(dst);
+  ipa_param_adjustments *pa = ci ? ci->param_adjustments : NULL;
+  vec<ipa_replace_map *, va_gc> *tm = ci ? ci->tree_map : NULL;
+  r.kind = (tm && vec_safe_length(tm)) ? "constprop" : pa ? "isra" : "clone";
+  r.has_map = pa || (tm && vec_safe_length(tm));
+  if (r.has_map) {
+    int n = param_count(src->decl);
+    std::vector<std::vector<int> > to(n);
+    if (pa) {
+      unsigned len = vec_safe_length(pa->m_adj_params);
+      for (unsigned j = 0; j < len; j++) {
+        ipa_adjusted_param &p = (*pa->m_adj_params)[j];
+        if ((p.op == IPA_PARAM_OP_COPY || p.op == IPA_PARAM_OP_SPLIT) && (int)p.prev_clone_index < n) to[p.prev_clone_index].push_back(j);
+      }
+      if (pa->m_always_copy_start >= 0)
+        for (int k = pa->m_always_copy_start; k < n; k++) to[k].push_back(len + k - pa->m_always_copy_start);
+    } else
+      for (int k = 0; k < n; k++) to[k].push_back(k);   /* IPA-CP keeps the signature */
+    std::set<int> consts;
+    for (unsigned i = 0; tm && i < tm->length(); i++) consts.insert((*tm)[i]->parm_num);
+    for (int k = 0; k < n; k++) {
+      if (consts.count(k)) r.map.push_back(std::make_pair(k, std::string("const")));
+      else if (to[k].empty()) r.map.push_back(std::make_pair(k, std::string("removed")));
+      else for (int j : to[k]) r.map.push_back(std::make_pair(k, std::to_string(j)));
+    }
+  }
+  clone_recs[uid_decl(dst->decl)] = r;
+}
+
+static void clone_start(void *, void *)
+{
+  symtab->add_cgraph_duplication_hook(clone_dup, NULL);
+  symtab->add_cgraph_insertion_hook(clone_inserted, NULL);
+}
+
+/* the root of a clone: the origin of the last record of its chain (the first function that is no clone) */
+static std::string clone_root(UidKey u)
+{
+  std::string name;
+  for (std::map<UidKey, CloneRec>::iterator i; (i = clone_recs.find(u)) != clone_recs.end();) { name = i->second.origin; u = i->second.origin_uid; }
+  return name;
+}
+
+static void write_clones()
+{
+  { cgraph_node *m; FOR_EACH_FUNCTION(m) {   /* the candidates whose node ipa-split marked: records of kind part (before any chain is followed) */
+      std::map<UidKey, PartCand>::iterator pc = part_cands.find(uid_decl(m->decl));
+      if (pc == part_cands.end() || !m->split_part) continue;
+      CloneRec r; r.origin_uid = pc->second.origin_uid; r.origin = pc->second.origin; r.kind = "part"; r.has_map = false;
+      clone_recs[pc->first] = r; } }
+  fprintf(asm_out_file, "\t.pushsection\t.fnvnx.clones,\"\",%%progbits\n");
+  std::map<std::string, std::string> out;   /* by clone symbol: one row each */
+  cgraph_node *n;
+  FOR_EACH_DEFINED_FUNCTION(n) {   /* every function with a body written to the object, local ones included (a clone is static) */
+    tree d = n->decl;
+    if (!TREE_ASM_WRITTEN(d) || DECL_EXTERNAL(d)) continue;
+    std::map<UidKey, CloneRec>::iterator c = clone_recs.find(uid_decl(d));
+    if (c == clone_recs.end()) continue;
+    std::string ps;
+    if (c->second.has_map) {
+      for (auto &m : c->second.map) ps += (ps.empty() ? "" : ",") + std::to_string(m.first) + ":" + m.second;
+    } else ps = "-";
+    out[asmname(d)] = c->second.origin + "\t" + clone_root(uid_decl(d)) + "\t" + c->second.kind + "\t" + ps;
+  }
+  for (auto &o : out) fprintf(asm_out_file, "\t.ascii\t\"%s\\t%s\\n\"\n", o.first.c_str(), o.second.c_str());
+  fprintf(asm_out_file, "\t.popsection\n");
+}
+
 static void finish_unit(void *, void *)
 {
   symtab_node *n;
@@ -1460,6 +1594,7 @@ static void finish_unit(void *, void *)
   for (auto &r : vtrows)
       fprintf(asm_out_file, "\t.ascii\t\"%s\\t%ld\\t%s\\t%ld\\n\"\n", r.sym.c_str(), (long)r.ap, r.ms.c_str(), (long)r.off);
   fprintf(asm_out_file, "\t.popsection\n");
+  write_clones();
 }
 
 /* ---- local scopes
@@ -1541,6 +1676,7 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *versio
     return 1;
   }
   register_callback(info->base_name, PLUGIN_ATTRIBUTES, register_attrs, NULL);
+  register_callback(info->base_name, PLUGIN_START_UNIT, clone_start, NULL);
   if (is_cxx()) {   /* the C++ rules: class keys, parameter forms, local scopes, early names (SDD thunks, vftables) */
     register_callback(info->base_name, PLUGIN_START_UNIT, start_unit, NULL);
     register_callback(info->base_name, PLUGIN_FINISH_DECL, finish_decl, NULL);
