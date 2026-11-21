@@ -3125,3 +3125,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - cand5 admits lift/sdm and sdmrows, the forbidden PDF path; liftsrc, liftprov, imptest/lifted and msvcrttest/lifted use them.
   - Fix inside cand5: L3a w16's deletion (claude/fnv-l3a-lift-w16-nosdm), plus deleting the poppler-utils and libpoppler134 pins from env.json in the same commit.
   - Status: blocked on L3a w16.
+- candcheck (w28, c5 b096dae73), first run at 5c80eeb6e, 9 sources: 1382 unique files checked. Per-head literal rule: 698 unique files red, 167 lost, 14 roots missing. Only rt/guest_main is taken (f7cb1d2ca).
+  - Ruling: Expected(F) = the clean N-way merge of the heads' versions against the trunk base. Clean: the candidate must equal it. Conflict or supersession: a merged record carrying the result blob and a reason. lost is a diagnostic only.
+  - 13 roots get cut records: stale (sm_link_prog, sm_link_stage) or after the freeze.
+  - Status: w28 doing; the cand5 fixes follow from its list.
