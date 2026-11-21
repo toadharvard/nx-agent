@@ -3,15 +3,16 @@
 no source head's edit is lost.
     python3 -I verify/candcheck.py --sources FILE [--candidate REF] [--json OUT]        cwd = the git checkout root
 FILE (the candidate's source list, JSON): {"trunk": REF, "sources": [{"head": REV or "self", "patches": [REV..] (optional), "layer": NAME, "trees": [PATH PREFIX..]}],
-"superseded": [{"file": PATH, "head": REV, "owner": REV, "reason": TEXT}], "cut": [{"root": PATH, "heads": [REV..], "reason": TEXT}]}.
+"superseded": [{"owner": REV or "self", "head": REV, "reason": TEXT}], "cut": [{"root": PATH, "heads": [REV..], "reason": TEXT}]}.
 `self` is the candidate's own line (L1's fixes are committed on it). Nothing else is listed: the files and roots come from git.
 Rules. A head changed F when its version differs from that at merge-base(head, trunk). The files are every file a non-self head changed, minus the files under a `cut` root.
 1. Trees: the owner of F is the source row with the longest tree prefix of F (a nested prefix is a more specific owner); the same prefix in two rows is RED `overlap`.
    A file in no row's trees is RED `unowned`.
 2. The candidate's version of F is its owner's version (the row's head; `self`: the candidate itself), else RED `owner-red`.
 3. For every non-owner head G that changed F, merge(owner O's version, G's version) on the base `git merge-base O G` must equal O's version: then G's edit is contained in O.
-   Otherwise RED `not-in-owner` (F, G, O), conflict or not. The remedy belongs to O: take G's change into O's head, or a `superseded` record {file, head G, owner O, reason}
-   (O's version deliberately replaces G's). A record nothing needs, or without a reason, is RED `record`.
+   Otherwise RED `not-in-owner` (F, G, O), conflict or not. The remedy belongs to O: take G's change into O's head, or a `superseded` PAIR record {owner O, head G, reason}:
+   the assembly's decision that in this candidate O's version replaces every edit of G in O's trees (not a list of files). The files under each pair record are printed
+   (`SUPERSEDED O<-G file`), so nothing is dropped silently. A pair record nothing needs, or without a reason, is RED `record`.
 4. Roots: every root with a recipe in a head's verify/admit.json must be admitted in the candidate or in `cut` with that head and a non-empty reason, else RED `root`;
    a `cut` record nothing needs is RED `record`.
 Prints one global line with the counts per class. Exit 0 iff nothing is red."""
@@ -122,7 +123,8 @@ def check(doc, cand):
             files |= {p for p in set(b) | set(t) if b.get(p) != t.get(p)}
     cutroots = [m["root"].rstrip("/") + "/" for m in doc.get("cut", [])]
     files = {p for p in files if not any(p.startswith(r) for r in cutroots)}   # a cut root takes its files with it
-    sup = {(m["file"], m["head"][:9], m["owner"][:9] if m["owner"] != "self" else "self"): m for m in doc.get("superseded", [])}
+    sup = {(("self" if m["owner"] == "self" else rev(m["owner"])[:9]), ("self" if m["head"] == "self" else rev(m["head"])[:9])): m for m in doc.get("superseded", [])}
+    sup_files = []
     used = set()
     idx = {n: i for i, n in enumerate(names)}
     st = {"files": len(files), "owner_equal": 0, "owner_red": 0, "unowned": 0, "not_in_owner": 0, "superseded": 0}
@@ -152,16 +154,17 @@ def check(doc, cand):
                 contained = True
             if contained:
                 continue
-            k = (p, n, o)
+            k = (o, n)
             if k in sup and sup[k].get("reason"):
                 used.add(k)
                 st["superseded"] += 1
+                sup_files.append((p, "%s<-%s" % k))
                 continue
             st["not_in_owner"] += 1
             pairs.setdefault((o, n), []).append(p)
             red.append(("not-in-owner", p, "%s<-%s" % (o, n), "owner %s's version does not contain %s's edit" % (o, n)))
     for k in sorted(set(sup) - used):
-        red.append(("record", k[0], "%s<-%s" % (k[2], k[1]), "superseded record nothing needs, or without a reason"))
+        red.append(("record", "superseded", "%s<-%s" % k, "pair record nothing needs, or without a reason"))
     ca, nroots, usedc = admitted(cand), 0, set()
     cut = {m["root"]: m for m in doc.get("cut", [])}
     for rh, n in zip(rowheads, names):
@@ -180,12 +183,15 @@ def check(doc, cand):
         red.append(("record", r, "", "cut record nothing needs (the candidate admits the root, no listed head does, or no reason)"))
     st.update({"candidate": cand, "trunk": trunk, "sources": len(rows), "roots_checked": nroots, "red": len(red), "pairs": {"%s<-%s" % k: len(v) for k, v in sorted(pairs.items())}})
     st["layers"] = layer
+    st["superseded_files"] = sup_files
     return st, red
 
 
 def main(argv):
     a = dict(zip(argv[::2], argv[1::2]))
     st, red = check(json.load(open(a["--sources"])), a.get("--candidate", "HEAD"))
+    for p, k in st.get("superseded_files", []):
+        print("SUPERSEDED %s %s" % (k, p))
     for k, p, h, t in red:
         print("RED %s %s (%s): %s" % (k, p, h, t))
     print("candcheck: %s" % json.dumps(st, sort_keys=True))

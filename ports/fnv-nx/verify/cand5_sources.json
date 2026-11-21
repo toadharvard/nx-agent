@@ -5,7 +5,8 @@
    "head": "self",
    "layer": "L1 (w28)",
    "trees": [
-    "ports/fnv-nx/"
+    "ports/fnv-nx/",
+    "ports/fnvnx"
    ]
   },
   {
@@ -150,5 +151,126 @@
    "reason": "new item after the cand5 freeze; next candidate"
   }
  ],
- "superseded": []
+ "superseded": [
+  {
+   "owner": "04f1e5dfb",
+   "head": "88a506c7d",
+   "reason": "the integration branch is the old line; the owners' heads replace it"
+  },
+  {
+   "owner": "407914779",
+   "head": "04f1e5dfb",
+   "reason": "a private edit of a non-owned file; G delivers it to O for the next candidate, or it is stale"
+  },
+  {
+   "owner": "407914779",
+   "head": "88a506c7d",
+   "reason": "the integration branch is the old line; the owners' heads replace it"
+  },
+  {
+   "owner": "407914779",
+   "head": "a3d039bf0",
+   "reason": "a private edit of a non-owned file; G delivers it to O for the next candidate, or it is stale"
+  },
+  {
+   "owner": "407914779",
+   "head": "da0e4ff78",
+   "reason": "a private edit of a non-owned file; G delivers it to O for the next candidate, or it is stale"
+  },
+  {
+   "owner": "88a506c7d",
+   "head": "04f1e5dfb",
+   "reason": "a private edit of a non-owned file; G delivers it to O for the next candidate, or it is stale"
+  },
+  {
+   "owner": "88a506c7d",
+   "head": "407914779",
+   "reason": "a private edit of a non-owned file; G delivers it to O for the next candidate, or it is stale"
+  },
+  {
+   "owner": "88a506c7d",
+   "head": "a3d039bf0",
+   "reason": "a private edit of a non-owned file; G delivers it to O for the next candidate, or it is stale"
+  },
+  {
+   "owner": "88a506c7d",
+   "head": "da0e4ff78",
+   "reason": "a private edit of a non-owned file; G delivers it to O for the next candidate, or it is stale"
+  },
+  {
+   "owner": "a36b3c8f2",
+   "head": "04f1e5dfb",
+   "reason": "a private edit of a non-owned file; G delivers it to O for the next candidate, or it is stale"
+  },
+  {
+   "owner": "a36b3c8f2",
+   "head": "88a506c7d",
+   "reason": "the integration branch is the old line; the owners' heads replace it"
+  },
+  {
+   "owner": "a36b3c8f2",
+   "head": "a3d039bf0",
+   "reason": "a private edit of a non-owned file; G delivers it to O for the next candidate, or it is stale"
+  },
+  {
+   "owner": "a36b3c8f2",
+   "head": "da0e4ff78",
+   "reason": "a private edit of a non-owned file; G delivers it to O for the next candidate, or it is stale"
+  },
+  {
+   "owner": "a3d039bf0",
+   "head": "407914779",
+   "reason": "a private edit of a non-owned file; G delivers it to O for the next candidate, or it is stale"
+  },
+  {
+   "owner": "a3d039bf0",
+   "head": "88a506c7d",
+   "reason": "the integration branch is the old line; the owners' heads replace it"
+  },
+  {
+   "owner": "a3d039bf0",
+   "head": "da0e4ff78",
+   "reason": "a private edit of a non-owned file; G delivers it to O for the next candidate, or it is stale"
+  },
+  {
+   "owner": "da0e4ff78",
+   "head": "407914779",
+   "reason": "a private edit of a non-owned file; G delivers it to O for the next candidate, or it is stale"
+  },
+  {
+   "owner": "da0e4ff78",
+   "head": "88a506c7d",
+   "reason": "the integration branch is the old line; the owners' heads replace it"
+  },
+  {
+   "owner": "self",
+   "head": "04f1e5dfb",
+   "reason": "a private edit of a non-owned file; G delivers it to O for the next candidate, or it is stale"
+  },
+  {
+   "owner": "self",
+   "head": "407914779",
+   "reason": "a private edit of a non-owned file; G delivers it to O for the next candidate, or it is stale"
+  },
+  {
+   "owner": "self",
+   "head": "88a506c7d",
+   "reason": "the integration branch is the old line; the owners' heads replace it"
+  },
+  {
+   "owner": "self",
+   "head": "a36b3c8f2",
+   "reason": "a private edit of a non-owned file; G delivers it to O for the next candidate, or it is stale"
+  },
+  {
+   "owner": "self",
+   "head": "a3d039bf0",
+   "reason": "a private edit of a non-owned file; G delivers it to O for the next candidate, or it is stale"
+  },
+  {
+   "owner": "self",
+   "head": "da0e4ff78",
+   "reason": "a private edit of a non-owned file; G delivers it to O for the next candidate, or it is stale"
+  }
+ ]
 }

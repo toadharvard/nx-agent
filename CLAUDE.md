@@ -144,9 +144,10 @@ The owner's words: "Транк никогда красный. Всегда зе�
       whose every instruction is lifted. That is MMX, SSE and SSE2; SSE3 and up, 3DNow and AVX are clear.
     - An instruction of a cleared feature is #UD, as on a real CPU with that feature set. This is read from CPUREF,
       not from a list.
-    - Every #UD shape site must be certified unreachable on the declared machine: dominated by the exe's own cpuid
-      test whose declared answer excludes it, with a call-graph certificate. If a site is not certified, the build is
-      red; the feature is then lifted or the site is reported.
+    - A site of a cleared feature is lowered to exactly that: a synchronous #UD at the instruction, raised through the
+      SEH path with its precise CONTEXT, as the declared CPU does. There is no unreachability certificate and no
+      feature partition. The feature of an instruction is the group that the lifter's own pinned decoder (capstone,
+      env.json) gives it, so there is no second source (owner, 2026-11-16 07:50Z: "Это все не приближает к кадру").
     - Processors: one count holds for the whole declared machine, 3. These are the console cores an application
       gets, one thread each. cpuid leaf 1 EBX/HTT and leaf 4 (L3a), GetSystemInfo, GetLogicalProcessorInformation and
       the affinity masks 0b111 (L5), and the emulator's core count (L4) all report it. Guest threads run in parallel
@@ -653,7 +654,187 @@ The owner's words: "Что ещё так проебано? Перепровер�
   - Tools used only by tests (X11 locks) and scratch notes are outside the product and gate paths; L1's rule decides that
     from the stage graph, not by a list.
 - **The cold pack build** of the relifted pack runs on up to 16 farms (orchestrator, 2026-11-15 21:00Z, for this one
-  build). It is sharded by the recipe, with N up to 16, and the shards' stores are merged by key.
+  build), and only after the density rules below. It is sharded by the recipe, with N up to 16, and the shards' stores are merged by key.
+
+## Orchestrator decision of 2026-11-15 23:30Z: jump-table index bound under OWNER 6 (binding for L3a, L3b, L1)
+
+- **The case.** MSVC /Od switches keep the index in a frame slot: `cmp [ebp-k],N; ja D; mov r,[ebp-k]; ...; jmp [r*4+T]`.
+  Between the guard and the reload there is no call and no unknown store, so only another thread, through an escaped
+  frame address, could change the slot. At w7 facts2 b9261cd85, 326 of 1005 sites are red this way.
+- **The rule.**
+  - The table read `[r*4+T]` is an array access. Under OWNER 6 its index is in the bounds of T.
+  - T's extent is the N+1 entries fixed by the guard `cmp [ebp-k],N` / `ja` on the same cell. The cell is the same
+    expression, with no redefinition of ebp between, and the guard dominates the jmp.
+  - So the target is one of T's N+1 entries, read statically. Each has a dispatcher entry.
+  - A racing in-range write still lands in T. An out-of-range one is a wild access, which OWNER 6 excludes.
+- **Status.** This is OWNER 6 applied to the table index. It is not a new assumption. The certificate cites OWNER 6, the
+  guard address and the table extent.
+- **The cell defects stay defects.** A join of different esp depths must not kill ebp cells (fix B), and precise escapes
+  are needed (SEH record, the /GS cookie value).
+- **Residue.** A site that this rule does not close, for example with no dominating guard on the same cell, is traced and
+  reported to the orchestrator with its address. Nothing is chosen for it.
+
+## Orchestrator decision of 2026-11-16 03:05Z: lift/rt FP helper bodies (binding for L3b, L3a, L1)
+
+- **The gap.** Shape certificates stop at the call into a lift/rt helper (`sse_f2i`, `fv_i` and every helper a Form
+  calls), so the helper's C body is not certified by them. gate_fpexact check 0 claimed otherwise. That was a false
+  claim, and it is corrected now: the check states exactly what is certified.
+- **One method for every width (revised 03:10Z).** An exhaustive run could only be checked against an executable
+  re-implementation of the z3 terms, and that is a third implementation. So it does not certify. The 32-bit helpers
+  take the same proof as the 64-bit ones.
+- **All Form-called helpers (rcptab aside, which rcpcert covers).** These are a REMOVE record in `verify/ASSUMPTIONS.json`: "the Form-called lift/rt FP
+  helpers equal their Form semantics", owner L3b. It is not an OWNER record and not red.
+  - It is removed by isla over the helper's host object, once the pinned Sail model covers cvttsd2si, ucomisd and the
+    other SSE FP instructions through the ACL2-derived patch that L3b owns for the model gaps. That is sound under
+    OWNER 1 and 9.
+  - The proof carries from the x86-64 host compile to the aarch64-ILP32 object only if each helper in it passes four
+    static checks over the helper universe (L3a, 03:05Z). The removing argument checks all four:
+    1. fixed-width integer types only: no long, size_t or pointer-sized arithmetic;
+    2. no implementation-defined or undefined behaviour on the path: signed overflow, out-of-range FP-to-int casts,
+       shifts by the width or more;
+    3. the same FP settings in both compiles: -ffp-contract=off and FLT_EVAL_METHOD 0;
+    4. no target builtins or intrinsics.
+  - The work comes after the first frame, since it blocks no step of the path.
+  - No new trusted tool (CBMC or ESBMC) is pinned for it.
+- **No new gaps.** A helper added after this decision enters the same rule. The REMOVE record covers exactly the Form-called
+  helpers, derived from the Form→helper call table (L3a w13 lift/proof/fpchost) and not from a list.
+
+## Orchestrator decision of 2026-11-16 04:15Z: an esp the facts cannot fix takes the general form (binding for L3a, L3b, L1)
+
+- **Class.** A site where the static stack analysis cannot give esp a single value. For example, after a virtual call
+  `call/jmp [[reg]+k]` whose callee set mixes pops, the vptr tail jmps and the EH continuations that follow it.
+- **Rule.** A static esp fact is used only where it is proven: a single value, or the finite offset set that collapses
+  at `mov esp, ebp` and `leave`.
+  - Everywhere else the lifter emits the general form, which is correct for every esp value: esp is the run-time
+    register, an indirect jmp or call goes through the dispatcher with the full guest state, and an EH continuation takes
+    esp from the frame the exe's own EH code saved.
+  - This is the same as "a loop that is not proven stays sequential". It is not a red fact and not an assumption.
+- **Gates.** No gate may require a static esp at such a site. A gate that does is a defect of that gate, owner L1. The
+  fact record says `esp: general` and names the reason (the callee set's pops), derived from the facts, not listed.
+- **Refused.**
+  - "Callee pop = bytes the caller pushed" is a new assumption. It is also false in general, since `__cdecl` and
+    `__stdcall` callees share slots.
+  - Whole-program container typing is not on the path.
+- **Speed.** The general form costs only at those sites. After the first frame the instructions-per-frame data shows
+  whether any is hot. Only then is a rule written to narrow it.
+
+## Orchestrator decision of 2026-11-16 04:40Z: the scope of OWNER 10 is derived, not listed (binding for L3b, L3a, L5)
+
+- **Scope.** OWNER 10 covers "the parts that no pinned formal model covers". Its scope is therefore not a list: it is
+  derived. It is every instruction class for which the pinned Sail model's run reports a gap (for example "Opcode
+  Unimplemented in x86isa") and which has a site reachable from a proven root.
+  - The record's scope field in `verify/ASSUMPTIONS.json` is generated by a recipe stage from that model output and the
+    reach facts (rule 1). The word "today" in the record's text names only what that output held at the time.
+  - This is not a widening. A class enters only because the pinned model does not cover it, and a model patch that
+    covers it takes it out again automatically.
+- **At IR 257a93722adb** that output gives x87 plus four classes: rdtsc (3 sites), int3 (5), xlat (1) and mov r/m16
+  from a segment register (78).
+  - Each gets the x87 treatment: a z3 spec transcribed from the Intel SDM, with an SDM citation on every line. The owner
+    is L3b.
+- **Values that belong to the declared machine are read from its records, never restated.**
+  - rdtsc reads the platform monotonic timer (the declared CPU).
+  - int3 is a synchronous exception through the SEH path with the precise CONTEXT. ExceptionAddress and Eip follow the
+    declared OS records, which come from the 7601 kernel.
+  - A segment-register read takes its value from `x86sys.json` selectors.
+    - Every selector that the 78 sites read must be a row derived from the pinned 7601 kernel, the same way as gs.
+    - An undecided row names its blocker. The owner is L5.
+- **Candidate-root sites stay out.** The 1,580 sites with only candidate roots are outside this decision until L3a's
+  code-range rule decides their reachability. Once it does, they enter by this same rule.
+
+## Orchestrator decision of 2026-11-16 07:40Z: declared-machine rows only for reached sites; no Windows media, no PDF scraping (binding for L5, L3b, L1)
+
+The owner asked: "А винду зачем скачали?" and "Зачем пдф ридер."
+- **Scope of the x86sys rows.** A row is written only when a site reached from a proven root reads it. At IR 257a93722adb,
+  that is the selector values that the 78 `mov r/m16,Sreg` sites read, and the int3/rdtsc values above.
+  - Ring-3 selector values come from the WDK 7.1 headers (source 1). The pinned 7601 kernel is used only where the
+    headers say nothing.
+  - These wait until after the first frame, unless a reached site reads them:
+    - drivers, HALs and boot drivers;
+    - IDT gates other than the documented user vectors;
+    - LAR and accessed bits;
+    - iret task returns.
+  - **No Windows installation media.** Nothing is downloaded or pinned from a Windows ISO or wim. The 154 driver and HAL
+    pins already made are not extended.
+- **CPU feature of an instruction (owner, 07:50Z).** There is no XED, no SDM reading and no #UD certificate. See "The
+  declared CPU": the site is lowered to #UD by the decoder's own group.
+- **Rule for every lead.** Work on the declared machine is done only when a site on the path to the frame needs its
+  answer. Everything else waits until after the first frame.
+
+## Owner order of 2026-11-16 05:15Z: less generated code before the cold build (binding for L3a, L3b, L1)
+
+The owner's words: "не будем тратить так время... уменьшим количество генерируемого кода".
+
+- **No cold build of the pack at today's density.** It is 758.9 MB for 7.79 M instructions, 94.5 B per instruction
+  (u/000). More farms is not the answer. The relifted pack goes to the cold build only after the density rules below.
+- **Density rules, in this order.** Each one closes its class and gives the same guest semantics by construction.
+  1. **Re-entry only at derived targets.** A label and a nonlocal-switch case exist only at an address where control
+     can arrive: a branch or table target, a call's return address, an EH continuation, a dispatcher entry. These come
+     from the facts, not from a list. Every other instruction has no label and no case. Today every instruction has
+     both, and that makes each function one huge graph for the compiler. This touches no certified Form.
+  2. **One shared form for the call sequence and the nonlocal transfer.** It is an inline function in lift/rt, emitted
+     once instead of open-coded at every site. The code the compiler sees after inlining is identical. This touches no
+     certified Form.
+  3. **Flags only where they are read.** This means EFLAGS liveness from the facts, with L3b's projection lemma and a
+     certificate per function. It does touch the Forms, so it goes after 1 and 2, with L3b.
+- **Measure what each rule saves on the whole pack.** Generated bytes are counted by category and in total, from the
+  generator stage at a commit (rule 6), before and after each rule. Compile time is measured on the whole build, never
+  on a sample.
+- Owners: L3a with workers (1 and 2 now, right behind the relift as stages); L3b (3); L1 (the cold build, ≤16 farms).
+
+## Orchestrator decision of 2026-11-16 05:50Z: x87 transcendentals (binding for L3b, L3a, L2)
+
+- **The case.** F2XM1, FYL2X, FYL2XP1, FPTAN, FPATAN, FSIN, FCOS and FSINCOS. The OWNER-10 x87 spec leaves the function
+  itself uninterpreted, because a correctly rounded sin, log2 and so on is not a finite z3 term.
+- **The value is already decided.** OWNER 8 says "transcendentals return the correctly rounded value at the operand
+  type", and under OWNER 8 that type is binary64. So the spec's uninterpreted `x87_<fn>` *is* CR_binary64(fn). This is a
+  definition by an owner record, not a new assumption.
+- **The implementation is a pinned correctly rounded library: CORE-MATH.**
+  - It is mirrored in fnv-nx-build `tools/core-math`, pinned by commit and `tree_sha256`.
+  - It is built by the recipe with the game's compiler and every plugin, as part of the guest runtime (owner L2).
+  - It is taken by its documentation ("correctly rounded in all rounding modes"). This is the owner's existing rule for
+    external libraries (CLAUDE.md "Memory safety of hand-written native code": libc, libnx, FreeType and minimp3 are taken
+    by their documentation). It is not a widening of OWNER 9, and CORE-MATH's published proofs are not claimed as
+    theorems.
+- **The lowering.** The lifter (L3a) calls the library for each function:
+
+  | Instruction | Library call |
+  |---|---|
+  | F2XM1 | cr_exp2m1 |
+  | FYL2X | `y * cr_log2(x)` |
+  | FYL2XP1 | `y * cr_log2p1(x)` |
+  | FPTAN | cr_tan, then push 1.0 |
+  | FPATAN | cr_atan2(st1, st0) |
+  | FSIN | cr_sin |
+  | FCOS | cr_cos |
+  | FSINCOS | cr_sin and cr_cos |
+
+  - The product in FYL2X and FYL2XP1 is an IEEE binary64 multiply. The transcendental is the log2, and it is the only
+    part that is correctly rounded. That is how OWNER 8 reads for a two-operand instruction.
+  - Everything around the call follows the SDM (OWNER 10): stack, tags, C1 and the C2 out-of-range result
+    (|x| ≥ 2^63 leaves the operand unchanged, C2=1), the domain errors and their #IA when unmasked.
+- **The certificate (L3b).** The Form equals the SDM machinery plus a call of CR(fn) on the operand. It is proved
+  against the spec with `x87_<fn>` bound to the library symbol. The library body is not part of the proof.
+- **An undecided rounding takes Ziv's last step (06:10Z).** CORE-MATH's cr_atan2 has one branch, in tint.h's
+  tint_tod, for a result too close to a rounding boundary to decide. Upstream prints a message and exits there. No
+  certificate can prove that branch unreachable: there are 2^128 binary64 pairs, and no search covers them. So the
+  branch computes `mpfr_atan2` at 53 bits in the current rounding mode.
+  - MPFR is correctly rounded by its documentation, and it is taken under the same external-library rule.
+  - The result is therefore correctly rounded for every input, with no trap. This is an exact algorithm step, not a
+    fallback on a failure.
+  - MPFR and GMP are mirrored in fnv-nx-build `tools/*` and built as guest roots by the recipe, with the game's
+    compiler. Owner: L2.
+  - The redirect is a declared stage patch (`core-math.patch` in the root), never an edit of the mirror.
+  - Every other CORE-MATH exit or printf on the path is closed the same way, or shown dead by the preprocessor.
+- **A library's documented flags (06:15Z, corrected 06:20Z).** A compiler flag that a pinned library's documentation
+  requires for its documented semantics lives in one record: `verify/guest_compiler.json` `flags.semantics`, with the
+  citation (mirror file and line) on that row. CORE-MATH's `-frounding-math` is already the first entry of
+  `flags.semantics.common`; the CORE-MATH citation (README:173) is added to that row.
+  - No root restates such a flag in its build.json, and there is no per-root cited-flag form: a restatement is a second
+    copy of one fact (rule 2) and stays red.
+  - A documented flag not yet in `flags.semantics` is added to that one record with its citation, only if it changes
+    neither the data model nor the ABI (DATAMODEL decides).
+- **No other libm on the path.** A lifted call to newlib's sin, cos or log is not correctly rounded, so it does not meet
+  OWNER 8. The same table applies to it.
 
 ## Orchestrator decision of 2026-11-15 09:20Z: weekly budget (binding for every session)
 
