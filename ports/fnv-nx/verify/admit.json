@@ -463,6 +463,13 @@
    "recipe": "ports/fnv-nx/platform/build.json"
   },
   {
+   "path": "ports/fnv-nx/platform/coremath",
+   "class": "product",
+   "target": "guest",
+   "cxx_origin": "native",
+   "recipe": "ports/fnv-nx/platform/coremath/build.json"
+  },
+  {
    "path": "ports/fnv-nx/platform/include",
    "class": "header"
   },
