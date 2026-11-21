@@ -3349,7 +3349,7 @@ class Job:
         d = os.path.join(tmp, "ar%d" % n)
         os.makedirs(d)
         objs = sorted(r["objects"], key=lambda o: o["unit"])
-        with open(os.path.join(d, "lib.a"), "wb") as f:
+        with open(os.path.join(d, "lib%s.a" % os.path.basename(owner)), "wb") as f:
             f.write(ar_bytes([("%05d.o" % i, open(o["object"], "rb").read()) for i, o in enumerate(objs)]))
         return cas.ingest(d, self.store)
 
