@@ -1659,3 +1659,8 @@ Paused: w3b, w4, farm; no other work.
     - Encoding: `.fnvnx.const` with LEN 0 = void; `.fnvnx.ident` {fn, k}.
     - Clones: the record goes on the source function, here dk_cfg. The clone-to-origin map is a fact from L2's names plugin.
     - The 9 L6 rows wait for L1's const.h commit; a worker then writes them on 2ee150e.
+
+## 2026-11-21
+- 18:10Z Resumed after the weekly reset. sm_link_prog / sm_link_stage (L1 question 11-16): they are stale; 21872d6be deleted them and it is an ancestor of the cand5 render head da0e4ff78. L3a's base3 takes render/ from da0e4ff78.
+- 18:12Z w15 session_01KmtZKQgegQkrkUNoCLUrvC (doing): 9 .fnvnx.const records (gl4 2, translator 7) on L1 const.h 6d228dada; constants.tsv and the `constants` keys deleted; branch claude/fnv-l6-render-w15-const from w14-const 2ee150e14.
+- bottleneck: w15's records and objstub on gl4 and translator; reached.tsv (L1 w28) for the undoc d3d9 export filter. 1 of 4 workers busy.
