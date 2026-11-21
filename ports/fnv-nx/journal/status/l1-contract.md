@@ -3119,3 +3119,9 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - Reported to L3a: lift/sdm uses pdftotext over the SDM PDF, which the 07:40Z decision forbids. SDMROWS must come from XED. Status: blocked on L3a.
 - c5 8d7436ded: a uses of a declared output that its green producer does not write is a named red (uses:<root>), from w8's report. The cand5 head is 8d7436ded; w8 retakes verify/ onto base3.
 - cand6, L5 source: claude/fnv-l5-platform-c6 5b2618d66 (c5 563e1273f + w29-c5 6d228dada; gen_env_const on FNVNX_CONST/_IDENT). platform root green at 5b2618d66: 112 objects; 100 .fnvnx.const + 2 .fnvnx.ident records for 102 rows; 0 records in allocated sections; 0 .init_array relocations to a record (L5's run).
+- c5 5c80eeb6e restores 7 keys of verify/cpuid_model.json from 6f5ba9811~1, unchanged. cand5 had taken verify/ whole from w28-c5 at 40c639d16 and lost them; proof/cpufeat.py reads them. The cand5 head is now 5c80eeb6e.
+  - Rule-8 cause: a whole-tree take in candidate assembly loses other heads' edits.
+  - w28's task: a check that every file a source head changed survives into the candidate, or is a recorded 3-way merge. Status: doing.
+- cand5 admits lift/sdm and sdmrows, the forbidden PDF path; liftsrc, liftprov, imptest/lifted and msvcrttest/lifted use them.
+  - Fix inside cand5: L3a w16's deletion (claude/fnv-l3a-lift-w16-nosdm), plus deleting the poppler-utils and libpoppler134 pins from env.json in the same commit.
+  - Status: blocked on L3a w16.
