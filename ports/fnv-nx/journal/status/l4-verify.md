@@ -502,3 +502,10 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - test_bootrt: 5 cases, 0 failed. test_bootgpu: setup ok, then it stops at the bootguest link (lift/rt ENTRY1-CONT, L3a).
   - w11 archived.
 - bottleneck: lift/rt ENTRY1-CONT (L3a/L2); L1 cand5 (link imports row, .gamedata_pins); the L3a pack store | no workers, no farms
+- 2026-11-21 18:15: resumed after the weekly reset. L3a reports lift/rt green at base3 e82590d45. That head is L1 c5 eaeb17ffd for every non-lift path, lift/ from L3a, and toolchain/ and rules/ from L2 35e622293 (checked equal to L2's head).
+  - c5 holds older or cut copies of L4's own files: no verify/tests/icount, older boot*.py, and the bootrt reach double.
+  - w12 session_01KmtZKTgGCkvP413g4UxWdT: doing.
+    - It moves L4's own paths from 04f1e5dfb onto e82590d45; every other path stays base3's.
+    - It runs recipe.check, the gl4/bootrt/bootguest builds and the bootguest guest link.
+    - It runs test_bootrt, test_bootgpu, test_bootmachine and test_boot, with the milestones reached.
+- bottleneck: w12 | 1 worker, no farms
