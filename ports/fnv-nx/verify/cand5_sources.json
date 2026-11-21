@@ -6,7 +6,7 @@
    "owner": "w28 (L1): link, verify, contract, farm"
   },
   {
-   "head": "563e1273f",
+   "head": "a3d039bf0",
    "owner": "L5: platform, rt, hostabi, manifest, loader, bridgetable"
   },
   {
@@ -94,7 +94,7 @@
   {
    "root": "ports/fnv-nx/verify/probes",
    "heads": [
-    "563e1273f",
+    "a3d039bf0",
     "04f1e5dfb",
     "407914779",
     "a36b3c8f2"

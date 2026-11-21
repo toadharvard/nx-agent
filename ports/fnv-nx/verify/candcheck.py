@@ -3,9 +3,9 @@
     python3 -I verify/candcheck.py --sources FILE [--candidate REF] [--json OUT]        cwd = the git checkout root
 FILE (the candidate's source list, JSON): {"trunk": REF, "sources": [{"head": REV, "patches": [REV..] (optional), "owner": NAME}], "merged": [{"file": PATH, "heads": [REV..], "result": BLOB, "reason": TEXT}],
 "cut": [{"root": PATH, "heads": [REV..], "reason": TEXT}]}. Nothing else is listed: files and roots come from git.
-Rule, derived per file F that any source head changed. BASE = the common ancestor of the trunk and all heads (git merge-base --octopus).
-1. Expected(F) = the clean N-way merge of the versions of the heads that changed F (version != BASE's), folded pairwise in source-list order with `git merge-file`
-   against BASE's version; one changer: that head's version; a deletion by all changers: absent.
+Rule, derived per file F that any source head changed. A head changed F when its version differs from that at merge-base(head, trunk). Files under a `cut` root are out of Expected.
+1. Expected(F) = the clean N-way merge of the versions of the heads that changed F, folded pairwise in source-list order with `git merge-file`; folding G_i into
+   G_1..G_{i-1}, the base is `git merge-base G_i G_1..G_{i-1}` (per step, per file), its version of F; one changer: that head's version; a deletion by all changers: absent.
 2. Clean: the candidate must equal Expected, else RED `merge-red` naming F and the heads whose changes are missing.
 3. Conflict (a pairwise fold conflicts, or one head deletes what another changes): a `merged` record {file, heads, result, reason} is needed and the candidate must hold its
    `result` blob; a conflict with no record is RED `conflict`; a record whose merge is actually clean, or that names heads that did not change F, is RED `record`. A deliberate
@@ -73,15 +73,23 @@ def merge3(cur, base, other):
         return r.stdout if r.returncode == 0 else None
 
 
-def expected(base_blob, vers):
-    """VERS [(head, blob or None)] in source order (every version differs from BASE_BLOB) -> (blob or None, ok): ok False on a conflict."""
-    head0, cur = vers[0]
-    for _, v in vers[1:]:
+def at(c, p):
+    """The blob of file P at commit C, or None."""
+    r = subprocess.run(["git", "rev-parse", "--verify", "-q", c + ":" + p], capture_output=True)
+    return r.stdout.decode().strip() if r.returncode == 0 else None
+
+
+def expected(p, vers, mbs):
+    """VERS [(head name, commit, blob or None)] of the heads that changed P, in source order; MBS(commit, [commits]) = git merge-base -> (blob or None, ok).
+    Folding G_i into the result of G_1..G_{i-1}: the base is git merge-base G_i G_1..G_{i-1} (per step, per file), its version of P; ok False on a conflict."""
+    cur = vers[0][2]
+    for i in range(1, len(vers)):
+        _, g, v = vers[i]
         if v == cur:
             continue
         if cur is None or v is None:
             return None, False
-        m = merge3(cur, base_blob, v)
+        m = merge3(cur, at(mbs(g, [x[1] for x in vers[:i]]), p), v)
         if m is None:
             return None, False
         cur = git("hash-object", "-w", "--stdin", inp=m).decode().strip()
@@ -93,24 +101,33 @@ def check(doc, cand):
     trunk, cand = rev(doc["trunk"]), rev(cand)
     heads = [source_head(s) for s in doc["sources"]]
     rowheads = [rev(s["head"]) for s in doc["sources"]]
-    base = git("merge-base", "--octopus", trunk, *heads).decode().strip()
-    bb, cb = blobs(base), blobs(cand)
+    memo = {}
+
+    def mbs(g, prev):
+        k = (g, tuple(prev))
+        if k not in memo:
+            memo[k] = git("merge-base", g, *prev).decode().strip()
+        return memo[k]
+    cb = blobs(cand)
     hb = [blobs(h) for h in heads]
+    tb = [blobs(git("merge-base", h, trunk).decode().strip()) for h in heads]   # each head's own base on the trunk: what it changed
     merged = {m["file"]: m for m in doc.get("merged", [])}
     cut = {m["root"]: m for m in doc.get("cut", [])}
     red, st = [], {"clean_equal": 0, "clean_red": 0, "conflicts": 0, "conflict_recorded": 0, "lost": 0}
     files = set()
-    for b in hb:
-        files |= {p for p in set(b) | set(bb) if b.get(p) != bb.get(p)}
+    for b, t in zip(hb, tb):
+        files |= {p for p in set(b) | set(t) if b.get(p) != t.get(p)}
+    cutroots = [m["root"].rstrip("/") + "/" for m in doc.get("cut", [])]
+    files = {p for p in files if not any(p.startswith(r) for r in cutroots)}   # a cut root takes its files with it
     for p in sorted(files):
-        vers = [(h[:9], b.get(p)) for h, b in zip(heads, hb) if b.get(p) != bb.get(p)]
-        exp, ok = expected(bb.get(p), vers)
-        if cb.get(p) not in {v for _, v in vers}:
+        vers = [(h[:9], h, b.get(p)) for h, b, t in zip(heads, hb, tb) if b.get(p) != t.get(p)]
+        exp, ok = expected(p, vers, mbs)
+        if cb.get(p) not in {v for _, _, v in vers}:
             st["lost"] += 1
         if not ok:
             st["conflicts"] += 1
             m = merged.get(p)
-            names = ",".join(h for h, _ in vers)
+            names = ",".join(h for h, _, _ in vers)
             if m is None:
                 red.append(("conflict", p, names, "the heads' changes conflict and no merged record gives the result"))
             elif cb.get(p) != m["result"] or not m.get("reason"):
@@ -124,7 +141,7 @@ def check(doc, cand):
             st["clean_equal"] += 1
         else:
             st["clean_red"] += 1
-            red.append(("merge-red", p, ",".join(h for h, _ in vers), "candidate %s, expected %s" % ((cb.get(p) or "-")[:9], (exp or "-")[:9])))
+            red.append(("merge-red", p, ",".join(h for h, _, _ in vers), "candidate %s, expected %s" % ((cb.get(p) or "-")[:9], (exp or "-")[:9])))
     for p in sorted(set(merged) - files):
         red.append(("record", p, "", "merged record for a file no head changed"))
     ca, nroots, used = admitted(cand), 0, set()
@@ -140,7 +157,7 @@ def check(doc, cand):
                 red.append(("root", r, rh[:9], "admitted by the head, not by the candidate, not cut with a reason"))
     for r in sorted(set(cut) - used):
         red.append(("record", r, "", "cut record nothing needs (the candidate admits the root, no listed head does, or no reason)"))
-    st.update({"candidate": cand, "base": base, "sources": len(heads), "files": len(files), "roots_checked": nroots, "red": len(red)})
+    st.update({"candidate": cand, "trunk": trunk, "sources": len(heads), "files": len(files), "roots_checked": nroots, "red": len(red)})
     return st, red
 
 
