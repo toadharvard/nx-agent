@@ -1,6 +1,4 @@
 """gen_tab.py: emitters for the spec-derived tables of d9wrap.gen.cpp (struct descriptors, ids, formats, primitives, shader walk, object properties)."""
-import os as _q_os, sys as _q_sys
-_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import re
 from fnvnx.render.d3d9.gen.gen_expr import GenError
 

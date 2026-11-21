@@ -1,5 +1,5 @@
 // x1_validator.cpp: DebugSetMute, Direct3DShaderValidatorCreate9 and IDirect3DShaderValidator9, exactly what Wine 9.0 does (owner decision 2026-11-11 "Wine 9.0 as an acceptable implementation").
-// Source: wine-9.0 dlls/d3d9/d3d9_main.c (fetched, not from memory). Where Wine's body is a stub, the body does what Wine's does plus one log line (fnvnx_wine_fixme; ids = rows of verify/wine_fixme.tsv):
+// Source: wine-9.0 dlls/d3d9/d3d9_main.c (fetched, not from memory). Where Wine's body is a stub, the body does what Wine's does plus one log line (fnvnx_wine_fixme; ids = rows of render/d3d9/wine_fixme.tsv):
 //   DebugSetMute              `/* nothing to do */` (d3d9_exports.cpp)      id 52
 //   Direct3DShaderValidatorCreate9   FIXME("Returning stub validator %p."); returns the ONE static object (the same pointer every call, never freed)      id 20
 //   QueryInterface            WARN("%s not implemented, returning E_NOINTERFACE."); *out = NULL; E_NOINTERFACE for EVERY iid (IUnknown included): a real QueryInterface body (COM contract for a foreign iid), no log line
@@ -13,7 +13,7 @@
 #include <string.h>
 #include "../gen/d9impl.gen.h"
 #include "face.h"
-#include "const_fixme.h"   // fnvnx_wine_fixme and the NXW_ ids of verify/wine_fixme.tsv
+#include "const_fixme.h"   // fnvnx_wine_fixme and the NXW_ ids of render/d3d9/wine_fixme.tsv
 HRESULT STDMETHODCALLTYPE NxShaderValidator9::QueryInterface(REFIID riid, void** out) {
     if (!out) return E_POINTER;   // Wine writes *out unconditionally (a fault); the defined error is the layer's closed choice (README "Decided with doubt")
     if (!memcmp(&riid, &IID_NxObj, sizeof(GUID))) { *out = static_cast<NxObj*>(this); return S_OK; }

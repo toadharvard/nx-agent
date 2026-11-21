@@ -53,11 +53,8 @@ Key-level rule (L5 lead, 2026-11-12): when the root and key path of a value acce
 every name and a set writes run-time hive state. The row is `static`, value `*`, reason `key-has-no-declared-values`. When a value
 is declared under the key the rule no longer applies and the row is dynamic again. No assumption beyond ASM-003.
 """
-import os as _q_os, sys as _q_sys
-_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, re, struct, sys
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import fnvnx.manifest.funcfacts as funcfacts
+from fnvnx.manifest import funcfacts
 from fnvnx.manifest.rtti import Rtti
 from fnvnx.manifest.regclass import Closure
 X = funcfacts.X

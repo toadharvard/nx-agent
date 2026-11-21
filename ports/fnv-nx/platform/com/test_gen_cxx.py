@@ -6,8 +6,6 @@
   2. the thunk against the convention spec, for every convention the generator emits: thiscall (`this` first, the row's args are the stack words WITHOUT
      this), stdcall and cdecl (every argument a stack word): the thunk's parameter count and the row's args agree with the decoded stack words;
   3. a signature that disagrees with the decorated name, a base without cxx info and a citation that is not wine-9.0 stop the generator."""
-import os as _q_os, sys as _q_sys
-_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
@@ -20,7 +18,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, sys.argv[1])
-import fnvnx.platform.com.gen_cxx as gen_cxx
+import gen_cxx
 from contract import proto
 
 LETTERS = {"A": "cdecl", "C": "pascal", "E": "thiscall", "G": "stdcall", "I": "fastcall"}

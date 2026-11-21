@@ -4,7 +4,7 @@
 //  state model (state_model.py), default 1 x 1, back to the default by Reset (every state does). Violations = D3DERR_INVALIDCALL (the page lists no failure code). The kernel is read only by sampling a D3DFMT_A1 texture with
 //  D3DTEXF_CONVOLUTIONMONO: A1 textures cannot exist here (see ComposeRects) and TextureFilterCaps lacks D3DPTFILTERCAPS_CONVOLUTIONMONO (ValidateDevice reports UNSUPPORTEDTEXTUREFILTER), so the state is not observable beyond Capture / Apply.
 // ComposeRects: wine-9.0 dlls/d3d9/device.c d3d9_device_ComposeRects is `FIXME("... stub!"); return E_NOTIMPL;` and looks at no argument: the body does exactly that, one fnvnx_wine_fixme(47) per call
-//  (verify/wine_fixme.tsv). (The earlier decision D3DERR_INVALIDCALL, from the proof that no D3DFMT_A1 surface exists, is replaced by the Wine rule: the result of the Wine function is the source.)
+//  (render/d3d9/wine_fixme.tsv). (The earlier decision D3DERR_INVALIDCALL, from the proof that no D3DFMT_A1 surface exists, is replaced by the Wine rule: the result of the Wine function is the source.)
 #include "res_tex.h"
 #include "../gen/d9impl.gen.h"
 #include "dev_core.h"

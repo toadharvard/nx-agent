@@ -129,10 +129,13 @@
     "/in/ports/fnv-nx/manifest/env_const.tsv",
     "/out/win32/env_const.gen.inc",
     "--only",
-    "win32/"
+    "win32/",
+    "--declared",
+    "/in/ports/fnv-nx/platform/declared_machine.tsv"
    ],
    "inputs": [
-    "ports/fnv-nx/manifest/env_const.tsv"
+    "ports/fnv-nx/manifest/env_const.tsv",
+    "ports/fnv-nx/platform/declared_machine.tsv"
    ],
    "outputs": [
     "win32/env_const.gen.inc"
@@ -144,10 +147,13 @@
     "/in/ports/fnv-nx/manifest/env_const.tsv",
     "/out/crt/env_const.gen.inc",
     "--only",
-    "crt/"
+    "crt/",
+    "--declared",
+    "/in/ports/fnv-nx/platform/declared_machine.tsv"
    ],
    "inputs": [
-    "ports/fnv-nx/manifest/env_const.tsv"
+    "ports/fnv-nx/manifest/env_const.tsv",
+    "ports/fnv-nx/platform/declared_machine.tsv"
    ],
    "outputs": [
     "crt/env_const.gen.inc"
@@ -159,10 +165,13 @@
     "/in/ports/fnv-nx/manifest/env_const.tsv",
     "/out/audio/dshow.env_const.gen.inc",
     "--only",
-    "audio/dshow.cpp"
+    "audio/dshow.cpp",
+    "--declared",
+    "/in/ports/fnv-nx/platform/declared_machine.tsv"
    ],
    "inputs": [
-    "ports/fnv-nx/manifest/env_const.tsv"
+    "ports/fnv-nx/manifest/env_const.tsv",
+    "ports/fnv-nx/platform/declared_machine.tsv"
    ],
    "outputs": [
     "audio/dshow.env_const.gen.inc"
@@ -174,10 +183,13 @@
     "/in/ports/fnv-nx/manifest/env_const.tsv",
     "/out/audio/dshow_filters.env_const.gen.inc",
     "--only",
-    "audio/dshow_filters.cpp"
+    "audio/dshow_filters.cpp",
+    "--declared",
+    "/in/ports/fnv-nx/platform/declared_machine.tsv"
    ],
    "inputs": [
-    "ports/fnv-nx/manifest/env_const.tsv"
+    "ports/fnv-nx/manifest/env_const.tsv",
+    "ports/fnv-nx/platform/declared_machine.tsv"
    ],
    "outputs": [
     "audio/dshow_filters.env_const.gen.inc"
@@ -189,10 +201,13 @@
     "/in/ports/fnv-nx/manifest/env_const.tsv",
     "/out/audio/dsound.env_const.gen.inc",
     "--only",
-    "audio/dsound.cpp"
+    "audio/dsound.cpp",
+    "--declared",
+    "/in/ports/fnv-nx/platform/declared_machine.tsv"
    ],
    "inputs": [
-    "ports/fnv-nx/manifest/env_const.tsv"
+    "ports/fnv-nx/manifest/env_const.tsv",
+    "ports/fnv-nx/platform/declared_machine.tsv"
    ],
    "outputs": [
     "audio/dsound.env_const.gen.inc"
@@ -204,10 +219,13 @@
     "/in/ports/fnv-nx/manifest/env_const.tsv",
     "/out/audio/waveout.env_const.gen.inc",
     "--only",
-    "audio/waveout.cpp"
+    "audio/waveout.cpp",
+    "--declared",
+    "/in/ports/fnv-nx/platform/declared_machine.tsv"
    ],
    "inputs": [
-    "ports/fnv-nx/manifest/env_const.tsv"
+    "ports/fnv-nx/manifest/env_const.tsv",
+    "ports/fnv-nx/platform/declared_machine.tsv"
    ],
    "outputs": [
     "audio/waveout.env_const.gen.inc"
@@ -219,10 +237,13 @@
     "/in/ports/fnv-nx/manifest/env_const.tsv",
     "/out/input/dinput.env_const.gen.inc",
     "--only",
-    "input/dinput.cpp"
+    "input/dinput.cpp",
+    "--declared",
+    "/in/ports/fnv-nx/platform/declared_machine.tsv"
    ],
    "inputs": [
-    "ports/fnv-nx/manifest/env_const.tsv"
+    "ports/fnv-nx/manifest/env_const.tsv",
+    "ports/fnv-nx/platform/declared_machine.tsv"
    ],
    "outputs": [
     "input/dinput.env_const.gen.inc"
@@ -235,8 +256,7 @@
     "/uses/ports/fnv-nx/bridgefacts/com/COM_ROWS",
     "/uses/ports/fnv-nx/bridgefacts/com/COM_WORDS",
     "/out/com",
-    "/in/ports/fnv-nx/platform/crt/cxx_types.tsv",
-    "/in/ports/fnv-nx/contract"
+    "/in/ports/fnv-nx/platform/crt/cxx_types.tsv"
    ],
    "inputs": [
     "ports/fnv-nx/platform/crt/cxx_types.tsv",
@@ -257,14 +277,12 @@
     "/ext/wine-9.0",
     "/out/win32/wine_cites.tsv",
     "/in/ports/fnv-nx/platform",
-    "/in/ports/fnv-nx/verify/declared_machine.tsv",
-    "/in/ports/fnv-nx/verify/wine_fixme.tsv",
+    "/in/ports/fnv-nx/platform/declared_machine.tsv",
+    "/in/ports/fnv-nx/platform/wine_fixme.tsv",
     "/in/ports/fnv-nx/manifest/env_const.tsv"
    ],
    "inputs": [
     "ports/fnv-nx/platform",
-    "ports/fnv-nx/verify/declared_machine.tsv",
-    "ports/fnv-nx/verify/wine_fixme.tsv",
     "ports/fnv-nx/manifest/env_const.tsv"
    ],
    "outputs": [
@@ -554,7 +572,7 @@
    "output": "COM_WORDS"
   },
   {
-   "root": "ports/fnv-nx/contract/exporthdr",
+   "root": "ports/fnv-nx/contract/exporthdr/include",
    "output": "INCLUDE"
   },
   {

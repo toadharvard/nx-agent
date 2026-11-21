@@ -48,7 +48,7 @@ def cu_producers(path):
     if r.returncode == 0 and r.stdout.strip():
         members = [m for m in r.stdout.splitlines() if m]
     out = {m: [] for m in members}
-    r = subprocess.run([READELF, "--debug-dump=info", "--dwarf-depth=1", path], capture_output=True, text=True, env=dict(os.environ, LC_ALL="C"))
+    r = subprocess.run([READELF, "--debug-dump=info", "--dwarf-depth=1", path], capture_output=True, text=True, env=dict(recipe.unitstage.PROBE_ENV))
     cur = ""
     for line in r.stdout.splitlines():
         m = re.match(r"File: .*\((.*)\)$", line)
@@ -67,7 +67,7 @@ def expected(driver, kind):
         s, o = os.path.join(d, "p.c"), os.path.join(d, "p.o")
         open(s, "w").write(src)
         r = subprocess.run([driver, "-x", x, "-g", "-c", "-o", o] + recipe.semantics_for(driver, kind) + [s], capture_output=True, text=True,
-                           env=dict(os.environ, LC_ALL="C"))
+                           env=dict(recipe.unitstage.PROBE_ENV))
         if r.returncode:
             raise recipe.BuildRed({"stage": "producer-probe:" + kind, "exit": r.returncode, "stderr": r.stderr.splitlines()[-10:]})
         ps = [p for ps in cu_producers(o).values() for p in ps]

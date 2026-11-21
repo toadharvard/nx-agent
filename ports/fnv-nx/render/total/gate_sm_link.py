@@ -3,19 +3,17 @@
     GATE_OUT=<dir> GATE_CACHE=<dir> python3 -I ports/fnv-nx/render/total/gate_sm_link.py
 Run in the checkout root (verify/verdict.py does). Writes GATE_OUT/sm_link.json; exit 0 iff green, 2 red.
 The rule is render/shaders/total/SM_LINK_RULE.md. This gate computes nothing itself: the certificates are the outputs of the hermetic run
-stages of the product roots render/shaders/sm_link_stage (stage certificates), sm_link_prog (link certificates) and sm_link_sum (their
-completeness-checked summary), built by verify/recipe.py in GATE_CACHE; the summary is read through recipe.resolve_input
+stages of the product root render/shaders/sm_link_sum (stage certificates `stage` x8, link certificates `link` x8 and the completeness-checked `summary`; the shard count 8 is written once, as `foreach range`), built by verify/recipe.py in GATE_CACHE; the summary is read through recipe.resolve_input
 {"stage": "ports/fnv-nx/render/shaders/sm_link_sum:run:summary", "path": "summary.json"}, the one reader of a stage output.
 Universe = the stage certificates (entry x translator flag set) plus the link certificates (program set); red = the summary's `red`
 (refusals, not-ok stages, signature disagreements, link failures, missing or unexpected certificates). Green iff universe > 0 and red = 0."""
-import os as _q_os, sys as _q_sys
-_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import json, os, re, sys
 
 REPO = os.getcwd()
-sys.path.insert(0, os.path.join(REPO, "ports", "fnv-nx", "verify"))
-import fnvnx.verify.recipe as recipe  # noqa: E402
-import fnvnx.verify.gate_build as gate_build  # noqa: E402
+import types
+_pkg = sys.modules.setdefault("fnvnx", types.ModuleType("fnvnx")); _pkg.__path__ = [os.path.join(REPO, "ports", "fnv-nx")]   # a host-run driver: `fnvnx` is ports/fnv-nx (the stage mounts it at /imp/fnvnx)
+from fnvnx.verify import recipe  # noqa: E402
+from fnvnx.verify import gate_build  # noqa: E402
 
 ROOT = "ports/fnv-nx/render/shaders/sm_link_sum"
 

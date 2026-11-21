@@ -5,7 +5,7 @@
 
 Registry: verify/ASSUMPTIONS.json ("fnvnx-assumptions/1"; the accepted entries are ASM-001 to ASM-009):
   {"format": "fnvnx-assumptions/1", "entries": [ENTRY...]}
-  ENTRY  {"id": "ASM-NNN", "text": STR, "aliases": [STR...], "status": "OWNER" | "REMOVE", ...}
+  ENTRY  {"id": "ASM-NNN", "text": STR, "used_by": [PATH...], "aliases": [STR...], "status": "OWNER" | "REMOVE", ...}
     OWNER   + "decision": {"file": "CLAUDE.md", "quote": STR}   the owner's acceptance, verbatim
     REMOVE  + "removed_by": STR, "owner": LEAD | LEAD+LEAD      the discharge and the stream lead(s) who owe it
     optional: "note": STR. The registry holds exactly the entries that files of THIS tree rely on: the entry of an unmerged
@@ -30,8 +30,8 @@ universe is (path, first line of the block). A mention is certified iff ALL hold
   2. every id in it is the id of an entry of the registry.
 The registry is certified iff ALL hold:
   3. ids are unique and well formed, aliases are unique across entries, text is not empty;
-  4. the entry has a user: at least one tracked text file other than the registry (not an append-only log, CLAUDE.md included) cites its id. The users are
-     derived (users_of), never listed in the entry: the reliance is written at the place of reliance, so an entry nobody cites is dead and is red;
+  4. used_by is not empty and every path in it is a tracked file that contains the entry's id (the reliance is written at the
+     place of reliance, so an entry nobody cites is dead and is red);
   5. an OWNER entry has decision.file CLAUDE.md and decision.quote occurring verbatim inside exactly one numbered item under
      the line "OWNER, the only accepted ones:", no item serves two entries, and every item has an entry: the OWNER set is
      exactly the owner's list, so a tenth OWNER entry without the owner's item is red;
@@ -494,22 +494,9 @@ def ratchet_errors(base, new):
     return out
 
 
-def users_of(files, read):
-    """{id: [paths]}: the files of FILES (never the registry itself) that contain the id, in sorted order. The users of a registry entry are DERIVED from the text,
-    never listed: a hand-kept `used_by` drifts (a file that was renamed or deleted keeps being named), the citing files cannot."""
-    out = {}
-    for p in sorted(files):
-        if p == REGISTRY:
-            continue
-        for n in sorted(set(ID.findall(read(p)))):
-            out.setdefault("ASM-" + n, []).append(p)
-    return out
-
-
-def judge_registry(doc, tracked, read, gate_names, users=None):
-    """-> ([error str], counts); pure function of its arguments. USERS: {id: [paths]} (users_of); derived from TRACKED when not given."""
+def judge_registry(doc, tracked, read, gate_names):
+    """-> ([error str], counts); pure function of its arguments"""
     err = []
-    users = users_of(tracked, read) if users is None else users
     if not isinstance(doc, dict) or set(doc) != {"format", "ranges", "retired", "entries"} or doc["format"] != FORMAT \
             or not isinstance(doc["entries"], list):
         return [finding("registry-form", "registry", "registry is missing or is not %s with keys format, ranges, retired, entries" % FORMAT)], {}
@@ -542,7 +529,7 @@ def judge_registry(doc, tracked, read, gate_names, users=None):
         if st not in STATUSES:
             err.append(finding("status", i, w + "status is not one of %s" % ", ".join(STATUSES)))
             continue
-        want = {"id", "text", "aliases", "status"} | ({"decision"} if st == "OWNER" else {"removed_by", "owner"})
+        want = {"id", "text", "used_by", "aliases", "status"} | ({"decision"} if st == "OWNER" else {"removed_by", "owner"})
         extra = set(e) - want
         extra.discard("note")
         if set(want) - set(e) or extra:
@@ -562,8 +549,16 @@ def judge_registry(doc, tracked, read, gate_names, users=None):
                 if a in aliases:
                     err.append(finding("alias-claimed", i, w + "alias %r is also an alias of %s" % (a, aliases[a])))
                 aliases[a] = i
-        if not users.get(i):   # the users are the files that cite the id (users_of): an entry no file cites is dead
-            err.append(finding("unused", i, w + "no tracked file cites the id (a dead entry)"))
+        ub = e["used_by"]
+        if not isinstance(ub, list) or not ub or not all(isinstance(p, str) for p in ub):
+            err.append(finding("used-by-empty", i, w + "used_by is empty (a dead entry)"))
+        else:
+            for p in ub:
+                if p in tracked:
+                    if i not in set("ASM-" + n for n in ID.findall(read(p))):
+                        err.append(finding("used-by-cites", i, w + "used_by %s does not cite %s" % (p, i)))
+                else:
+                    err.append(finding("used-by-untracked", i, w + "used_by %r is not a tracked file" % (p,)))
         if st == "OWNER":
             count["OWNER"] += 1
             d = e["decision"]
@@ -728,7 +723,7 @@ def main():
     doc = load(REGISTRY)
     gates = gatesdir.load_dir_or_empty()
     gate_names = set(g.get("name") for g in gates.get("gates", []) if isinstance(g, dict))
-    errors, count = judge_registry(doc, tracked_all, read, gate_names, users_of([p for p in scanned_all if p != REGISTRY] + ["CLAUDE.md"], read))
+    errors, count = judge_registry(doc, tracked_all, read, gate_names)
     ids = set(e["id"] for e in doc["entries"] if isinstance(e, dict) and isinstance(e.get("id"), str)) \
         if isinstance(doc, dict) and isinstance(doc.get("entries"), list) else set()
     retired = retired_of(doc.get("retired"))[0] if isinstance(doc, dict) else {}

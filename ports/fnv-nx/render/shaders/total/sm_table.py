@@ -3,10 +3,8 @@
   python3 -I sm_table.py --docs DIR --wine DIR --vkd3d DIR --cites DIR --recipe build.json --out DIR   (recipe step of this root: the reference trees are its externals; --cites is the Wine 9.0 tree whose file lines the decision records cite)
 Opcode model sets: MS version tables (per instruction page); cross-checked against wine wined3d + vkd3d d3dbc (set, operand counts);
 registers: MS register tables vs wine d3dcompiler asmparser tables.  Disagreements -> `conflicts`; facts nobody states -> `undetermined`."""
-import os as _q_os, sys as _q_sys
-_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import argparse, json, os, sys
-import fnvnx.render.shaders.total.sm_docs as sm_docs; import fnvnx.render.shaders.total.sm_xref as sm_xref; import fnvnx.render.shaders.total.sm_decisions as sm_decisions
+from fnvnx.render.shaders.total import sm_docs, sm_xref, sm_decisions
 from fnvnx.render.shaders.total.sm_rules import ALL, ALU, CMPS, FLOW, MANUAL_MODELS, MS, P30, PAGES, SETP, TEX1, TEX2
 from fnvnx.render.shaders.total.sm_rules2 import (CAPS, DCL_SRC, DSTMOD, DST_OK, ENV_DEFAULT, FLOW_LIM, INSTR_LIMITS, REG, REG_SRC, SAMPLER_TYPES, SAT_EXCEPT_VS, SRCMOD,
                        SRCMOD_SRC, SRC_OK, SWZ, SWZ_FORMS, USAGES)
@@ -114,7 +112,7 @@ def build(a):
     excl = {m: dict(creatable=False, source=MS + "software-shaders: *_sw are 'only supported by software vertex processing and/or a reference device'; this device is a hardware (HAL-like) device") for m in ("vs_2_sw", "vs_3_sw", "ps_2_sw", "ps_3_sw")}
     excl.update({m: dict(creatable="undetermined", included_in_universe=True, source="not in MS asm reference; see undetermined.vs1_0_ps1_0") for m in ("vs_1_0", "ps_1_0")})
     ill = []
-    res = legacy_rows(a.legacy_dir, models, ops, a)
+    res = legacy_rows(models, ops, a)
     return dict(schema=1, ref_commits=a.pins, models=models, excluded_models=excl, opcodes=ops, srcmod_source=SRCMOD_SRC, sat_except_vs=SAT_EXCEPT_VS,
                 usages=USAGES, usage_source=DCL_SRC, sampler_types={k: v for k, v in SAMPLER_TYPES.items()}, caps=CAPS, env_default=ENV_DEFAULT,
                 writemask=dict(general="any subset in xyzw order (MS ps-registers-modifiers-write-mask / vs-registers-modifiers-masking)",
@@ -132,13 +130,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--docs", required=True); ap.add_argument("--wine", required=True); ap.add_argument("--vkd3d", required=True); ap.add_argument("--cites", required=True);
     ap.add_argument("--recipe", required=True, help="build.json of this root: the external pins"); ap.add_argument("--out", required=True, help="output directory")
-    ap.add_argument("--legacy-dir", dest="legacy_dir", required=True, help="the directory holding sm_cases.py (an input of the stage)")
     a = ap.parse_args(); p = pins(a.recipe); a.pins = p
     T, regx = build(a)
     os.makedirs(a.out, exist_ok=True); tj = os.path.join(a.out, "sm_table.json")
     ill = T.pop("legacy_illegal")
     json.dump(T, open(tj, "w"), indent=1, sort_keys=True)
-    import fnvnx.render.shaders.total.gen_sm_rows as gen_sm_rows; os.makedirs(os.path.join(a.out, "inc"), exist_ok=True); open(os.path.join(a.out, "inc", "fnvnx_sm_rows.h"), "w").write(gen_sm_rows.render(tj))
+    from fnvnx.render.shaders.total import gen_sm_rows; os.makedirs(os.path.join(a.out, "inc"), exist_ok=True); open(os.path.join(a.out, "inc", "fnvnx_sm_rows.h"), "w").write(gen_sm_rows.render(tj))
     leg = T["legacy"] + ill
     with open(os.path.join(a.out, "sm_legacy.tsv"), "w") as o:
         o.write("model\tkind\tfeature\tstatus\tsource\n")

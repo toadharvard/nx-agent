@@ -17,12 +17,10 @@ Output header: for each enumeration `typedef enum NxD3D<name> {NX_<enumerator> =
 a default, compiled with -Werror=switch-enum: it cannot go out of step with the enum). The switch is emitted for every enumeration, so two
 enumerators with one value are a `duplicate case value` compile error. The translation functions are switches over these types with no default
 branch and are compiled with -Werror=switch -Werror=switch-enum, so an enumerator of the spec without a case is a compile error."""
-import os as _q_os, sys as _q_sys
-_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import json, os, sys
-HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
-import fnvnx.render.d3d9.env.envq as envq        # noqa: E402
-import fnvnx.render.d3d9.env.wine_fourcc as wine_fourcc  # noqa: E402
+HERE = os.path.dirname(os.path.abspath(__file__))
+from fnvnx.render.d3d9.env import envq  # noqa: E402
+from fnvnx.render.d3d9.env import wine_fourcc  # noqa: E402
 
 WINE = None   # argv[3]: the pinned Wine mirror directory (an input of the recipe stage)
 SPEC = None   # the interface table the bridgefacts D9_SPEC output, argv[2] (an input of the recipe stage)
