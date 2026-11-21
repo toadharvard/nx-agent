@@ -1,3 +1,5 @@
+step 4 (after it, the boot of the ELF): missing for the ELF to boot: the ELF link root itself (L3a/L1). L4's boot roots on base3 e82590d45 wait on L1 w29-c5 (toolrt pinned set, DATAMODEL import mount) and L3a w16-c5 (lift/sdm deleted). L4 takes no item off steps 1-4 and the ELF boot; no workers, no farms.
+
 # L4 VERIFY status (lead: Opus 5.5, branch claude/fnv-l4-verify)
 
 Updated 2026-11-11 23:10Z. Merged head 1979832: L1 GREEN (tree da24d4be, 24 gates, selftests 52/52, admit 427/427, oracle 52/52, 196.7 s), ready for the trunk. Trunk claude/fnv-nx-clean a2453fe9 holds L4 e8b2c4ad (L1 green, tree 6dbf402b, 23 gates). Trunk CLAUDE.md d7fac9b50 merged (GL is the reference for deko3d). claude/fnv-l4-verify-w1 (68e37dab7) is never merged. L4 fully in the trunk: claude/fnv-nx-clean 41c9eca merged a4b0a84 (93477f2, 5d106a8 included).
@@ -520,3 +522,4 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
 - bottleneck: L1 (toolrt key, compiler-build profile), L1/L2 (records.py /imp mount), L3a (lift/sdm sdm.txt); L1 answer on the boot-machine owner map | no workers, no farms
 - 18:46: L1 accepted the owner map. From cand6, these prefixes are L4 trees: verify/boot, verify/hostabirec.py, verify/tests/test_boot, verify/tests/test_hostabirec.py and farm/boot_job.sh. cand6 takes them from the L4 head c6c8b7a59. L3a: lift/sdm and sdmrows are being deleted by w16 (claude/fnv-l3a-lift-w16-c5); L4 takes lift/ from it once it is green.
 - bottleneck: L1 (toolrt key, compiler-build profile), L1/L2 (records.py /imp mount), L3a w16 (lift/sdm deletion) | no workers, no farms
+- 18:58: owner order of 11-21 18:50Z (integration CLAUDE.md 0aa926371) read: until the ELF links, L4 works only on what steps 1-4 need from it, and otherwise prepares the boot of the ELF. L4 has no item that steps 1-4 need; its boot preparation waits on the L1/L3a heads above. No workers to archive.
