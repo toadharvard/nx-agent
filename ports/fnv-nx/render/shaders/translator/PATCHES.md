@@ -83,7 +83,7 @@ with no D3D9 instruction) are exactly these rows; `emit_GLSL_RESERVED` and its p
 render/total/gen_opcover.py from the tree (op_reserved.tsv).
 Mirror pin: commit 7693847e, tree_sha256 bc0ea3c1…, see build.json.
 
-## 10th change: declared constants are records in the source (mirror commit 839fa4f9)
+## 10th change: declared constants are records in the source (mirror commit d7e45fda)
 The constants.tsv table is deleted. Each row is one `FNVNX_CONST*` record (hostabi/include/fnvnx/const.h) after its function in the mirror's own file, with the row's
-citation in the comment: mojoshader_profile_glsl.c (`emit_GLSL_NOP`, `emit_GLSL_phase`, `emit_GLSL_TEXM3X2PAD`, `emit_GLSL_TEXM3X3PAD`, `emit_GLSL_DCL`: VOID; `dk_cfg`: IDENT 0) and
-mojoshader.c (`parse_args_NULL`: 1). Mirror pin: commit 839fa4f9, tree_sha256 8a71ba66…, see build.json. build.json `include` and `uses` name hostabi's INCLUDE.
+citation in the comment: mojoshader_profile_glsl.c (`emit_GLSL_NOP`, `emit_GLSL_phase`, `emit_GLSL_TEXM3X2PAD`, `emit_GLSL_TEXM3X3PAD`, `emit_GLSL_DCL`: VOID) and
+mojoshader.c (`parse_args_NULL`: 1). Mirror pin: commit d7e45fda, tree_sha256 feb1989a…, see build.json. build.json `include` and `uses` name hostabi's INCLUDE.
