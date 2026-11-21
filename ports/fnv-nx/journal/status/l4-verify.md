@@ -518,3 +518,5 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - Tests: none could reach a boot run. test_bootrt 1 case, 1 failed (gen toolchain:0). test_bootgpu, test_bootmachine and test_boot stop at their setup on the reds above.
   - w12 archived.
 - bottleneck: L1 (toolrt key, compiler-build profile), L1/L2 (records.py /imp mount), L3a (lift/sdm sdm.txt); L1 answer on the boot-machine owner map | no workers, no farms
+- 18:46: L1 accepted the owner map. From cand6, these prefixes are L4 trees: verify/boot, verify/hostabirec.py, verify/tests/test_boot, verify/tests/test_hostabirec.py and farm/boot_job.sh. cand6 takes them from the L4 head c6c8b7a59. L3a: lift/sdm and sdmrows are being deleted by w16 (claude/fnv-l3a-lift-w16-c5); L4 takes lift/ from it once it is green.
+- bottleneck: L1 (toolrt key, compiler-build profile), L1/L2 (records.py /imp mount), L3a w16 (lift/sdm deletion) | no workers, no farms
