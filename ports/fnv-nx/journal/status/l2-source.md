@@ -805,3 +805,4 @@ After the first frame:
 - bottleneck: the farm's rt result -> the pin commit (w3).
 - 2026-11-21 19:20Z: cand6 census done and sent to L1. claude/fnv-l2-source-cand6-l1 acb3875e8 (on c5 e4e9b7e53). Universe 710 commits at cand4b f3b188ec8: 0 equivalent, 42 in c5, 14 contributions (cherry-picked; recipe.py +71/-1, archive code re-inserted by hand), 654 stale. test_archive_sources passes; test_recipe has the same 6 env-only FAILs as the c5 base.
 - 2026-11-21 19:25Z: L1 accepted cand6-l1 acb3875e8 for cand6 (w28 folds the ar_bytes duplicate). w2 drops the env.json and ctypes_compat commits, which come via w29-c5.
+- 2026-11-21 19:28Z: cand6-l1 rebuilt at 778457923 (12 contributions, without the 2 w29 duplicates); test_archive_sources passes. Head sent to L1.
