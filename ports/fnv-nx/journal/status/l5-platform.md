@@ -5,6 +5,7 @@ Lead: Opus 5.5, session_01KmtZKTGM2tLun8zgoE6X44 (from 2026-11-11 22:35; replace
 Branch: claude/fnv-l5-platform. Workers: Sonnet 5.5, branches claude/fnv-l5-platform-w<N>.
 
 ## RESTART 2026-11-12 08:23Z (orchestrator): ONE task, the platform product root
+- 2026-11-21: L1 took c6 @09ceed68d for cand6. The Python-test recipe form is an L1 open rule gap, to be closed after the first frame; L5 Python tests stay measurements. Bottleneck: the c5 verdict (w40). Workers 1 (w40).
 - 2026-11-21: out-of-tree share of a3d039bf0 is closed. 275 files: 1 real hunk (lift/rt/build.json uses-root to contract/exporthdr/include, from 599f1bb26), sent to L3a. The rest are stale: shared-history commits on 57+ branches, or L5-only commits already in L1 w29-c5 d55573f95 or in the owner head. L1 told its 75 are 0-to-transfer; L2 18 stale; orch 1 stale. Table: journal/inbox/l5-w43-a3d039bf0-outoftree.md on claude/fnv-l5-platform-w43 @051909a6. w43 archived. Bottleneck: the c5 verdict (w40). Workers 1 (w40).
 - 2026-11-21: c6 @09ceed68d (+48fad17a1). Python generator tests (test_gen_cxx.py) have no recipe form, so they are measurements; the gap is reported to L1 (off path). Workers 2 (w40, w43).
 - 2026-11-21: L3a w8: of 27 L5 files in the L3a candcheck section, 26 are stale and 1 is real (platform/com/test_gen_cxx.py bare imports). Its fix 48fad17a1 is reviewed and queued for c6 on w40. Workers 2 (w40, w43).
