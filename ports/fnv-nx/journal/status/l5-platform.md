@@ -5,6 +5,7 @@ Lead: Opus 5.5, session_01KmtZKTGM2tLun8zgoE6X44 (from 2026-11-11 22:35; replace
 Branch: claude/fnv-l5-platform. Workers: Sonnet 5.5, branches claude/fnv-l5-platform-w<N>.
 
 ## RESTART 2026-11-12 08:23Z (orchestrator): ONE task, the platform product root
+- 2026-11-21: L1 const.h (w29-c5 6d228dada) reviewed and accepted, with an optional constinit hardening suggested. cand5 head stays c5 @563e1273f. w40 queued: c6 = c5 + w29-c5 merge (568d0049, const.h) + gen_env_const on FNVNX_CONST*, then a record census against d937a8936 (100 const + 2 ident). Bottleneck: w40 verdict on 563e1273f (weekly limit). Workers 1 (w40).
 - 2026-11-21 18:15: resumed after the weekly limit. The c5 563e1273f verdict never landed (w40 hit the limit); w40 re-runs it. w29-c5 568d0049 (drop external_errors) waits until L6 converts its constants (gl4 and translator build.json still carry them). rt/guest_main is on c5 but not in w28-c5 admit; L1 told. No cand5 branch yet. workers 1 (w40).
 - 2026-11-16 12:48: c5 @563e1273f: Steam Shutdown/RunCallbacks are void dm:20/21; g_steam_pipe and the dead hook fnvnx_steam_callback_count (no user) deleted; platform build green, 112 objects. Warm verdict restarted on this head. workers 1 (w40).
 - 2026-11-16 12:45: SteamAPI_Shutdown/RunCallbacks found to be no-ops in disguise (lock plus a dead g_steam_pipe store). L1 accepted: void bodies dm:20/21 (no-galaxy, steamworks-sdk); g_steam_pipe deleted; test hook fnvnx_steam_callback_count deleted if only a test uses it. w40 doing. L1 w29 closes the objstub hole that let them through. workers 1 (w40).
