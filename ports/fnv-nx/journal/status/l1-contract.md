@@ -3117,3 +3117,4 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - Test: test_runpython.py, "uses of a run-only producer". It needs the pinned z3 and capstone, so it runs on the farm with cand5.
   - cand5 head moves to 9b95ef5a5.
 - Reported to L3a: lift/sdm uses pdftotext over the SDM PDF, which the 07:40Z decision forbids. SDMROWS must come from XED. Status: blocked on L3a.
+- c5 8d7436ded: a uses of a declared output that its green producer does not write is a named red (uses:<root>), from w8's report. The cand5 head is 8d7436ded; w8 retakes verify/ onto base3.
