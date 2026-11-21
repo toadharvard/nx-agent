@@ -3180,3 +3180,6 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - 18:48 w29 const.h 6d228dad accepted (FNVNX_CONST/_VOID/_IDENT; the tests pass). L5 replaces gen_env_const's RECORD templates with the macros.
   - w29 order: `!`, then pinned closure, then the import-mount data, then the clone parser, then the lift/rt measurement.
   - L2 reverted w3's argv version (932a00c3d / bca6714e1).
+- 18:49 Ruling on objstub external units: one judgment path. Bodies of external units are judged like our own, and ext_units stays as provenance only. This reverses w29 item 4's exemption.
+  - L6 d4537e160 measurement: 7081 bodies, 6950 certified, 133 findings (127 L5, 6 L6 translator; all 6 are false const-mismatch caused by the skip).
+  - w29 item 0: remove the skip. L6 keeps its 6 mirror records.
