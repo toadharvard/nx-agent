@@ -3174,3 +3174,6 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - (3) The pinned package set becomes the closure debs.packages, from one envcheck function. L2's compiler-build gmp/mpfr/mpc/zlib comes in by merge. L4 w12's toolrt red at base3 e82590d45.
   - (4) pathflow carries __file__-derived data paths across calls, or the recipe check is red. This is L4's DATAMODEL.json red.
 - w8: L1's 98 files in the 407914779 section are all stale (0 real). Base3 97f335d19 holds c5 9bd09cfee's trees whole.
+- 18:48 DATAMODEL class: L1's rule (pathflow import-mount data) is the one fix, and L2 drops w3's argv conversion.
+  - cand6 sources: L4 claude/fnv-l4-verify ab7b1bf36 (L4 prefixes, boot roots); L5 c6 09ceed68d (0 transfers to L1).
+- Open rule gap (L1, after the first frame): a recipe form for a root's tracked Python tests, e.g. platform/com/test_gen_cxx.py. Until then they are measurements.
