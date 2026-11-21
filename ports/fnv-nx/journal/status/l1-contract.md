@@ -3111,3 +3111,9 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - dk_cfg.isra.0 (translator) is red until L2 lands the fact. L6 writes no record for it.
   - Blocked: by L2, the clone fact, requested 18:15.
 - The farm lost its queue in the container reset. RUN re-sent: cand4 dcc88df77, then cand5 eaeb17ffd with overlay 2ba233f20, after L2's toolchain job.
+- Recipe defect (from w7, done at c5 9b95ef5a5): Job.use_tree skipped the producer's run stages, so a `uses` of a run-only output failed with ENOENT.
+  - It broke lift/sdm through the chain imptest/lifted -> sdmrows -> sdm.
+  - Rule 3 fix: one Job.produce (copy, externals, generated, run) for every consumer path (pp, external, uses).
+  - Test: test_runpython.py, "uses of a run-only producer". It needs the pinned z3 and capstone, so it runs on the farm with cand5.
+  - cand5 head moves to 9b95ef5a5.
+- Reported to L3a: lift/sdm uses pdftotext over the SDM PDF, which the 07:40Z decision forbids. SDMROWS must come from XED. Status: blocked on L3a.
