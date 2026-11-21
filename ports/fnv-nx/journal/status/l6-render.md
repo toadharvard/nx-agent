@@ -1663,4 +1663,6 @@ Paused: w3b, w4, farm; no other work.
 ## 2026-11-21
 - 18:10Z Resumed after the weekly reset. sm_link_prog / sm_link_stage (L1 question 11-16): they are stale; 21872d6be deleted them and it is an ancestor of the cand5 render head da0e4ff78. L3a's base3 takes render/ from da0e4ff78.
 - 18:12Z w15 session_01KmtZKQgegQkrkUNoCLUrvC (doing): 9 .fnvnx.const records (gl4 2, translator 7) on L1 const.h 6d228dada; constants.tsv and the `constants` keys deleted; branch claude/fnv-l6-render-w15-const from w14-const 2ee150e14.
-- bottleneck: w15's records and objstub on gl4 and translator; reached.tsv (L1 w28) for the undoc d3d9 export filter. 1 of 4 workers busy.
+- 18:14Z w15 done 218850bc1 (archived): 8 records (gl4 2 in-tree; translator 6 in fnv-nx-build tools/mojoshader-glsldk d7e45fda, tree feb1989a…7134); constants.tsv + keys deleted; translator uses hostabi INCLUDE. parse_args_NULL is int (its real type). dk_cfg has no record: the source returns ctx->dk (a field), so IDENT(0) would be false; the class (an IPA clone whose params the compiler rewrote) is with L1 for an objstub rule by origin + param map.
+- 18:14Z farm session_01KmtZKRUsnQ9ZAouC5E4aQK (doing): recipe check, build, objstub of gl4 and translator at 218850bc1. Not verified yet.
+- bottleneck: the farm's objstub numbers; L1's ruling on IPA clones (dk_cfg.isra.0); reached.tsv (L1 w28). 0 of 4 workers, 1 farm.
