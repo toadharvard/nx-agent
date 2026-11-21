@@ -256,8 +256,9 @@ EOF
 # one next to that object. The files are FTOI/<archive path below the prefix>/<member>.f2i.json (a member that occurs more than once in its archive gets .<its position> after
 # its name) and FTOI/index.json [{archive, member, report}] sorted by (archive, member); report is null when the object has no report beside it (cc1 did not run with the plugin
 # loaded, as for an assembler unit). The facts belong to the object's bytes: the written report's `unit` is the sorted list of the units (the source path relative to the compile's
-# directory) of every candidate object with those bytes. A member that matches no build object, or whose candidates carry reports that differ in any field but `unit`, or of which
-# only some candidates have a report, is an error.
+# directory) of every candidate object with those bytes that has a report. A candidate without a report beside it is a copy of another object (newlib's libc build copies the
+# libm objects under their own names: no cc1 ran for the copy), or an assembler unit; the facts belong to the bytes, so the report is null only when no candidate has one.
+# A member that matches no build object, or whose candidates carry reports that differ in any field but `unit`, is an error.
 mkdir -p "$OUT_DIR/FTOI"
 "$PY" -I - "$P" "$W" "$OUT_DIR/FTOI" <<'EOF3'
 import hashlib, json, os, sys
@@ -318,8 +319,6 @@ for a in archives:
         if not cands:
             bad.append("%s(%s): no build object has these bytes" % (arel, n)); continue
         reps = [r for r in map(report_of, cands) if r is not None]
-        if reps and len(reps) != len(cands):
-            bad.append("%s(%s): some objects with these bytes have a report and some have none: %s" % (arel, n, ", ".join(cands))); continue
         if any(facts(r) != facts(reps[0]) for r in reps):
             bad.append("%s(%s): the objects with these bytes carry different reports: %s" % (arel, n, ", ".join(cands))); continue
         k = seen.get(n, 0); seen[n] = k + 1
