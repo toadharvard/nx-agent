@@ -787,3 +787,9 @@ After the first frame:
 - 2026-11-16 13:00Z: L1 asks the names plugin for a clone-origin fact for the stub gate (objstub, w29). Rule: for every cgraph clone with a body (isra, constprop, part, other), a record {clone, origin, root, kind, params}, all read from cgraph fields (clone_of / former_clone_of, split_part, param_adjustments, tree_map), never from the suffix. It goes in the names report's `clones` array, with 5 fixtures. -> w2, doing.
 - 2026-11-16 13:05Z: the farm's rt run at a36b3c8f2: newlib, libgcc and libstdc++ all clean. It failed only at rt.sh:206 on a process substitution (the sandbox has no /dev/fd). w3 fixed it at fc87efde2 (list files), and the farm is rerunning the toolchain root; w3 also cherry-picks it onto the overlay.
 - bottleneck: the farm's rt rerun at fc87efde2 -> the pin commit.
+- 2026-11-21 18:15Z: resumed after the weekly limit. Farm, w2 and w3 had all stopped at the limit on 11-16. Re-queued:
+  - the farm reruns the toolchain roots at cand4b fc87efde2 (only rt should miss the cache);
+  - w3 then makes the pin commit, on cand4b and the overlay;
+  - w2 does the names clone-origin fact.
+  - Overlay head: 2ba233f20.
+- bottleneck: the farm's rt rerun at fc87efde2 -> the pin commit.
