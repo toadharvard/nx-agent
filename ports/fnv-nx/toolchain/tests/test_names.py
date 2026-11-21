@@ -143,18 +143,39 @@ def sections(td, so):
 def _copy(j, i): return {'j': j, 'origin': i, 'op': 'copy'}
 
 
+def _split(j, i, off, size, by_ref): return {'j': j, 'origin': i, 'op': 'split', 'offset': off, 'size': size, 'by_ref': by_ref}
+
+
+def invariant(sym, params):
+    """the fact's own invariant, from the Python side (the plugin raises an error on it too): every clone parameter j appears exactly once and they are 0..m-1; every origin
+    parameter 0..max appears (a copy or split, a const or removed entry); a split carries a boolean by_ref; a null map has nothing to check"""
+    if params is None:
+        return []
+    bad = []
+    js = [e['j'] for e in params if 'j' in e]
+    if sorted(js) != list(range(len(js))): bad.append('%s: clone parameters %s are not 0..m-1 once each' % (sym, js))
+    org = {e['origin'] for e in params if 'origin' in e}
+    if org != set(range(len(org))): bad.append('%s: origin parameters %s are not 0..n-1' % (sym, sorted(org)))
+    for e in params:
+        if e['op'] == 'split' and not isinstance(e.get('by_ref'), bool): bad.append('%s: split without by_ref: %s' % (sym, e))
+        if e['op'] in ('const', 'removed') and 'j' in e: bad.append('%s: %s entry with a clone parameter: %s' % (sym, e['op'], e))
+    return bad
+
+
 CLONES = {   # clone symbol -> (origin, root, kind, params): what the cgraph says of each clone of names/clones.cpp at -O2
     '_ZL6isra_fiii.isra.0': ('_ZL6isra_fiii', '_ZL6isra_fiii', 'isra',       # 1. IPA-SRA drops the unused parameter 1; origin parameter 2 is the clone's 1
                              [_copy(0, 0), _copy(1, 2), {'origin': 1, 'op': 'removed'}]),
     '_ZL4cp_fii.constprop.0': ('_ZL4cp_fii', '_ZL4cp_fii', 'constprop',     # 2. IPA-CP: parameter 1 is the constant 7 and the clone has no parameter for it
                                [_copy(0, 0), {'origin': 1, 'op': 'const', 'value': 7}]),
     '_ZL6part_fPii.part.0': ('_ZL6part_fPii', '_ZL6part_fPii', 'part', None),    # 3. ipa-split part: the origin is the split function, no parameter map
-    '_ZL6dk_cfgi.isra.0': ('_ZL6dk_cfgi', '_ZL6dk_cfgi', 'isra',            # 4. L1's first case: an identity body, the record names dk_cfg
-                           [{'origin': 0, 'op': 'removed'}]),
-    '_ZL7split_fPK3Big.isra.0': ('_ZL7split_fPK3Big', '_ZL7split_fPK3Big', 'isra',   # 6. IPA-SRA split: the int at byte 4 of parameter 0, passed by value
-                                 [{'j': 0, 'origin': 0, 'op': 'split', 'offset': 4, 'size': 4}]),
+    '_ZL6dk_cfgPK7Context.isra.0': ('_ZL6dk_cfgPK7Context', '_ZL6dk_cfgPK7Context', 'isra',   # 4. L1's first case, render's dk_cfg: the pointer field of the context, loaded
+                                    [_split(0, 0, 4, 4, True)]),                                 # through the origin's pointer parameter (offsetof(Context, dk) = 4, a 4-byte pointer)
+    '_ZL7split_fPK3Big.isra.0': ('_ZL7split_fPK3Big', '_ZL7split_fPK3Big', 'isra',   # 6. IPA-SRA split by reference: the int at byte 4 behind the pointer parameter 0
+                                 [_split(0, 0, 4, 4, True)]),
+    '_ZL5val_f4Pair.isra.0': ('_ZL5val_f4Pair', '_ZL5val_f4Pair', 'isra',            # 8. IPA-SRA split by value: the int at byte 4 of the aggregate parameter 0
+                              [_split(0, 0, 4, 4, False)]),
     '_ZL7chain_fPK3Bigi.constprop.0.isra.0': ('_ZL7chain_fPK3Bigi.constprop.0', '_ZL7chain_fPK3Bigi', 'isra',   # 7. a clone of a clone: the origin is the constprop clone
-                                              [{'j': 0, 'origin': 0, 'op': 'split', 'offset': 4, 'size': 4}]),     # (it has no body of its own in the object, so no row), the root is chain_f
+                                              [_split(0, 0, 4, 4, True)]),     # (it has no body of its own in the object, so no row), the root is chain_f
 }
 
 
@@ -174,6 +195,7 @@ def clones(td, so):
     check('clones: exactly the clones of the fixture have a row (a function that is no clone has none)', set(rows) == set(CLONES), sorted(set(rows) ^ set(CLONES)))
     for sym, want in sorted(CLONES.items()):
         check('clones: %s' % sym, rows.get(sym) == want, (rows.get(sym), want))
+    check('clones: the invariant of the map holds in every row', not [b for sym, v in rows.items() for b in invariant(sym, v[3])], rows)
     st = pb.symbols_of(o)
     check('clones: every clone of the table is a function the object defines', all(s in st and st[s]['sec'] not in (None, 'UND') for s in rows), sorted(rows))
     check('clones: the negative (`plain`, `use_*`) has no row', not [s for s in rows if s.startswith(('_Z5plain', '_Z7use_', '_Z8use_'))], sorted(rows))
