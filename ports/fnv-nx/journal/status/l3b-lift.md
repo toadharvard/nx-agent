@@ -1,3 +1,5 @@
+step 3: certificates for the 1,098 forms of L3a's lifted pack (pack forms certified 0 in the measurement build); being measured by cause with the existing cert tools (x87 34/122 classes proved; integer certs blocked by Sail/x86isa model gaps, 444 in the 26,500-shape universe)
+
 # L3b LIFT-CERT status
 
 Lead: session_01KmtZKSQpF5Su9oG96Kbe4A (Opus 5.5), branch claude/fnv-l3b-lift. Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48 UTC). Took over from session_01KmtZKQYtMYtB5pgYaAbehV
@@ -579,3 +581,8 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
   - sha canonical: 26,500 keys, 24,281 built, 0 differing;
   - lift canonical: 131,072 units plus 20 cold, 0 differing.
 - Doing: worker a4fefc3884cbfe194, x87 carrier kind in the spec state (pack x87 34/122 at 6538cb97f).
+
+## 2026-11-21 19:05Z — owner order "only what puts the product on the trunk" (integ 0aa926371)
+- Stopped: the x87 emitted-fragment executor (new proof machinery). Its last head on claude/fnv-l3b-lift-w-x87f stays as is; nothing more goes into it.
+- The only item: the certificate gap of the pack root. Worker a769442d7dd9a643b measures certified/uncertified over the pack's 1,098 forms by cause with the existing tools, then stops.
+- Worker a9f9faade5d009f5d is idle and gets no further items.
