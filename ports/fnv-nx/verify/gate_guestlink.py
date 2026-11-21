@@ -45,7 +45,7 @@ def derive(repo, cache):
     j = recipe.Job(repo, guests[0], os.path.join(cache, "store"), 1, recipe.ext_dir(cache))
     prof = recipe.load_guest_link(repo)
     with tempfile.TemporaryDirectory(prefix="guestlink-") as ws:
-        derived, gone = j.guest_libs(ws, rootdef, open(os.path.join(repo, recipe.TREE, prof["script"])).read())
+        derived, gone = j.guest_libs(ws, rootdef, "".join(open(os.path.join(repo, recipe.TREE, prof[k])).read() + "\n" for k in ("script", "image_script")))
     return derived, gone, pin
 
 

@@ -95,7 +95,10 @@ def main():
     rs1 = recipe.build(srepo("s1", ["tsrc:src/s1.c"]), ROOT, SS, BASE + "/o-s1")
     check("sources: the unit listed by the generate stage (a file of an external) is compiled and linked: unit tsrc/src/s1.c, symbol s1_fn",
           rs1["status"] == "green" and "tsrc/src/s1.c" in rs1["units"] and "s1_fn" in TL.syms(rs1["elf"]["path"]), TL.err_text(rs1))
+    check("sources: the build result records the provenance: ext_units names the external's unit and the external, and not the root's own unit toy/b.c",
+          rs1.get("ext_units") == {"tsrc/src/s1.c": "tsrc"} and "toy/b.c" in rs1["units"] and "toy/b.c" not in rs1["ext_units"], rs1.get("ext_units"))
     rs2 = recipe.build(srepo("s2", ["tsrc:src/s1.c", "tsrc:src/s2.c"]), ROOT, SS, BASE + "/o-s2")
+    check("sources: ext_units lists every external unit, by the unit list and not by a name", rs2.get("ext_units") == {"tsrc/src/s1.c": "tsrc", "tsrc/src/s2.c": "tsrc"}, rs2.get("ext_units"))
     o1 = {o["unit"]: o["sha256"] for o in rs1["objects"]}
     o2 = {o["unit"]: o["sha256"] for o in rs2["objects"]}
     check("sources: a changed list adds only the new unit: the other units keep their objects and their compile-stage keys (cache hits)",
@@ -120,6 +123,7 @@ def main():
     rr1 = recipe.build(rrepo("rs1", [P + ":p.c"]), ROOT, SS, BASE + "/o-rs1")
     check("root sources: a tracked file of a root in uses is compiled as unit <root with / as __>/<path>", rr1["status"] == "green"
           and P.replace("/", "__") + "/p.c" in rr1["units"], TL.err_text(rr1))
+    check("root sources: a tracked file of another admitted root is our own code, not an external unit: ext_units is empty", rr1.get("ext_units") == {}, rr1.get("ext_units"))
     rr2 = recipe.build(rrepo("rs2", [P + ":p.c"], pfiles=dict(PF, **{"p.c": "int p_x;\nint p_y;\n"})), ROOT, SS, BASE + "/o-rs2")
     u = P.replace("/", "__") + "/p.c"
     check("root sources: the file's content is in the unit key: another content has another preprocessing key", rr1["status"] == rr2["status"] == "green"

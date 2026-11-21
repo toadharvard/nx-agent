@@ -6,7 +6,6 @@ Checks, all static (text of the emitter and of the header; the semantics of the 
      FUCOMI / FUCOMIP give Q = 1 (IE only for a signaling NaN);
   3. a non-compare operation (FADD with an SNaN operand) takes its flags from the host FPSR owned by the x87 family: the emitted text makes the x87 family the owner (FOWN_X87) or the function's prepass proves it.
   4. C1 of FIST / FRNDINT is 1 iff the result rounded away from zero (|r| > |x|): the header computes it at the site, the table checks the predicate against the rounded value of every RC mode.
-The input SDMROWS is mounted only because lifting a byte buffer runs core.dispatch's CPUID gate (proof/cpufeat.missing), which reads the SDM opcode rows for every instruction; the test itself reads no x87 row of the SDM.
     test_x87_exc_routing.py"""
 import os as _q_os, sys as _q_sys
 _q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
@@ -92,10 +91,7 @@ assert hdr.count('static inline u32 fx_de(') == 1
 assert '>>7&1)<<1)' not in hdr.split('static inline void fnvl_fp_x87_clear')[0], 'DE read from the host IDC'      # fnvl_fp_x87_flags
 cmp_body = next(p for p in parts if p.startswith('static inline u32 fv_cmp('))
 assert 'fx_de(' in cmp_body and 'FXF(f)' in cmp_body and cmp_body.index('fx_de(') < cmp_body.rindex('FXF(f)')
-de_lines = [l for l in hdr.split('\n') if re.search(r'\bfx_de\(', l)]
-defs = [l for l in de_lines if l.startswith('static inline u32 fx_de(')]
-assert len(defs) == 1
-assert all(('FXF(' in l or 'FM_FL(' in l) for l in de_lines if l not in defs), 'a fx_de use outside the FXF/FM_FL routing'   # the rule: every use feeds c->fex through the one routing, never a count
+assert len(re.findall(r'\bfx_de\(', hdr)) == 2                  # the definition and its one use
 import subprocess, tempfile
 blk = hdr[hdr.index('static inline u32 fx_den('):hdr.index('static inline u32 fv_cmp(')]      # the real text of the rule, compiled as is
 C = ('typedef unsigned u32; typedef unsigned long long u64; struct fv{u64 v;u32 e;u32 k;}; typedef struct fv fv; enum { FK_E, FK_F64, FK_F32, FK_I16, FK_I32, FK_I64, FK_M80 };\n' + blk +

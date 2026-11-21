@@ -12,5 +12,8 @@
   "product-guest",
   "lifted",
   "host-product"
+ ],
+ "needs": [
+  "reach"
  ]
 }

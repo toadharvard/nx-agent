@@ -2,7 +2,7 @@
 Universe by rule: every one-instruction unit [opcode map (one byte, 0F), opcode byte, ModRM byte, four zero bytes, RET] of the synthetic image Image.from_bytes at 0x401000 (the buffers of test_sites).
 A unit's text is its lift (or 'UNSUPPORTED reason').  Process A lifts the universe in sorted order, process B (another PYTHONHASHSEED) in a seeded shuffle;
 The whole universe is compared (no sampling).  Further, COLD units are lifted one per fresh process and compared with A.
-    python3 -I test_lift_canonical.py        (the SDM rows are the mounted input SDMROWS, tests/inputs.json; the children inherit the mount)"""
+    python3 -I test_lift_canonical.py"""
 import os as _q_os, sys as _q_sys
 _q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import hashlib, os, random, subprocess, sys, tempfile

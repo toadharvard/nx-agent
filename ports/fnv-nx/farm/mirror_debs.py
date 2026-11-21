@@ -53,7 +53,7 @@ def main(a):
     work = os.path.join(out, ".idx")
     os.makedirs(work, exist_ok=True)
     idx = index(snap, work)
-    pins = dict(envcheck.dep_closure(env["packages"]), **env["packages"])   # name -> version
+    pins = envcheck.declared_debs(env)   # name -> version: the declared packages, the profiles' tops and their dependency closure (the one function)
     man, bad = {}, []
     for name, ver in sorted(pins.items()):
         want = None

@@ -5,7 +5,7 @@ generates the import entries (tools/impgen.py) and the perfect-hash dispatch tab
   guest.cc   the lifted functions (lifted-code flags)          imp.cc   the generated import entries          tab.cc    the dispatch table
   image.inc  the image bytes, the import table words, the entry address and the expected eax of every case (main.cc includes it)
 Expected values are computed from the x86 semantics by hand, stated at each case (as in the comments below).
-usage: gen.py OUT_DIR LIFT_DIR --x86sys F --sdmrows F --cpumodel F --rcptab F --rcpcert F      (the lifter's declared inputs: lifted.buffer_arguments)"""
+usage: gen.py OUT_DIR LIFT_DIR --x86sys F --cpumodel F --rcptab F --rcpcert F      (the lifter's declared inputs: lifted.buffer_arguments)"""
 import os as _q_os, sys as _q_sys
 _q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, struct, sys, tempfile

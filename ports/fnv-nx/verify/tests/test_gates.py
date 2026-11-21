@@ -197,7 +197,7 @@ from fnvnx.verify import gatesdir  # noqa: E402
 spec = gatesdir.load_dir(os.path.join(VERIFY, "gates.d"))
 files_d = sorted(f[:-5] for f in os.listdir(os.path.join(VERIFY, "gates.d")))
 check("gates.d: no gates.json is tracked and every file is one gate named like it", not os.path.exists(os.path.join(VERIFY, "gates.json"))
-      and [g["name"] for g in spec["gates"]] == files_d and len(files_d) == len(set(files_d)), files_d)
+      and sorted(g["name"] for g in spec["gates"]) == files_d and len(files_d) == len(set(files_d)), files_d)
 check("gates.d: every gate file declares valid covers", all(isinstance(g.get("covers"), list) and g["covers"] and all(c in gatesdir.ROOT_CLASSES for c in g["covers"])
                                                           for g in spec["gates"]), spec)
 byname = {g["name"]: g for g in spec["gates"]}

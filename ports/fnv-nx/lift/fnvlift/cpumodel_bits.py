@@ -10,3 +10,10 @@ def model_words(mod):
             'leaf1_edx': I(mod['leaf1_edx_raw']) & ~I(mod['leaf1_edx_clear']) & 0xffffffff,
             'ext1_ecx': I(mod['ext1_ecx_raw']) & I(mod['ext1_ecx_keep']),
             'ext1_edx': I(mod['ext1_edx_raw']) & I(mod['ext1_edx_keep'])}
+
+
+def declared_cpu(mod):
+    """cpuid_model.json (a dict) -> {(leaf, reg): word, (0, 'EAX'): max basic leaf, (0x80000000, 'EAX'): max extended leaf}: the declared CPU's words of every field a feature flag can sit in (leaf 1 ECX/EDX, 0x80000001 ECX/EDX); fields the platform owns are not features.
+    The one derivation: proof/cpufeat.py and the sail model's dispatch splice (sail_patches/bump/bsf_bsr_dispatch.py) both call it"""
+    w = model_words(mod)
+    return {(0, 'EAX'): I(mod['max_basic']), (0x80000000, 'EAX'): I(mod['max_ext']), (1, 'EDX'): w['leaf1_edx'], (1, 'ECX'): w['leaf1_ecx'], (0x80000001, 'EDX'): w['ext1_edx'], (0x80000001, 'ECX'): w['ext1_ecx']}

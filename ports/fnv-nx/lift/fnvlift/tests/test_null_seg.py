@@ -7,7 +7,7 @@
 import os as _q_os, sys as _q_sys
 _q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import json, os, sys
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import fnvnx.lift.fnvlift.tests._inputs as _inputs; SDMROWS = _inputs.sdmrows_arg(); _inputs.configure(SDMROWS)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import fnvnx.lift.fnvlift.tests._inputs as _inputs; _inputs.configure()
 import fnvnx.lift.fnvlift as L
 from fnvnx.lift.fnvlift import x86sys
 from fnvnx.lift.fnvlift.core import Unsupported
@@ -25,7 +25,7 @@ def configure(**guard):
     g = {**dict(es=False, ds=False, fs=False, gs=True), **guard}
     json.dump({'format': 'fnvnx-segwrites/2', 'images': {'buf': {n: {'guard': v} for n, v in g.items()}}}, open(d + '/segwrites.json', 'w'))
     open(d + '/universe.tsv', 'w').close(); open(d + '/depth.tsv', 'w').close()
-    inputs.configure(universe=d + '/universe.tsv', fpstate=d, fpdepth=d + '/depth.tsv', x86sys=_inputs.X86SYS, sdmrows=SDMROWS, cpumodel=_inputs.CPUMODEL, segwrites=d + '/segwrites.json', image='buf')
+    inputs.configure(universe=d + '/universe.tsv', fpstate=d, fpdepth=d + '/depth.tsv', x86sys=_inputs.X86SYS, cpumodel=_inputs.CPUMODEL, segwrites=d + '/segwrites.json', image='buf')
 
 
 def lift(code):
@@ -69,7 +69,7 @@ def sel_cfg(**sets):
     g = {n: {'guard': n == 'gs', 'selectors': sets.get(n)} for n in ('es', 'ds', 'fs', 'gs')}
     json.dump({'format': 'fnvnx-segwrites/2', 'images': {'buf': g}}, open(d + '/segwrites.json', 'w'))
     open(d + '/universe.tsv', 'w').close(); open(d + '/depth.tsv', 'w').close()
-    inputs.configure(universe=d + '/universe.tsv', fpstate=d, fpdepth=d + '/depth.tsv', x86sys=_inputs.X86SYS, sdmrows=SDMROWS, cpumodel=_inputs.CPUMODEL, segwrites=d + '/segwrites.json', image='buf')
+    inputs.configure(universe=d + '/universe.tsv', fpstate=d, fpdepth=d + '/depth.tsv', x86sys=_inputs.X86SYS, cpumodel=_inputs.CPUMODEL, segwrites=d + '/segwrites.json', image='buf')
 sel_cfg(gs=[0, 0x23], ds=[0x23])
 t = lift(bytes([0x65, 0x89, 0x01, 0xc3])); assert GUARD['gs'] in t and 'in_sel_gs >> 3' not in t, t[:500]      # gs: null guard kept, code-selector arm dropped
 t = lift(bytes([0x89, 0x01, 0xc3])); assert 'in_sel_ds >> 3' not in t, t[:500]

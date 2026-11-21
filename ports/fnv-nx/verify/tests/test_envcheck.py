@@ -232,6 +232,16 @@ bad = [b for b in envcheck.check(doc(), rr) if "read root" in b]
 check("read root: a missing header is a mismatch", any("env: read root t:" in b and "no/such/header.h" in b for b in bad), bad)
 envcheck.READROOTS = os.path.join(VERIFY, "readroots.json")
 
+# declared_debs: the one set of the deb pins, the mirror and the pinned tree set: declared packages + profile tops + their closure (a toy dependency relation)
+_dc = envcheck.dep_closure
+envcheck.dep_closure = lambda names: {"libc": "1", "libgmp": "2"} if {"gmp-dev"} <= set(names) else {"libc": "1"}
+toy = {"packages": {"bash": "5"}, "debs": {"profiles": {"cb": ["gmp-dev"], "x": ["bash"]}}}
+check("declared_debs: a profile's top brings its closure into the set", envcheck.declared_debs(toy) == {"libc": "1", "libgmp": "2", "bash": "5"}, envcheck.declared_debs(toy))
+check("declared_debs: with no profile the set is the declared packages and their closure", envcheck.declared_debs({"packages": {"bash": "5"}}) == {"libc": "1", "bash": "5"}, envcheck.declared_debs({"packages": {"bash": "5"}}))
+check("profile_tops: every top of every profile", envcheck.profile_tops(toy["debs"]) == {"gmp-dev", "bash"} and envcheck.profile_tops(None) == set(), envcheck.profile_tops(toy["debs"]))
+envcheck.dep_closure = _dc
+check("env.json: the compiler-build profile holds gcc's configure libraries", {"libgmp-dev", "libmpfr-dev", "libmpc-dev", "zlib1g-dev"} <= set(doc()["debs"]["profiles"]["compiler-build"]))
+
 shutil.rmtree(TD, ignore_errors=True)
 print("%d failed: %s" % (len(FAILED), FAILED) if FAILED else "ALL PASS")
 sys.exit(1 if FAILED else 0)

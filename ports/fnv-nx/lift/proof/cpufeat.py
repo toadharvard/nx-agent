@@ -20,9 +20,8 @@ _S = {}
 def _model():
     path = inputs.get('cpumodel')
     if _S.get('path') != path:
-        from fnvnx.lift.fnvlift.cpumodel_bits import model_words, I
-        m = json.load(open(path)); w = model_words(m)
-        cpu = {(0, 'EAX'): I(m['max_basic']), (0x80000000, 'EAX'): I(m['max_ext']), (1, 'EDX'): w['leaf1_edx'], (1, 'ECX'): w['leaf1_ecx'], (0x80000001, 'EDX'): w['ext1_edx'], (0x80000001, 'ECX'): w['ext1_ecx']}
+        from fnvnx.lift.fnvlift.cpumodel_bits import declared_cpu
+        m = json.load(open(path)); cpu = declared_cpu(m)
         from fnvnx.lift.fnvlift.cpumodel_bits import I as _I
         _S.clear(); _S.update(path=path, cpu=cpu, groups=_groups(m), ud={k: (_I(v[0]), v[1], v[2], v[3], v[4]) for k, v in m['ud_encodings'].items()}, nop={k: (_I(v[0]), v[1], v[2], v[3], v[4]) for k, v in m['exec_as_nop'].items()}, memo={})
     return _S

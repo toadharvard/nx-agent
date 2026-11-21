@@ -3,7 +3,7 @@
   prelude: every plain accessor macro of rt/fnvl.h passes `lkwin_` to its accessor and LK_BEGIN declares a block-local `lkwin_` of another type, so any spelling of a plain accessor (hand, DSL, helper)
   inside the window does not compile. Positive: the hand handlers of every LOCKABLE form lift, and the lifted unit compiles with the pack flags. Negative: the old defect (the DSL emitter handling a
   locked add) raises at the emitter; a plain accessor of every kind inside LK_BEGIN fails to compile. The accessor list is read from rt/fnvl.h (every `#define M..(a)` that is a guest accessor).
-  Every compile is a stage of the recipe (toolchain/tests/plugbuild.py: the pinned msvcmodel compiler, the full plugin set, a lifted root), no direct compiler call.   test_lock_only.py (the inputs SDMROWS and GEN are mounted)"""
+  Every compile is a stage of the recipe (toolchain/tests/plugbuild.py: the pinned msvcmodel compiler, the full plugin set, a lifted root), no direct compiler call.   test_lock_only.py (the input GEN is mounted)"""
 import os as _q_os, sys as _q_sys
 _q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", "..")) # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, re, shutil, sys, tempfile

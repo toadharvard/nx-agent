@@ -52,11 +52,11 @@ def pop(cx, n=1):
     return '' if cx.xm == 's' else ' dyn_pop();' * n
 
 
-def arith(cx, dst, o, fx, fy):
-    """st(dst) = fx o fy; fx and fy are the source operands as carriers (fv), each evaluated ONCE (a memory operand is read once: the x86 instruction reads it once, so no other thread's store can fall between two reads); the double operands and DE are both taken from those locals (rt/fnvl_x87.h fx_de through FXD). 'r' suffix: operands swapped"""
+def arith(cx, dst, x, y, o, fx, fy):
+    """st(dst) = x o y; x and y are C double expressions ('r' suffix: operands swapped), fx and fy the source operands as carriers (fv): DE is read from them at their own type (rt/fnvl_x87.h fx_de through FXD)"""
     if o.endswith('r'):
-        o, fx, fy = o[0], fy, fx
-    cx.em('{ fv da_=(%s), db_=(%s); double x_=fv_d(da_), y_=fv_d(db_), r_=FXN(x_%sy_,x_,y_); %s=fv_f64(r_); FXD(da_,db_,r_); }' % (fx, fy, o, wr(cx, dst)))
+        x, y, o, fx, fy = y, x, o[0], fy, fx
+    cx.em('{ fv da_=(%s), db_=(%s); double x_=(%s), y_=(%s), r_=FXN(x_%sy_,x_,y_); %s=fv_f64(r_); FXD(da_,db_,r_); }' % (fx, fy, x, y, o, wr(cx, dst)))
 
 
 def control(b0, mr):
@@ -115,9 +115,9 @@ def x87_reg(cx, ins, b0, mr, g):
     em, i = cx.em, mr & 7
     R = lambda k: rd(cx, k)
     if b0 == 0xd8 and g in AR:
-        arith(cx, 0, AR[g], R(0), R(i))
+        arith(cx, 0, 'fv_d(%s)' % R(0), 'fv_d(%s)' % R(i), AR[g], R(0), R(i))
     elif b0 in (0xdc, 0xde) and g in ARD:
-        arith(cx, i, ARD[g], R(i), R(0))
+        arith(cx, i, 'fv_d(%s)' % R(i), 'fv_d(%s)' % R(0), ARD[g], R(i), R(0))
         em(pop(cx) if b0 == 0xde else '')
     elif b0 == 0xd8 and g in (2, 3) or b0 == 0xdd and g in (4, 5):                 # fcom fcomp / fucom fucomp st(i)
         em('FCMP(%s,%s,%du);%s' % (R(0), R(i), b0 == 0xdd, pop(cx) if g in (3, 5) else ''))
@@ -182,20 +182,21 @@ def x87_mem(cx, ins, b0, mr, g):
     r0 = lambda: rd(cx, 0)
     a = '{ u32 a_=%s; ' % A
     if b0 in (0xd8, 0xdc, 0xda, 0xde):                                             # arithmetic and compares with m32 / m64 / m32int / m16int
-        src = {0xd8: 'fv_ld32(M32(a_))', 0xdc: 'fv_ld64(M64(a_))', 0xda: 'fv_ldi(FK_I32,(s32)M32(a_))', 0xde: 'fv_ldi(FK_I16,(s16)M16(a_))'}[b0]
+        src = {0xd8: ('(double)MF32(a_)', 'fv_ld32(M32(a_))'), 0xdc: ('MF64(a_)', 'fv_ld64(M64(a_))'),
+               0xda: ('(double)(s32)M32(a_)', 'fv_ldi(FK_I32,(s32)M32(a_))'), 0xde: ('(double)(s16)M16(a_)', 'fv_ldi(FK_I16,(s16)M16(a_))')}[b0]
         if g in AR:
             em(a + '')
-            arith(cx, 0, AR[g], r0(), src)
+            arith(cx, 0, 'fv_d(%s)' % r0(), src[0], AR[g], r0(), src[1])
             em('}')
         elif g in (2, 3):
-            em(a + 'FCMP(%s,%s,0u); }%s' % (r0(), src, pop(cx) if g == 3 else ''))
+            em(a + 'FCMP(%s,%s,0u); }%s' % (r0(), src[1], pop(cx) if g == 3 else ''))
         else:
             raise Unsupported('x87 ' + cx.m)
         return
     if b0 == 0xd9 and g == 0:
-        em(a + 'fv v_=fv_ld32(M32(a_)); FXD(v_,v_,0.0); ' + push(cx, 'v_') + ' }')                # DE: a binary32 denormal operand (SDM 1:8.5.2)
+        em(a + push(cx, 'fv_ld32(M32(a_))') + ' }')
     elif b0 == 0xdd and g == 0:
-        em(a + 'fv v_=fv_ld64(M64(a_)); FXD(v_,v_,0.0); ' + push(cx, 'v_') + ' }')
+        em(a + push(cx, 'fv_ld64(M64(a_))') + ' }')
     elif b0 == 0xdb and g == 0:
         em(a + push(cx, 'fv_ldi(FK_I32,(s32)M32(a_))') + ' }')
     elif b0 == 0xdf and g == 0:

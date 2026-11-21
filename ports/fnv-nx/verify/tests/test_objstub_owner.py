@@ -31,7 +31,7 @@ IN, OUT = 'ports/fnv-nx/render/gl4/gl4.o', 'ports/fnv-nx/render/other/x.o'
 
 
 def kinds(oid, cite, owners=OWN, stats=None):
-    items, finds = objstub.judge({oid: res(cite)}, {}, None, owners=owners, stats=stats)
+    items, finds = objstub.judge({oid: res(cite)}, None, owners=owners, stats=stats)
     return sorted(k for _, _, k, _ in finds)
 
 
@@ -41,7 +41,7 @@ check('unknown id', kinds(IN, {'f': ['od:no-such']}) == ['owner-decision-unknown
 check('no anchors at all', kinds(IN, {'f': ['od:gl-shader-failure']}, owners={}) == ['owner-decision-unknown-id'])
 check('citation outside the root', kinds(OUT, {'f': ['od:gl-shader-failure']}) == ['owner-decision-wrong-root'])
 check('a root that merely shares a prefix is outside', kinds('ports/fnv-nx/render/gl4x/a.o', {'f': ['od:gl-shader-failure']}) == ['owner-decision-wrong-root'])
-check('uncited body keeps its finding', kinds(IN, {}) == ['V'])
+check('uncited body keeps its finding', kinds(IN, {}) == ['const-missing'])
 check('two records for one body', kinds(IN, {'f': ['od:gl-shader-failure', 'dm:31']}) == ['cite-mismatch'])
 
 # path independence: a cited body that an earlier branch flags (the fnvnx_wine_fixme path, a terminator path, a real body) is decided by the anchor alone
@@ -50,7 +50,7 @@ for kind in ('WINE-V', 'wine-fixme-in-real-body', 'T2', 'CITED', 'trap-body', 'f
         r = res({'f': cite})
         r['finds'] = [('f', kind, 'x', None)]
         r['wine_id'] = {'f': 5}
-        items, finds = objstub.judge({oid: r}, {}, None, wine={5: ('f', 'wine-9.0:a:b', 'void', '')}, owners=OWN)
+        items, finds = objstub.judge({oid: r}, None, wine={5: ('f', 'wine-9.0:a:b', 'void', '')}, owners=OWN)
         check('finding %s on a cited body: %s' % (kind, want), sorted(k for _, _, k, _ in finds) == want, finds)
 d = tempfile.mkdtemp(prefix='objstub-owner-')
 p = os.path.join(d, 'CLAUDE.md')

@@ -40,7 +40,7 @@ def w(repo, rel, text):
 
 
 recipe.deb_pins = lambda: {"toybb": {"version": "1", "sha256": "0" * 64}, "base-files": {"version": "1", "sha256": "1" * 64}}
-TABLE = "shape\tclass\nadd\tint\nmul\tint\nvaddps\tsimd\n"
+TABLE = "#shape\tclass\nadd\tint\nmul\tint\nvaddps\tsimd\n"
 
 
 def make(td, name, table, step=None, tracked_table=True):
@@ -77,11 +77,13 @@ with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as td:
     check("{{ and }} are literal braces", ex3[0]["args"] == ["{x}", "add"], ex3[0]["args"])
     bad = (("a table that is not tracked", dict(table=TABLE, tracked_table=False), "not a tracked file"),
            ("an empty table", dict(table=""), "empty"),
-           ("a header only", dict(table="shape\tclass\n"), "no row"),
-           ("a short row", dict(table="shape\tclass\nadd\n"), "fields"),
-           ("a duplicate key", dict(table="shape\tclass\nadd\tint\nadd\tsimd\n"), "twice"),
-           ("a key that is no plain name", dict(table="shape\tclass\na b\tint\n"), "not a plain name"),
-           ("a duplicate column", dict(table="shape\tshape\nadd\tint\n"), "unique column"),
+           ("a header only", dict(table="#shape\tclass\n"), "no row"),
+           ("a short row", dict(table="#shape\tclass\nadd\n"), "fields"),
+           ("a duplicate key", dict(table="#shape\tclass\nadd\tint\nadd\tsimd\n"), "twice"),
+           ("a key that is no plain name", dict(table="#shape\tclass\na b\tint\n"), "not a plain name"),
+           ("a duplicate column", dict(table="#shape\tshape\nadd\tint\n"), "unique column"),
+           ("a header without #", dict(table="shape\tclass\nadd\tint\n"), "not a header"),
+           ("a # line after the header", dict(table="#shape\tclass\nadd\tint\n# comment\nmul\tint\n"), "no comments"),
            ("a key column that is not in the header", dict(table=TABLE, step={"foreach": {"table": R + "/rows.tsv", "key": "nope"}}), "key column"),
            ("an unknown {column}", dict(table=TABLE, step={"args": ["{nope}"]}), "no column"),
            ("a lone brace", dict(table=TABLE, step={"args": ["a{b"]}), "lone brace"),
@@ -141,12 +143,24 @@ with tempfile.TemporaryDirectory() as td2:
                             ("an output that does not name the row", dict(dyn, outputs=["proof/all.txt"]), "lie under"),
                             ("a table of another form", dict(dyn, foreach={"table": {"nope": 1}, "key": "shape", "into": "proof"}), "build-time foreach is"),
                             ("an undeclared external table", dict(dyn, foreach={"table": {"external": "x", "path": "t.tsv"}, "key": "shape", "into": "proof"}), "not declared"),
-                            ("dirs beside into", dict(dyn, dirs=["z"]), "`into`")):
+                            ("a dir outside into", dict(dyn, dirs=["other/{shape}"]), "lie under"),
+                            ("a dir that does not name the row", dict(dyn, dirs=["proof/all"]), "lie under"),
+                            ("no output and no dir", {k: v for k, v in dyn.items() if k != "outputs"}, "lie under")):
         try:
             recipe.expand_foreach(dict(rc, run=[gen, mut]), r)
             msg = ""
         except ValueError as ex2:
             msg = str(ex2)
         check("build-time foreach: %s is red" % what, want in msg, msg)
+# a template of directories (`dirs`) keyed by the row like files: the marker still declares only `into`, the row template keeps both
+    dd = dict(dyn, outputs=["proof/{shape}.txt"], dirs=["proof/{shape}.d"])
+    ex = recipe.expand_foreach(dict(rc, run=[gen, dd]), r)["run"]
+    check("build-time foreach: a dirs template is kept in the row, the marker declares only into", ex[1]["dirs"] == ["proof"] and ex[1]["outputs"] == []
+          and ex[1]["foreach"]["row"]["dirs"] == ["proof/{shape}.d"] and ex[1]["foreach"]["row"]["outputs"] == ["proof/{shape}.txt"], ex[1])
+    dd = {k: v for k, v in dd.items() if k != "outputs"}
+    ex = recipe.expand_foreach(dict(rc, run=[gen, dd]), r)["run"]
+    check("build-time foreach: a template of dirs alone is valid", ex[1]["dirs"] == ["proof"] and ex[1]["foreach"]["row"]["dirs"] == ["proof/{shape}.d"], ex[1])
+    st = recipe.foreach_row_step(ex[1]["foreach"]["row"], {"shape": "add", "class": "int"}, "shape")
+    check("build-time foreach: a row step's dirs name its row", st["dirs"] == ["proof/add.d"] and st["name"] == "prove.add", st)
 print("fails: %d" % fails)
 sys.exit(1 if fails else 0)
