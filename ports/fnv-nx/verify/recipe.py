@@ -1007,9 +1007,9 @@ def foreign_imports(tool, owner, files, inputs, repo=".", closure=None, imports=
                         return c
         return None
 
-    def pkg_dir(name):   # a directory of a declared root that holds modules, named by the qualified rule: an implicit (PEP 420) namespace package, `from <it> import <module>`
+    def pkg_dir(name):   # a directory of a declared root that holds modules, named by the qualified rule, with no __init__.py: an implicit (PEP 420) namespace package, `from <it> import <module>`
         d = TREE + "/" + (gate_admit.module_file(name) or "\0") + "/"
-        return any(name == pre or name.startswith(pre + ".") for pre in prefixes) and any(c.startswith(d) for c in theirs_set)
+        return any(name == pre or name.startswith(pre + ".") for pre in prefixes) and any(c.startswith(d) for c in theirs_set) and not qualified(name)
 
     def find(name, rel):    # the tracked file of module NAME (dotted): in the tool's own root, or carried by a declared input
         parts = name.split(".")
@@ -1067,7 +1067,7 @@ def foreign_imports(tool, owner, files, inputs, repo=".", closure=None, imports=
                 names += [(n.module + "." + a.name, 0) for a in n.names if qualified(n.module + "." + a.name)]
             for name, level in names:
                 top = name.split(".")[0]
-                if top in std or top in pinned or not top or name in ns or pkg_dir(name) or (name in prefixes and not qualified(name)):
+                if top in std or top in pinned or not top or (name in ns and not qualified(name)) or pkg_dir(name) or (name in prefixes and not qualified(name)):   # a directory with __init__.py is a regular package: a module of the closure (its __init__ runs on import)
                     continue
                 got = find(name, f) or find(top, f)
                 if got is None:
