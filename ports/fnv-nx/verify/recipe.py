@@ -2934,14 +2934,25 @@ class Job:
             raise BuildRed({"stage": "pp:%s" % ref.get("pp", "?"), "exit": None, "stderr": errs})
         return resolved(self, "pp", ref["pp"], ref["unit"], lambda: self.pp_make(ws, ref))
 
-    def pp_make(self, ws, ref):
-        p = Job(self.repo, ref["pp"], self.store, self.jobs, self.extcache)
+    def produce(self, ws, root):
+        """The one way a root's outputs are made for another root (pp, external, uses): the producer ROOT's tracked files copied, its externals fetched, then its
+        generated and its run stages, in that order, exactly as its own build makes them. -> (job, workspace). The producer's stage keys and run/hit counts join this
+        job's. A second sequence at a call site (one that skips the run stages, say) cannot exist: every consumer path calls this."""
+        p = Job(self.repo, root, self.store, self.jobs, self.extcache)
         pws = tempfile.mkdtemp(dir=ws)
-        _copy(self.repo, [f for f in p.files if under(f, ref["pp"])], ref["pp"], os.path.join(pws, "root"))
         try:
+            _copy(self.repo, [f for f in p.files if under(f, root)], root, os.path.join(pws, "root"))
             p.externals(pws)
             p.generate(pws)
             p.run_all(pws)
+        finally:
+            self.run, self.hit = self.run + p.run, self.hit + p.hit
+        self.keys |= p.keys
+        return p, pws
+
+    def pp_make(self, ws, ref):
+        p, pws = self.produce(ws, ref["pp"])
+        try:
             got = p.compile(pws, [ref["unit"]], pp_only=True)
         finally:
             self.run, self.hit = self.run + p.run, self.hit + p.hit
@@ -2972,16 +2983,7 @@ class Job:
         change re-runs the plugin stage only, an input of an earlier stage re-runs everything after it), ingested, and materialised once at
         EXTCACHE/stage-<tree> for the mount. -> {host, tree, at, stage_key}; stage_key = sha256 of the producer's sorted stage keys: the key of
         every PP and CC stage of this root holds it (FNVNX_COMPILER_KEY), beside the tree hash that its mount already holds."""
-        p = Job(self.repo, e["root"], self.store, self.jobs, self.extcache)
-        pws = tempfile.mkdtemp(dir=ws)
-        try:
-            _copy(self.repo, [f for f in p.files if under(f, e["root"])], e["root"], os.path.join(pws, "root"))
-            p.externals(pws)
-            p.generate(pws)
-            p.run_all(pws)
-        finally:
-            self.run, self.hit = self.run + p.run, self.hit + p.hit
-        self.keys |= p.keys
+        p, pws = self.produce(ws, e["root"])
         if p.red:
             raise BuildRed({"stage": "external:" + e["name"], "exit": None, "stderr": ["producer %s is red: %s" % (e["root"], p.red[0]["stage"])] + list(p.red[0]["stderr"])[-18:]})
         rel = (p.rec.get("outputs") or {}).get(e["output"])
@@ -3189,14 +3191,13 @@ class Job:
             # a directory of tracked files: its content is the output, no stage of the producer runs (a header-only root has nothing to build)
             _copy(self.repo, [f for f in p.files if under(f, u["root"] + "/" + rel)], u["root"], os.path.join(pws, "root"))
             return cas.ingest(os.path.join(pws, "root", rel), self.store)
-        try:
-            p.externals(pws)
-            p.generate(pws)
-            if p.red:   # the output this root uses is not produced
-                raise BuildRed({"stage": "uses:" + u["root"], "exit": None, "stderr": ["producer %s is red: %s" % (u["root"], p.red[0]["stage"])] + list(p.red[0]["stderr"])[-18:]})
-            return cas.ingest(os.path.join(pws, "root", p.rec["outputs"][u["output"]]), self.store)
-        finally:
-            self.run, self.hit = self.run + p.run, self.hit + p.hit
+        p, pws = self.produce(ws, u["root"])
+        if p.red:   # the output this root uses is not produced
+            raise BuildRed({"stage": "uses:" + u["root"], "exit": None, "stderr": ["producer %s is red: %s" % (u["root"], p.red[0]["stage"])] + list(p.red[0]["stderr"])[-18:]})
+        out = os.path.join(pws, "root", rel) if isinstance(rel, str) else ""
+        if not os.path.lexists(out):   # a green producer that does not write a declared output is a named red, never an OSError at ingest
+            raise BuildRed({"stage": "uses:" + u["root"], "exit": None, "stderr": ["producer %s is green but its declared output %s (%r) is not written" % (u["root"], u["output"], rel)]})
+        return cas.ingest(out, self.store)
 
     def objects_input(self, ws, tmp, g):
         """The tree mounted at /objs of a generate stage with `objects_of`: the objects of every admitted product root (implicit variant) the rule
