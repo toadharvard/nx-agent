@@ -3141,3 +3141,8 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - candcheck at c5 4dc09319c, 6 sources: 1389 files; 606 equal the clean merge; 261 merge-red; 522 conflicts (an upper bound, from an old octopus base); 0 roots red after 10 cut records.
   - Ruling: the per-step base is git merge-base G_i G_1..G_{i-1}; files under cut roots are excluded.
   - Status: w28 rerunning.
+- The L2 clone fact, .fnvnx.clones (cand4b 8075e2492; overlay 9b30693aa), is returned for one fix.
+  - dk_cfg.isra.0's params are not total: the by-ref split j0 <- origin 0 at offsetof(Context, dk) is missing.
+  - Required: split entries carry by_ref (from POINTER_TYPE_P); every clone param appears once; a self-check against DECL_ARGUMENTS.
+  - w29's parser waits for the fix.
+- FTOI (w3 3164eff45): report is null only when no object with the same bytes has one; newlib's copied libm members are covered. Waiting on the farm.
