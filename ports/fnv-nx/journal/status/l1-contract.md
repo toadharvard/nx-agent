@@ -3168,3 +3168,9 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - L6 delivery: 3 admit-only commits; 293 files stale; L1's share empty. bridgefacts/com stays admitted in c5 (L5's platform and bridgetable use it); L6 admits it on its own head for cand6.
 
 - 2026-11-21 18:45 L4 tree request: accepted. From cand6 the owner map gives L4 the prefixes verify/boot, verify/hostabirec.py, verify/tests/test_boot, verify/tests/test_hostabirec.py and farm/boot_job.sh (31 files; the longest prefix owns). cand6 takes them from L4's head. cand5 e4e9b7e53 keeps its current versions under the pair record. Waiting: farm verdicts on cand5 e4e9b7e53 and cand4 dcc88df77.
+- 18:50 w29 (session_01KmtZKUxqdNhZGVjAtF3F1K), doing on w29-c5:
+  - (1) objstub .fnvnx.clones parser against L2 c07458d34.
+  - (2) ctypes_compat accepts the LAYOUT-CALLTRIVIAL `}!` suffix: a merge of L2 6f147b874. This is w8's exports:0 red on dsound.cpp.o at base3 97f335d19.
+  - (3) The pinned package set becomes the closure debs.packages, from one envcheck function. L2's compiler-build gmp/mpfr/mpc/zlib comes in by merge. L4 w12's toolrt red at base3 e82590d45.
+  - (4) pathflow carries __file__-derived data paths across calls, or the recipe check is red. This is L4's DATAMODEL.json red.
+- w8: L1's 98 files in the 407914779 section are all stale (0 real). Base3 97f335d19 holds c5 9bd09cfee's trees whole.
