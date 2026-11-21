@@ -298,3 +298,7 @@ The first product root is L5 w10's platform root (6516d0d is red: 58 of 74 units
 - L1 w21 (legal gate) has been PENDING since 03:01Z without starting. L1 was told.
 - L1 w13 setup-from-scratch: a fresh container fails at install_debs (25 dpkg errors). L1 was asked for the commit of the first fresh-container green.
 - `pgrep -f autoadopt` is empty.
+
+## 2026-11-21 18:12Z
+- Weekly limit: every lead stopped 2026-11-16 ~12:57Z and nothing moved for 5 days (trunk fac693694, cand4 dcc88df77, L1 head 567995585, L2 cand5 overlay 2ba233f20, L6 w12-cand5 b80203aca). Reset 18:00Z; L1, L2, L3a, L3b, L4, L5, L6 and MERGER resumed 18:11Z. L6A stays idle (off path).
+- Order of work: cand4/cand5 verdicts and merge (L1); L6 .fnvnx.const records (needs L1 const.h); L3a density + facts pin + dispatch.c (L4 blocked on it).
