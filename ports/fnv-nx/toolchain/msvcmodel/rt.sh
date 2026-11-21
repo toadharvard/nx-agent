@@ -118,9 +118,10 @@ TLC="-O2 $(tlflags c) $PLUG_C"   # no -ffunction-sections/-fdata-sections: rtasm
 # recipe's PP and CC stages do; the ODR definition record re-lexes the unit and can only do so from its own preprocessed text (a raw unit's include chains and macros are
 # not readable from the plugin). The flag changes no code: the same cc1 input, the preprocessed text is what the compiler would have lexed.
 TLCXX="-O2 -save-temps=obj $(tlflags cxx) $PLUG_CXX"
-# a plugin that writes a report (recipe.PLUGIN_OUT, the records' PLUGIN_REPORT) requires its out=FILE at every compile, configure's included. The runtime build has no unit report to
-# keep (the gates read the product units' reports), so each such plugin writes to /dev/null: a build argument, not part of the compiler's flags in MANIFEST (TLC/TLCXX).
-REPORT=""; for n in "${PLUGIN_REPORT[@]}"; do REPORT="$REPORT -fplugin-arg-$n-out=/dev/null"; done
+# a plugin that writes a report (recipe.PLUGIN_OUT, the records' PLUGIN_REPORT) is given `beside` at every compile of the runtime build, configure's probes included: its report goes
+# next to the object that compile makes (<output name without suffix>.f2i.json, from the driver's own -o). One report per object, no shared file; the FTOI step below pairs each
+# member of each installed archive with its object and its report. A build argument, not part of the compiler's flags in MANIFEST (TLC/TLCXX).
+REPORT=""; for n in "${PLUGIN_REPORT[@]}"; do REPORT="$REPORT -fplugin-arg-$n-beside"; done
 TLC_RUN="$TLC$REPORT"; TLCXX_RUN="$TLCXX$REPORT"
 note "CFLAGS_FOR_TARGET=$TLC"
 note "CXXFLAGS_FOR_TARGET=$TLCXX"
@@ -198,21 +199,23 @@ for ml in "" $MLFLAG; do
 done
 # The prefix is self-contained real files: every symlink (libtool's .so version chain of libcc1 and the plugin libraries) becomes a copy of the regular file it resolves to
 # inside the prefix; any other kind is an error.
+find "$P" -type l > "$W/symlinks.txt"   # a list file, not a process substitution: the stage sandbox has no /dev/fd
 while IFS= read -r l; do
   t=$(readlink -f "$l")
   case "$t" in "$P"/*) [ -f "$t" ] || { echo "rt.sh: symlink $l does not resolve to a file ($t)" >&2; exit 5; } ;;
     *) echo "rt.sh: symlink $l resolves outside the prefix ($t)" >&2; exit 5 ;; esac
   cp --remove-destination "$t" "$l"
-done < <(find "$P" -type l)
+done < "$W/symlinks.txt"
 [ -z "$(find "$P" -type l)" ] || { echo "rt.sh: the prefix holds symlinks:" >&2; find "$P" -type l | head >&2; exit 5; }
 # Host programs (the compiler's own x86-64 executables under bin/ and libexec/) lose their .debug_* sections: a host program is not a guest object, and with debug info (the runtime_cflags record)
 # cc1/cc1plus/lto1/lto-dump exceed the 100 MB file limit of the mirror. The class is every x86-64 ELF file in those two directories; the guest libraries and their
 # members keep all their sections.
+find "$P/bin" "$P/libexec" -type f > "$W/hostfiles.txt"
 while IFS= read -r f; do
   [ "$(head -c4 "$f" | od -An -c | tr -d ' ')" = '177ELF' ] || continue
   [ "$(readelf -h "$f" | sed -n 's/^ *Machine: *//p')" = "Advanced Micro Devices X86-64" ] || continue
   strip --strip-debug "$f"
-done < <(find "$P/bin" "$P/libexec" -type f)
+done < "$W/hostfiles.txt"
 # MANIFEST.json (fnvnx-runtime-manifest/1): the facts of this build for the recipe and the gates, all derived from the mounts: the plugin objects' sha256 in the records'
 # PLUGIN_ORDER with their arguments, the flags of the target libraries, the multilib set, every library's sha256, CFG-LINK's answers. There is no key in it: the key of
 # this tree is the stage key of the step that wrote it (the sandbox's content key).
@@ -249,6 +252,90 @@ m = {"format": "fnvnx-runtime-manifest/1",
 open(os.path.join(P, "MANIFEST.json"), "w").write(json.dumps(m, indent=1, sort_keys=True) + "\n")
 print("MANIFEST.json: %d plugins, %d libraries" % (len(plugins), len(libs)))
 EOF
+# FTOI/: the fnvnx_ftoi report of every object of every installed runtime archive. Each member is paired with the build-tree object whose bytes it is (sha256); the report is the
+# one next to that object. The files are FTOI/<archive path below the prefix>/<member>.f2i.json (a member that occurs more than once in its archive gets .<its position> after
+# its name) and FTOI/index.json [{archive, member, report}] sorted by (archive, member); report is null when the object has no report beside it (cc1 did not run with the plugin
+# loaded, as for an assembler unit). The facts belong to the object's bytes: the written report's `unit` is the sorted list of the units (the source path relative to the compile's
+# directory) of every candidate object with those bytes. A member that matches no build object, or whose candidates carry reports that differ in any field but `unit`, or of which
+# only some candidates have a report, is an error.
+mkdir -p "$OUT_DIR/FTOI"
+"$PY" -I - "$P" "$W" "$OUT_DIR/FTOI" <<'EOF3'
+import hashlib, json, os, sys
+P, W, OUT = sys.argv[1:4]
+def members(path):
+    d = open(path, "rb").read()
+    if d[:8] != b"!<arch>\n":
+        raise SystemExit("rt.sh: %s is not a plain ar archive" % path)
+    pos, names, out = 8, b"", []
+    while pos < len(d):
+        h = d[pos:pos + 60]
+        name, size = h[:16].decode().rstrip(), int(h[48:58])
+        body = d[pos + 60:pos + 60 + size]
+        pos += 60 + size + (size & 1)
+        if name == "//":
+            names = body
+        elif name in ("/", "/SYM64/"):
+            continue
+        else:
+            if name.startswith("/") and name[1:].isdigit():
+                k = int(name[1:]); name = names[k:names.index(b"/\n", k)].decode()
+            else:
+                name = name.rstrip("/")
+            out.append((name, body))
+    return out
+archives = sorted(os.path.join(r, f) for r, _, fs in os.walk(P) for f in fs if f.endswith(".a"))
+want = {}
+for a in archives:
+    for n, b in members(a):
+        want.setdefault(len(b), set()).add(hashlib.sha256(b).hexdigest())
+objs = {}   # sha256 of a build-tree object that some member is -> its paths
+for r, ds, fs in os.walk(W):
+    ds.sort()
+    for f in sorted(fs):
+        if not f.endswith(".o"):
+            continue
+        p = os.path.join(r, f)
+        if os.path.getsize(p) in want:
+            h = hashlib.sha256(open(p, "rb").read()).hexdigest()
+            if h in want[os.path.getsize(p)]:
+                objs.setdefault(h, []).append(p)
+def report_of(o):
+    rp = os.path.splitext(o)[0] + ".f2i.json"
+    return json.load(open(rp)) if os.path.isfile(rp) else None
+def facts(r):
+    return {k: v for k, v in r.items() if k != "unit"}
+index, bad = [], []
+for a in archives:
+    arel = os.path.relpath(a, P)
+    ms = members(a)
+    count = {}
+    for n, _ in ms:
+        count[n] = count.get(n, 0) + 1
+    seen = {}
+    for n, b in ms:
+        h = hashlib.sha256(b).hexdigest()
+        cands = sorted(objs.get(h, []))
+        if not cands:
+            bad.append("%s(%s): no build object has these bytes" % (arel, n)); continue
+        reps = [r for r in map(report_of, cands) if r is not None]
+        if reps and len(reps) != len(cands):
+            bad.append("%s(%s): some objects with these bytes have a report and some have none: %s" % (arel, n, ", ".join(cands))); continue
+        if any(facts(r) != facts(reps[0]) for r in reps):
+            bad.append("%s(%s): the objects with these bytes carry different reports: %s" % (arel, n, ", ".join(cands))); continue
+        k = seen.get(n, 0); seen[n] = k + 1
+        mname = n if count[n] == 1 else "%s.%d" % (n, k)
+        rel = None
+        if reps:
+            rel = os.path.join(arel, mname + ".f2i.json")
+            os.makedirs(os.path.join(OUT, arel), exist_ok=True)
+            json.dump(dict(facts(reps[0]), unit=sorted({r["unit"] for r in reps})), open(os.path.join(OUT, rel), "w"), indent=1, sort_keys=True); open(os.path.join(OUT, rel), "a").write("\n")
+        index.append({"archive": arel, "member": mname, "report": rel})
+if bad:
+    sys.stderr.write("rt.sh: FTOI pairing:\n  " + "\n  ".join(bad[:30]) + "\n"); sys.exit(6)
+index.sort(key=lambda r: (r["archive"], r["member"]))
+json.dump(index, open(os.path.join(OUT, "index.json"), "w"), indent=1); open(os.path.join(OUT, "index.json"), "a").write("\n")
+print("FTOI: %d archives, %d members, %d with a report" % (len(archives), len(index), sum(r["report"] is not None for r in index)))
+EOF3
 # the output: the compiler tree
 mkdir -p "$OUT_DIR/COMPILER"   # the directory output COMPILER of build.json
 cp -a --no-preserve=ownership "$P/." "$OUT_DIR/COMPILER/"
