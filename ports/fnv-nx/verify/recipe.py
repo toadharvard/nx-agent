@@ -1185,6 +1185,11 @@ def step_outputs(x):
     return [o for k in ("outputs", "dirs") for o in (x.get(k) if isinstance(x.get(k), list) else []) if isinstance(o, str)]
 
 
+def generated_dirs(rec):
+    """The directories (`dirs`) the generate and run steps of a recipe declare: whole directories of generated files, named by the directory."""
+    return {o for k in ("generated", "run") for x in (rec.get(k) if isinstance(rec.get(k), list) else []) if isinstance(x, dict) for o in (x.get("dirs") if isinstance(x.get("dirs"), list) else []) if isinstance(o, str)}
+
+
 def generated_outputs(rec):
     """The declared outputs (files and directories) of the generate and run stages of a recipe."""
     return [o for k in ("generated", "run") for x in (rec.get(k) if isinstance(rec.get(k), list) else []) if isinstance(x, dict) for o in step_outputs(x)]
@@ -1570,7 +1575,11 @@ def include_uses_errors(rec, roots, repo):
             p = outs.get(u["output"])
         except (OSError, ValueError, KeyError, AttributeError, TypeError):
             continue    # uses_errors reports an unreadable or undeclared producer
-        if not (isinstance(p, str) and output_kind(p, u["root"], gen, tracked(repo)) in ("gendir", "srcdir")):
+        try:
+            gdirs = generated_dirs(read_recipe(repo, roots[u["root"]]["recipe"]))
+        except (OSError, ValueError, KeyError):
+            gdirs = set()
+        if not (isinstance(p, str) and (p in gdirs or output_kind(p, u["root"], gen, tracked(repo)) in ("gendir", "srcdir"))):
             err.append("include_uses: output %r of %s is not a directory output (outputs: {NAME: a directory of generated files, or of tracked files})" % (u["output"], u["root"]))
     return err
 
@@ -3364,7 +3373,7 @@ class Job:
             raise BuildRed({"stage": "archive:" + owner, "exit": None, "stderr": ["archive input %s: stage %s is red" % (owner, p.red[0]["stage"])] + list(p.red[0]["stderr"])[-18:]})
         gen = generated_outputs(p.rec)
         for name, rel in sorted((p.rec.get("outputs") or {}).items()):
-            if output_kind(rel, owner, gen, p.files) == "gendir":
+            if rel in generated_dirs(p.rec) or output_kind(rel, owner, gen, p.files) == "gendir":
                 shutil.copytree(os.path.join(pws, "root", rel), os.path.join(d, name))
         return cas.ingest(d, self.store)
 
