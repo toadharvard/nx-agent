@@ -139,6 +139,35 @@ def sections(td, so):
             check('pattern instantiated: its instantiations are named', {x[1] for x in rows} >= {'??$count@HN@@YAHHN@Z', '??$?BH@C@@QBEHXZ', '??$n@HH@C@@QBEHHH@Z', '??$both@H@?$Pack@HD@@SAHH@Z'}, rows)
 
 
+CLONES = {   # clone symbol -> (origin, root, kind, params): what the cgraph says of each clone of names/clones.cpp at -O2
+    '_ZL6isra_fiii.isra.0': ('_ZL6isra_fiii', '_ZL6isra_fiii', 'isra', '0:0,1:removed,2:1'),       # 1. IPA-SRA drops the unused parameter 1; parameter 2 becomes the clone's 1
+    '_ZL4cp_fii.constprop.0': ('_ZL4cp_fii', '_ZL4cp_fii', 'constprop', '0:0,1:const'),             # 2. IPA-CP: parameter 1 is the constant 7, the signature is kept
+    '_ZL6part_fPii.part.0': ('_ZL6part_fPii', '_ZL6part_fPii', 'part', '-'),                         # 3. ipa-split part: the origin is the split function, no parameter map
+    '_ZL6dk_cfgi.isra.0': ('_ZL6dk_cfgi', '_ZL6dk_cfgi', 'isra', '0:removed'),                       # 4. L1's first case: an identity body, the clone's record names dk_cfg
+}
+
+
+def clones(td, so):
+    """`.fnvnx.clones`: one row `clone TAB origin TAB root TAB kind TAB params` for every cgraph clone with a body in the object, every field from the call
+    graph (names/clones.cpp, -O2: IPA-SRA, IPA-CP, ipa-split, the identity body); a function that is no clone has no row (the negative: plain, the callers)"""
+    o = os.path.join(td, 'clones.o')
+    r = pb.compile(os.path.join(HERE, 'names', 'clones.cpp'), o, so, flags=pb.PRODUCT_FLAGS + ['-O2'])
+    check('clones: compiles', r.returncode == 0, r.stderr[-2000:])
+    if r.returncode:
+        return
+    rows = {}
+    for l in pb.section(o, '.fnvnx.clones').splitlines():
+        f = l.split('\t')
+        check('clones: a row has 5 fields', len(f) == 5, l)
+        rows[f[0]] = tuple(f[1:])
+    check('clones: exactly the four clones have a row (a function that is no clone has none)', set(rows) == set(CLONES), sorted(set(rows) ^ set(CLONES)))
+    for sym, want in sorted(CLONES.items()):
+        check('clones: %s' % sym, rows.get(sym) == want, (rows.get(sym), want))
+    st = pb.symbols_of(o)
+    check('clones: every clone of the table is a function the object defines', all(s in st and st[s]['sec'] not in (None, 'UND') for s in rows), sorted(rows))
+    check('clones: the negative (`plain`, `use_*`) has no row', not [s for s in rows if s.startswith(('_Z5plain', '_Z7use_', '_Z8use_'))], sorted(rows))
+
+
 def main():
     td = tempfile.mkdtemp(prefix='test-names-')
     try:
@@ -149,6 +178,7 @@ def main():
         if r.returncode == 0:
             checks(obj)
         sections(td, so)
+        clones(td, so)
         r = pb.compile(FIX, os.path.join(td, 'x.o'), so, args=['-fplugin-arg-fnvnx_names-mode=1'])
         check('a plugin argument is an error: the recipe fixes them', pb.argument_refused(r, 'names'), r.stderr[:500])
     finally:
