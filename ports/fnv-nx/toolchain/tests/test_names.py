@@ -13,6 +13,7 @@ class's exact size is asserted, so a name that starts or stops matching fails th
             therefore has no row for are counted against those rows, never listed
 The compiler is the guest compiler msvcmodel: size_t is `unsigned int` as for cl, so there is no size_t hole.
 An unknown plugin argument is an error. No network, no game data.  Run: python3 -I <this file> from the checkout root."""
+import json
 import os
 import re
 import shutil
@@ -139,16 +140,24 @@ def sections(td, so):
             check('pattern instantiated: its instantiations are named', {x[1] for x in rows} >= {'??$count@HN@@YAHHN@Z', '??$?BH@C@@QBEHXZ', '??$n@HH@C@@QBEHHH@Z', '??$both@H@?$Pack@HD@@SAHH@Z'}, rows)
 
 
+def _copy(j, i): return {'j': j, 'origin': i, 'op': 'copy'}
+
+
 CLONES = {   # clone symbol -> (origin, root, kind, params): what the cgraph says of each clone of names/clones.cpp at -O2
-    '_ZL6isra_fiii.isra.0': ('_ZL6isra_fiii', '_ZL6isra_fiii', 'isra', '0:0,1:removed,2:1'),       # 1. IPA-SRA drops the unused parameter 1; parameter 2 becomes the clone's 1
-    '_ZL4cp_fii.constprop.0': ('_ZL4cp_fii', '_ZL4cp_fii', 'constprop', '0:0,1:const'),             # 2. IPA-CP: parameter 1 is the constant 7, the signature is kept
-    '_ZL6part_fPii.part.0': ('_ZL6part_fPii', '_ZL6part_fPii', 'part', '-'),                         # 3. ipa-split part: the origin is the split function, no parameter map
-    '_ZL6dk_cfgi.isra.0': ('_ZL6dk_cfgi', '_ZL6dk_cfgi', 'isra', '0:removed'),                       # 4. L1's first case: an identity body, the clone's record names dk_cfg
+    '_ZL6isra_fiii.isra.0': ('_ZL6isra_fiii', '_ZL6isra_fiii', 'isra',       # 1. IPA-SRA drops the unused parameter 1; origin parameter 2 is the clone's 1
+                             [_copy(0, 0), _copy(1, 2), {'origin': 1, 'op': 'removed'}]),
+    '_ZL4cp_fii.constprop.0': ('_ZL4cp_fii', '_ZL4cp_fii', 'constprop',     # 2. IPA-CP: parameter 1 is the constant 7 and the clone has no parameter for it
+                               [_copy(0, 0), {'origin': 1, 'op': 'const', 'value': 7}]),
+    '_ZL6part_fPii.part.0': ('_ZL6part_fPii', '_ZL6part_fPii', 'part', None),    # 3. ipa-split part: the origin is the split function, no parameter map
+    '_ZL6dk_cfgi.isra.0': ('_ZL6dk_cfgi', '_ZL6dk_cfgi', 'isra',            # 4. L1's first case: an identity body, the record names dk_cfg
+                           [{'origin': 0, 'op': 'removed'}]),
+    '_ZL7split_fPK3Big.isra.0': ('_ZL7split_fPK3Big', '_ZL7split_fPK3Big', 'isra',   # 6. IPA-SRA split: the int at byte 4 of parameter 0, passed by value
+                                 [{'j': 0, 'origin': 0, 'op': 'split', 'offset': 4, 'size': 4}]),
 }
 
 
 def clones(td, so):
-    """`.fnvnx.clones`: one row `clone TAB origin TAB root TAB kind TAB params` for every cgraph clone with a body in the object, every field from the call
+    """`.fnvnx.clones`: one row `clone TAB origin TAB root TAB kind TAB params` (params: a JSON array or null) for every cgraph clone with a body in the object, every field from the call
     graph (names/clones.cpp, -O2: IPA-SRA, IPA-CP, ipa-split, the identity body); a function that is no clone has no row (the negative: plain, the callers)"""
     o = os.path.join(td, 'clones.o')
     r = pb.compile(os.path.join(HERE, 'names', 'clones.cpp'), o, so, flags=pb.PRODUCT_FLAGS + ['-O2'])
@@ -159,8 +168,8 @@ def clones(td, so):
     for l in pb.section(o, '.fnvnx.clones').splitlines():
         f = l.split('\t')
         check('clones: a row has 5 fields', len(f) == 5, l)
-        rows[f[0]] = tuple(f[1:])
-    check('clones: exactly the four clones have a row (a function that is no clone has none)', set(rows) == set(CLONES), sorted(set(rows) ^ set(CLONES)))
+        rows[f[0]] = tuple(f[1:4]) + (json.loads(f[4]),)
+    check('clones: exactly the five clones have a row (a function that is no clone has none)', set(rows) == set(CLONES), sorted(set(rows) ^ set(CLONES)))
     for sym, want in sorted(CLONES.items()):
         check('clones: %s' % sym, rows.get(sym) == want, (rows.get(sym), want))
     st = pb.symbols_of(o)
