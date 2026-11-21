@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""udcensus: the CPUID-UD census over the code universe of every image (the same universe as proof/factsites.py: L3a's facts graph, one decoder).
+"""udcensus: the CPUID-UD census over the code universe of every image (the lifter's own code universe: every entry of the image's universe.tsv, descended by core.explore).
 
     python3 -I udcensus.py --exe FalloutNV.exe --modules modules.tsv --dir DIR [--dir DIR ...] --facts FACTS_DIR --cpumodel cpuid_model.json --sdmrows SDMROWS.json --out CENSUS.tsv
 
@@ -21,8 +21,13 @@ sys.path.insert(0, os.path.dirname(HERE)); sys.path.insert(0, os.path.join(os.pa
 import imageset  # noqa: E402
 from fnvlift import inputs  # noqa: E402
 from proof import cpufeat, sdmfeat, shape  # noqa: E402
-import udcert as U  # noqa: E402
-from factsites import Mapped, sha  # noqa: E402
+import hashlib  # noqa: E402
+from fnvlift import core, universe  # noqa: E402
+from fnvlift.image import Image  # noqa: E402
+
+
+def sha(path):
+    return hashlib.sha256(open(path, 'rb').read()).hexdigest()
 
 
 def classify(i, raw, idx, table, cpu, nopflags, miss):
@@ -46,15 +51,20 @@ def classify(i, raw, idx, table, cpu, nopflags, miss):
     return out
 
 
-def census(pe_path, facts, load_base, idx, table, cpu, nopflags):
-    base, ranges = U.load_ranges(os.path.join(facts, 'ranges.tsv'))
-    uni = U.load_universe(os.path.join(facts, 'universe.tsv'))
-    if load_base is not None and base != load_base:
-        raise SystemExit('%s: the facts are at base %08x, the module table assigns %08x' % (pe_path, base, load_base))
-    g = U.Graph(Mapped(pe_path, load_base), ranges, uni, lambda i: False)
-    md = shape.decoder(); res = {'total': []}
-    for a in sorted(g.ins):
-        raw = g.pe.read(a, 15)
+def census(pe_path, universe_tsv, load_base, idx, table, cpu, nopflags):
+    """every instruction the lifter lifts of the image: for each entry of the image's universe, the lifter's own recursive descent (core.explore, the range and owns that universe.entry_args gives), the union over entries"""
+    img = Image(pe_path, load_base)
+    ent = universe.load(universe_tsv)[0]
+    seen, md = {}, shape.decoder()
+    for e in sorted(ent):
+        kw = universe.entry_args(e, universe_tsv)
+        lo, hi = kw['addr'], kw['addr'] + kw['size']
+        code = img.bytes(lo, hi - lo + 16)
+        insns = core.explore(img, lo, hi, code, kw['start'], kw['owns'] if kw['start'] == lo else (), hi)[0]
+        for a, i in insns.items(): seen.setdefault(a, i)
+    res = {'total': []}
+    for a in sorted(seen):
+        raw = img.bytes(a, 15)
         i = next(iter(md.disasm(raw, a, 1)))
         raw = bytes(raw[:i.size])
         res['total'].append(a)
@@ -78,7 +88,7 @@ def main(argv):
         fh.write('# fnvnx-udcensus/1 images=%d modules_sha256=%s cpumodel_sha256=%s\n# image\tclass\tcount\tsites\n' % (len(ims), sha(a.modules), sha(a.cpumodel)))
         for name, path, sub in ims:
             fd = a.facts if sub is None else os.path.join(a.facts, sub)
-            r = census(path, fd, ab.get(name), idx, table, cpu, nopflags)
+            r = census(path, os.path.join(fd, 'universe.tsv'), ab.get(name), idx, table, cpu, nopflags)
             for k in sorted(r):
                 fh.write('%s\t%s\t%d\t%s\n' % (name, k, len(r[k]), ','.join('%08x' % x for x in r[k]) if k != 'total' else ''))
             sys.stdout.write('%s: %d instructions, %s\n' % (name, len(r['total']), ' '.join('%s=%d' % (k, len(v)) for k, v in sorted(r.items()) if k != 'total') or 'no #UD and no gap'))
