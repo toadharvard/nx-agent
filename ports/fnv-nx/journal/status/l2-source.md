@@ -803,3 +803,4 @@ After the first frame:
 - 2026-11-21 19:10Z: w3's argv data-path fix (932a00c3d / bca6714e1) landed before the cancel. One fix per class: L1's mount fix (w29-c5) lands, and w3 reverts ours on both branches. L4 told to take L1's head.
 - 2026-11-21 19:12Z: reverts done: cand4b 87b242f0c, overlay 8cea22108. Diffs against the pre-change commits are empty over toolchain/, toolchain-stage1/ and platform/{gmp,mpfr}/. One mechanism stands, L1's pathflow import mount. 0bee5040e is going into c5 through w29.
 - bottleneck: the farm's rt result -> the pin commit (w3).
+- 2026-11-21 19:20Z: cand6 census done and sent to L1. claude/fnv-l2-source-cand6-l1 acb3875e8 (on c5 e4e9b7e53). Universe 710 commits at cand4b f3b188ec8: 0 equivalent, 42 in c5, 14 contributions (cherry-picked; recipe.py +71/-1, archive code re-inserted by hand), 654 stale. test_archive_sources passes; test_recipe has the same 6 env-only FAILs as the c5 base.
