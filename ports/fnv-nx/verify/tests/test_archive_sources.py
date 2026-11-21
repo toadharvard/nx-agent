@@ -136,7 +136,8 @@ with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as td:
     def tree(objs, store):
         os.makedirs(store, exist_ok=True)
         jj = recipe.Job(repo, T + "con", store, 1, os.path.join(td, "ext"))
-        jj.arts["archive:" + T + "lib"] = {"status": "green", "objects": [{"unit": u, "object": o} for u, o in objs], "stage_keys": []}
+        jj.archives = {}
+        jj.archives[T + "lib"] = {"status": "green", "objects": [{"unit": u, "object": o} for u, o in objs], "stage_keys": []}
         tmp = tempfile.mkdtemp(dir=td)
         return jj.archive_tree(tmp, tmp, 1, {"archive": T + "lib"})
     o1, o2, o2b = obj("int f(void){return 1;}\n", "f1"), obj("int g(void){return 2;}\n", "g"), obj("int g(void){return 3;}\n", "g2")
@@ -146,7 +147,8 @@ with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as td:
     check("the archive tree is a function of the objects' content (order of the list aside)", t1 == t2, (t1, t2))
     check("a changed lib unit is a changed archive: the consumer's stage key changes", t1 != t3, (t1, t3))
     red = recipe.Job(repo, T + "con", os.path.join(td, "s4"), 1, os.path.join(td, "ext"))
-    red.arts["archive:" + T + "lib"] = {"status": "red", "failure": {"stage": "cc:u/f.c", "exit": 1, "stderr": ["boom"]}, "objects": [], "stage_keys": []}
+    red.archives = {}
+    red.archives[T + "lib"] = {"status": "red", "failure": {"stage": "cc:u/f.c", "exit": 1, "stderr": ["boom"]}, "objects": [], "stage_keys": []}
     try:
         t = tempfile.mkdtemp(dir=td)
         red.archive_tree(t, t, 1, {"archive": T + "lib"})

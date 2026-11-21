@@ -3346,9 +3346,11 @@ class Job:
         """The tree {lib.a} of archive input REF: the objects of root REF["archive"], built objects-only through the stage cache (the same build a link offers), as ar_bytes in
         unit order. Its content is the key: a changed unit of the root is a changed archive. A red root is red here (blocked, never an empty archive)."""
         owner = ref["archive"]
-        r = self.arts.get("archive:" + owner)
+        if not hasattr(self, "archives"):
+            self.archives = {}   # {archive root: its objects-only build result}: a root is built once per Job
+        r = self.archives.get(owner)
         if r is None:
-            r = self.arts["archive:" + owner] = build(self.repo, owner, self.store, tempfile.mkdtemp(dir=ws), self.jobs, self.extcache, link=False)
+            r = self.archives[owner] = build(self.repo, owner, self.store, tempfile.mkdtemp(dir=ws), self.jobs, self.extcache, link=False)
             self.keys |= set(r["stage_keys"])
         if r["status"] != "green":
             f = r.get("failure") or {}
