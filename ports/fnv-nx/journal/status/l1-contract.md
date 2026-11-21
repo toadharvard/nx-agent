@@ -3183,3 +3183,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - 18:49 Ruling on objstub external units: one judgment path. Bodies of external units are judged like our own, and ext_units stays as provenance only. This reverses w29 item 4's exemption.
   - L6 d4537e160 measurement: 7081 bodies, 6950 certified, 133 findings (127 L5, 6 L6 translator; all 6 are false const-mismatch caused by the skip).
   - w29 item 0: remove the skip. L6 keeps its 6 mirror records.
+- 18:52 L2 cand6 list for L1's trees: claude/fnv-l2-source-cand6-l1 acb3875e8, on c5 e4e9b7e53. Over 710 commits: 14 contributions, 42 already in c5, 654 stale.
+  - Reviewed and accepted into cand6: the archive inputs, include_uses for run steps, semantics_cite and scratch.store.
+  - Condition: archive_tree and recipe.py:3929 share one ar function. w28 makes the change at cand6 assembly.
+  - The env.json profile and ctypes_compat `!` come from w29-c5, not from L2.
