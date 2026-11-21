@@ -3097,3 +3097,8 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - Archive feature (L2's recipe hunk): taken whole if a c5 root uses it; otherwise test_archive_sources is deleted and L2 brings feature and test together later.
 - 12:54: w28 eaeb17ffd (next verdict). No c5 root uses archive or `sources <step>:<dir>`, so test_archive_sources is deleted and L2 brings feature and test together later. objstub's 5 probes use PROBE_ENV, and the errno-probe cache is keyed by the compiler tree hash. w29 3bded003 (item 7: foreach dirs plus the header rule) is accepted, and w7 is told. w29 now does const.h and the format fix.
 - 12:58: rt/guest_main (L5's process entry `main`) was missing from c5. w28 takes it from 563e1273f, then diffs every source head's admitted roots against c5's admit. sm_link_prog and sm_link_stage are stale (deleted at L6 21872d6be; sm_link_sum replaces them). base3 takes render/ whole from da0e4ff78.
+
+## 2026-11-21 18:30 (resume after the weekly reset)
+- cand4 (w15 dcc88df77) and cand5 (c5 eaeb17ffd, with L2 overlay 2ba233f20): the farm's 11-16 run stopped at the weekly limit before either verdict finished. RUN re-sent to farm session_01KmtZKTV1mniUErarfUpdJZ. Status: doing.
+- const.h (w29-c5 6d228dada) sent to L6, for its 9 .fnvnx.const records, and to L5 for review, gen_env_const via w40 and taking 568d0049. Status: waiting on L5 and L6.
+- Trunk: fac693694.
