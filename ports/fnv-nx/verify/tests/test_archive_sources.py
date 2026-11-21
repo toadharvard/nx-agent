@@ -4,7 +4,7 @@
      unknown name, a directory that is no declared dirs output of the step (a path outside it), an empty unit set, a file name that is also a tracked unit.
   2. a run-step input {"archive": ROOT}: ROOT's objects as one archive (recipe.ar_bytes), keyed by content. Red: a malformed ref, the root itself, a non-root, a root that is not
      `uses`d, another compiler record, no units, a CC/generated step (tool steps only). Green: a toy lib/consumer pair: the consumer's archive changes when a lib unit changes.
-Run: python3 -I <this file> from anywhere (git, gcc needed)."""
+Run: FNVNX_ARTIFACTS=<fnv-nx-build checkout> python3 -I <this file> from anywhere (git, gcc, root, the sandbox)."""
 import json
 import os
 import subprocess
@@ -150,9 +150,6 @@ with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as td:
     mt = os.path.join(td, "mt")
     recipe.cas.materialize(t1, os.path.join(td, "s1"), mt)
     check("an archive mount holds only the archive (no directory outputs of the root)", os.listdir(mt) == ["liblib.a"], os.listdir(mt))
-    # a run step takes include_uses as a CC stage does: the same trees, at /uses/<root>/<NAME>
-    src = open(os.path.join(HERE, "..", "recipe.py")).read()
-    check("run_one mounts the include_uses trees through use_inputs", 'self.use_inputs(ws) if t["at"] in iu' in src)
     red = recipe.Job(repo, T + "con", os.path.join(td, "s4"), 1, os.path.join(td, "ext"))
     red.archives = {}
     red.archives[T + "lib"] = {"status": "red", "failure": {"stage": "cc:u/f.c", "exit": 1, "stderr": ["boom"]}, "objects": [], "stage_keys": []}
@@ -162,5 +159,42 @@ with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as td:
         check("a red root is a red archive input (never an empty archive)", False)
     except recipe.BuildRed as x:
         check("a red root is a red archive input (never an empty archive)", "is red" in " ".join(x.args[0]["stderr"]), x.args)
+
+# --- behavioural: a run step reads another root's header directory through include_uses (and only through it)
+def toy_uses(td, with_iu):
+    r = os.path.join(td, "u%d" % with_iu)
+    os.makedirs(r)
+    git(r, "init", "-q")
+    lib = {"format": "fnvnx-recipe/1", "outputs": {"INC": "h"}}
+    step = {"name": "rd", "exec": "/usr/bin/bash", "args": ["/in/1"], "inputs": [T + "con/rd.sh"], "debs": {"profile": "compiler-build"}, "outputs": ["o.txt"]}
+    con = {"format": "fnvnx-recipe/1", "outputs": {"c": "o.txt"}, "uses": [{"root": T + "lib", "output": "INC"}], "run": [step]}
+    if with_iu:
+        con["include_uses"] = [{"root": T + "lib", "output": "INC"}]
+    w(r, T + "lib/build.json", json.dumps(lib))
+    w(r, T + "lib/h/x.h", "#define TOY 42\n")
+    w(r, T + "con/build.json", json.dumps(con))
+    w(r, T + "con/rd.sh", "cp /uses/%slib/INC/x.h /out/o.txt\n" % T)
+    w(r, T + "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [
+        {"path": T + "lib", "class": "product", "target": "host", "recipe": T + "lib/build.json"},
+        {"path": T + "con", "class": "product", "target": "host", "recipe": T + "con/build.json"}]}))
+    w(r, T + "verify/env.json", open(os.path.join(HERE, "..", "env.json")).read())
+    git(r, "add", "-A")
+    git(r, "commit", "-q", "-m", "toy")
+    return r
+
+def run_toy(repo):
+    jj = recipe.Job(repo, T + "con", os.path.join(os.path.dirname(repo), "bstore"), 1, os.path.join(os.path.dirname(repo), "bext"))
+    ws = tempfile.mkdtemp(dir=os.path.dirname(repo))
+    jj.run_all(ws)
+    out = os.path.join(ws, "root", "o.txt")
+    return jj, (open(out).read() if os.path.exists(out) else None)
+
+with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as td2:
+    os.makedirs(os.path.join(td2, "bstore"))
+    recipe.set_artifacts(recipe.ext_dir(td2), os.environ.get("FNVNX_ARTIFACTS", ""))
+    jj, got = run_toy(toy_uses(td2, 1))
+    check("a run step reads the header dir of a used root through include_uses", got == "#define TOY 42\n" and not jj.red, (got, jj.red[:1]))
+    jj, got = run_toy(toy_uses(td2, 0))
+    check("without include_uses the step does not see the header: the step is red", got is None and jj.red, (got, jj.red[:1]))
 print("fails: %d" % fails)
 sys.exit(1 if fails else 0)
