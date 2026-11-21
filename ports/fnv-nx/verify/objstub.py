@@ -186,7 +186,11 @@ non-alloc section `.fnvnx.const` (contract/l2consts.py; no constants table). A r
 value as an object of the row's type (LEN 0: void; a relocation at the value: the address of that symbol), or an `.fnvnx.ident` record {ABS relocation to the function, u32 k}: the function returns its argument k
 unchanged (hostabi/include/fnvnx/const.h writes both). A V function is certified iff it has exactly one
 record and it equals the result bit for bit (the low 8*LEN bits of x0; x1 and v0 unwritten): `const-missing`, `const-duplicate`, `const-mismatch` (also a
-record on a body that is not V), `const-malformed` (a record with no relocation, a bad length, a relocation of another kind: with its offset)."""
+record on a body that is not V), `const-malformed` (a record with no relocation, a bad length, a relocation of another kind: with its offset). CLONES: a function that the compiler
+cloned (IPA-SRA, IPA-CP, ipa-split) is judged by the records of its root, from the `.fnvnx.clones` fact of the `names` plugin (read_clones: `clone TAB origin
+TAB root TAB kind TAB params`; the origins reach a root that is defined here); an identity record k moves to the clone's parameter through the maps of the chain
+(clone_arg: only a copy keeps it), and a part never takes its root's records. A clone with no row is no clone: a V body without a record is const-missing
+as any other. A malformed row is `clones-malformed`."""
 import atexit
 import bisect
 import concurrent.futures
@@ -1468,6 +1472,102 @@ def read_consts(o):
     return at, bad
 
 
+CLONES_SEC = ".fnvnx.clones"   # the clone-origin fact of every cgraph clone with a body in the object (the `names` plugin, toolchain/names/fnvnx_names.cc)
+
+
+def clone_invariant(sym, params):
+    """The invariant of one parameter map (the plugin errors on it too): every clone parameter j appears exactly once and they are 0..m-1; the origin parameters that
+    are named are 0..n-1; a split carries a boolean by_ref; a const or removed entry has no clone parameter. -> [why]."""
+    if params is None:
+        return []
+    if not isinstance(params, list) or not all(isinstance(e, dict) and e.get("op") in ("copy", "split", "new", "const", "removed") for e in params):
+        return ["%s: the parameter map is not a list of entries with op copy|split|new|const|removed" % sym]
+    bad = []
+    js = [e["j"] for e in params if "j" in e]
+    if sorted(js) != list(range(len(js))):
+        bad.append("%s: clone parameters %s are not 0..m-1 once each" % (sym, js))
+    org = {e["origin"] for e in params if "origin" in e}
+    if org != set(range(len(org))):
+        bad.append("%s: origin parameters %s are not 0..n-1" % (sym, sorted(org)))
+    for e in params:
+        if e["op"] == "split" and not isinstance(e.get("by_ref"), bool):
+            bad.append("%s: split without a boolean by_ref: %s" % (sym, e))
+        if e["op"] in ("const", "removed") and "j" in e:
+            bad.append("%s: %s entry with a clone parameter: %s" % (sym, e["op"], e))
+        if e["op"] in ("copy", "split") and not ("j" in e and "origin" in e):
+            bad.append("%s: %s entry without j and origin: %s" % (sym, e["op"], e))
+    return bad
+
+
+def read_clones(o):
+    """The `.fnvnx.clones` rows of the object O -> ({clone symbol: (origin, root, kind, params)}, [(item name, detail)] of malformed rows). A row is
+    `clone TAB origin TAB root TAB kind TAB params` (params: a JSON array or null), one per clone with a body in the object, every field read from the compiler's
+    call graph. The fact is closed here: the clone, its origin and the root are symbols (the clone is DEFINED in this object), the origin is the root or a clone
+    of the table, the chain of origins reaches the root without a cycle, the kind is part|constprop|isra|clone, a part has no map, and every map meets
+    clone_invariant. A function with no row is no clone."""
+    rows, bad = {}, []
+    defined = {s[0] for s in o.syms if s[3] == 2 and 0 < s[5] < 0xFF00}
+    for si, (sname, stype, sflags, soff, ssize, _, _) in enumerate(o.secs):
+        if sname != CLONES_SEC:
+            continue
+        if stype != 1 or sflags & 2:
+            bad.append((sname, "the section must be PROGBITS without SHF_ALLOC (type %d, flags %#x)" % (stype, sflags)))
+            continue
+        for k, line in enumerate(o.data[soff:soff + ssize].decode("latin-1").splitlines()):
+            nm = "%s:%d" % (CLONES_SEC, k)
+            f = line.split("\t")
+            if len(f) != 5:
+                bad.append((nm, "a row has 5 fields (clone, origin, root, kind, params), has %d" % len(f)))
+                continue
+            try:
+                params = json.loads(f[4])
+            except ValueError:
+                bad.append((nm, "the parameter map is not JSON: %r" % f[4][:60]))
+                continue
+            if f[0] in rows:
+                bad.append((nm, "clone %s has two rows" % f[0]))
+            elif f[3] not in ("part", "constprop", "isra", "clone"):
+                bad.append((nm, "kind %r is not part|constprop|isra|clone" % f[3]))
+            elif f[0] not in defined:
+                bad.append((nm, "the clone %s is not a function defined in this object" % f[0]))
+            elif f[3] == "part" and params is not None:
+                bad.append((nm, "a part has no parameter map"))
+            else:
+                why = clone_invariant(f[0], params)
+                if why:
+                    bad.append((nm, "; ".join(why)))
+                else:
+                    rows[f[0]] = (f[1], f[2], f[3], params)
+    for c, (org, root, _, _) in sorted(rows.items()):
+        seen, x = {c}, org
+        while x in rows and x not in seen:
+            seen.add(x)
+            x = rows[x][0]
+        if x in rows or x != root or root in rows or root not in defined:
+            bad.append(("%s:%s" % (CLONES_SEC, c), "the origins of %s do not reach its root %s, a function that is no clone and is defined in this object" % (c, root)))
+    return ({c: v for c, v in rows.items() if not any(b[0] == "%s:%s" % (CLONES_SEC, c) for b in bad)}, bad)
+
+
+def clone_arg(rows, clone, k):
+    """The parameter j of CLONE that holds, unchanged, the parameter K of its root, or None: the chain of origins from the root down to the clone is followed through
+    the maps (relative to each origin). Only a COPY keeps the identity: a split, a const, a removed parameter or a part (no map) does not. A clone with no map that is
+    no part (kind clone) keeps the signature."""
+    chain, x = [], clone
+    while x in rows:
+        chain.append(x)
+        x = rows[x][0]
+    for c in reversed(chain):
+        _, _, kind, params = rows[c]
+        if kind == "part":
+            return None
+        if params is None:
+            continue
+        k = next((e["j"] for e in params if e["op"] == "copy" and e.get("origin") == k), None)
+        if k is None:
+            return None
+    return k
+
+
 def const_matches(rec, v):
     """The record REC of read_consts against the V result v (JSON form): length 0 is void (x0, x1 and v0 unwritten); an address value is the address
     of that symbol; an integer value of LEN bytes equals the low 8*LEN bits of x0, bit for bit. x1 or v0 written never matches (a float result has no record)."""
@@ -1517,6 +1617,21 @@ def check_obj(path, terms, os_layer, probe=None, machine=None):
     stops = frozenset(t for t in terms if t[:1] != "~")   # the declared-noreturn callees (terminator candidates): a call ends the path of a mixed body
     cites_at, cbad = read_cites(o)   # rule C: the citation records of the object, by function address
     consts_at, kbad = read_consts(o)   # the declared-constant records of the object, by function address
+    clones, clbad = read_clones(o)   # the clone facts of the object: a clone is judged by the records of its root (clone_arg maps an identity through the parameter maps)
+    defat = {s_[0]: (s_[5], s_[1]) for s_ in o.syms if s_[3] == 2 and 0 < s_[5] < 0xFF00}
+
+    def recs_at(name, key):
+        """The records that decide the body NAME at KEY: its own, or, for a clone with a row (not a part), the records of its root with an identity moved to the clone's
+        parameter (-1, which no analysis result equals, when the root's argument is not kept as it is)."""
+        if name not in clones or clones[name][2] == "part":
+            return consts_at.get(key, [])
+        out = []
+        for r in consts_at.get(defat.get(clones[name][1]), []):
+            if "ident" in r:
+                j = clone_arg(clones, name, r["ident"])
+                r = {"ident": -1 if j is None else j}
+            out.append(r)
+        return out
     extra["terms"] = sorted(stops)
     extra["unw"] = sorted(unw)   # the unwinder callees (a transfer of control that does not return: longjmp, throw, resume): an end of a declared-noreturn body, not a process end
     for nm, why in cbad:
@@ -1525,6 +1640,9 @@ def check_obj(path, terms, os_layer, probe=None, machine=None):
     for nm, why in kbad:
         items.append(nm)
         finds.append((nm, "const-malformed", why, None))
+    for nm, why in clbad:
+        items.append(nm)
+        finds.append((nm, "clones-malformed", why, None))
     tid = {i for i, s in enumerate(o.syms) if s[0] in terms and s[4] != 0 and s[0] not in (REACH, ASSUME) + CITE}   # REACH and `ASSUME` are judged by their own rules
     for si, (sname, stype, sflags, soff, ssize, _, _) in enumerate(o.secs):
         if not sflags & 4 or stype != 1:
@@ -1610,8 +1728,8 @@ def check_obj(path, terms, os_layer, probe=None, machine=None):
             elif lk not in ("b", "end"):
                 fnd.append((name, "fallthrough", "last instruction %s can run into the next function" % lm, None))
             ids = cites_at.get((si, a), [])
-            if (si, a) in consts_at:
-                extra["const"][name] = consts_at[(si, a)]
+            if recs_at(name, (si, a)):
+                extra["const"][name] = recs_at(name, (si, a))
             if any(i.startswith("od:") for i in ids):
                 extra["cite"][name] = ids   # rule O reads the record before any rule branch: every finding of the body is decided by the anchor
             ntail = set()
@@ -1622,7 +1740,7 @@ def check_obj(path, terms, os_layer, probe=None, machine=None):
                 # returning paths are judged by the V rules (a constant or vacuous result needs a record or a citation)
                 o.stop = stops if (nrv is None and nterm) else frozenset()
                 try:
-                    idk = [r["ident"] for r in consts_at.get((si, a), []) if "ident" in r]   # an `.fnvnx.ident` record: the one input register that the body may read
+                    idk = [r["ident"] for r in recs_at(name, (si, a)) if "ident" in r]   # an `.fnvnx.ident` record: the one input register that the body may read
                     v = vanalyse(words, a, b, rel, o, {x: dec.get(soff + x) for x in words}, bool(wsites) or bool(ids), ident=idk[0] if len(set(idk)) == 1 and 0 <= idk[0] < 8 else None)
                 except Unanalysable as e:
                     v = None
