@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """R9: inside a locked instruction (core.Ctx.macc == 'LK') every memory access of the DSL-emitted Form is the LK accessor, never plain M (the atomic rule works on the private copy LK_BEGIN makes).
     dsl_lock_test.py     (exit 0 = all pass)"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, re, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import fnvnx.lift.proof.tests.declared_x86sys as declared_x86sys; declared_x86sys.configure()
+declared_x86sys.configure_segwrites()      # emit_form specialises the code-selector store guard on the SEGWRITES sets
 import capstone
-from fnvlift import core
-from proof import lift_dsl as f_dsl
-from proof import forms
+from fnvnx.lift.fnvlift import core
+from fnvnx.lift.proof import lift_dsl as f_dsl
+from fnvnx.lift.proof import forms
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True
 A0, FAILS = 0x400000, []
 

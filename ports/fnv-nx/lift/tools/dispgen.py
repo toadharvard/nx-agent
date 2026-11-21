@@ -9,9 +9,11 @@ A key that is not in the list resolves to fnvl_nobody (rt/rt.c): no row is added
 symbol` from contract/nativerows.py); the empty list is an ordinary input (a table with no key, every lookup misses, so fnvl_has_entry is 0 and dispatch takes its rule 3), the same code path for every size.
 --closure F: COMPLETENESS of the table over the closure (the list of every code address a call can reach, one hex address per row, from the closure gate): a closure address with no entry is an error, so the build is red. There is no run-time miss path that invents behaviour (CLAUDE.md option iii: an unmatched key at run time is proven unreachable).
 Used by liftgen.py --finish (rows of the pack it writes) and by test roots that build their own disp.cc from their entry list."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))      # the hash lives in this tool root: a tool imports only from its own root
-import phf
+import fnvnx.lift.tools.phf as phf
 
 
 def parse(lines):

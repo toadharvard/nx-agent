@@ -23,8 +23,9 @@ import os
 import re
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: the siblings are imported by their qualified name (contract.X)
-from contract import dllkind  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name (contract.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.contract import dllkind  # noqa: E402
 
 NOSPEC_CONV = "cdecl"   # a module without a reference spec is a vendor SDK's: its exports are the C ABI of the SDK (steam_api.h S_API), whose x86 convention is cdecl
 

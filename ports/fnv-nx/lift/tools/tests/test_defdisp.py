@@ -9,14 +9,16 @@
 (4) the hidden-pointer rule on results (msvc_pod): every case of clpod/gen.py (12 features x depth d0/d1/d1a/d2 x sizes 1,2,4,8,12 + plain controls) against
     clpod/table.tsv, the cl 15.00.30729.01 (VC 2008 SP1) measurement with its toolchain commit and cl.exe sha256; prints the mismatch count (must be 0).
 Run: python3 -I lift/tools/tests/test_defdisp.py   exit 0 on pass. Every compile is a stage of the recipe (toolchain/tests/plugbuild.py), no direct compiler call."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", "..")) # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, re, shutil, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, '..'))
-import test_descclass as dc
-import bridgegen
-import plugbuild as pb
+import fnvnx.lift.tools.tests.test_descclass as dc
+from fnvnx.contract import bridgegen
+from fnvnx.toolchain.tests import plugbuild as pb
 
 UNIT = r'''
 struct VB { int v; };
@@ -134,7 +136,7 @@ def run_all(w):
             check('%s %s' % (kind, n), ok, 'row %s %s, the compiler uses %s' % (fn, d1, want))
     # (4b) DEFDISP-NS (L2's rule, toolchain/tests/test_dispatch_defdisp_ns.py): a definition whose type has no x86 shape compiles quietly, whatever its linkage and
     # whether its address is taken, and gets the row `<asm> -<reason>`; reachability is decided by the join in exitgen, which is red for a JOINED `-` row.
-    import exitgen
+    import fnvnx.lift.tools.exitgen as exitgen
     U = 'typedef unsigned __int128 u128;\n'
     cases = (('u128static', 'static u128 __attribute__((noinline)) sq(u128 x) { return x + 1; }\nextern "C" int use(int a) { return (int)sq(a); }\n', '_ZL2sqo', 'static, address not taken'),
              ('u128taken', 'static u128 __attribute__((noinline)) sq(u128 x) { return x + 1; }\nu128 (*volatile tab)(u128) = sq;\n', '_ZL2sqo', 'static, address taken'),

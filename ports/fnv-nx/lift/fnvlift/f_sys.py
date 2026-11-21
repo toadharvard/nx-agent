@@ -13,7 +13,7 @@ exclusive by their guards and exhaustive because the last one, UD, is the comple
      -> STATUS_ACCESS_VIOLATION otherwise;
   4. reserved-NOP / hint space (0F 0D, 0F 18..0F 1F /r not claimed above: bnd*, cldemote, endbr*, rdssp, nop Ev): SDM Vol 2 A.4, Table A-6 "reserved-NOP": no architectural effect;
   5. prefix-only variants whose prefix the model CPU ignores (F2 BND on branches, 3E NOTRACK, F2/F3 XACQUIRE/XRELEASE with LOCK): the instruction without the prefix;
-  6. UD: only what the declared CPU's CPUID table (f_cpufeat.missing, h_absent_ext) or the SDM opcode map (UD0/UD1/UD2) decides; any other shape without a Form or a handler is a lift error (h_default).  The model advertises none of the extensions that introduced it (VEX/EVEX/XOP encodings, the 0F 38 and 0F 3A maps, SSE3/SSE4a,
+  6. UD: only what the declared CPU's CPUID table (cpufeat.missing, h_absent_ext) or the SDM opcode map (UD0/UD1/UD2) decides; any other shape without a Form or a handler is a lift error (h_default).  The model advertises none of the extensions that introduced it (VEX/EVEX/XOP encodings, the 0F 38 and 0F 3A maps, SSE3/SSE4a,
      MOVBE, POPCNT, RDRAND, XSAVE/OSXSAVE/XGETBV, BMI/ADX/..., VMX/SMX/SVM/SGX, CET, RTM/HLE, MPX, PadLock, SYSCALL/SYSRET/SWAPGS which Intel defines only in 64-bit mode): SDM Vol 2
      "Exceptions" of each instruction lists #UD for CPUID.<feature> = 0.
 Legal-on-the-model instructions that are NOT implemented anywhere are named in LEGAL_UNIMPLEMENTED and stay Unsupported (never silently #UD)."""
@@ -57,7 +57,7 @@ def wine_is_privileged(b):
 
 def row_privileged(b, row):
     """the null_seg_access row's privileged_check_first over the instruction bytes b: True -> EXCEPTION_PRIV_INSTRUCTION, False -> the row's access violation. A decoded instruction has fewer than
-    prefix_limit prefixes (x86 length <= 15 with an opcode byte), so the row's at_limit case cannot occur; checked here, not assumed."""
+    prefix_limit prefixes (x86 length <= 15 with an opcode byte), so the row's at_limit case cannot occur; checked here from the table."""
     p = row['privileged_check_first']
     skip = {int(x, 16) for x in p['prefix_skip']}
     pri = {int(x, 16) for x in p['priv_instruction_opcodes']}
@@ -133,9 +133,6 @@ def asz16(ins):
 
 
 
-@op('repz ret', 'repnz ret', 'repe ret', 'repne ret')
-def h_repz_ret(cx, ins):
-    f_flow.h_ret(cx, ins)
 
 
 # ---- class 3: segment registers, far transfers, descriptor-table instructions --------------------------------------------------------------------------------------
@@ -169,40 +166,12 @@ def pop_sreg(cx, ins, sg):
     cx.em('{ u32 s=M%d(esp)&0xffffu; %s esp+=%du; }' % (8 * w, seg_load(cx, sg), w))
 
 
-@op('les', 'lds', 'lss', 'lfs', 'lgs')
+@op('lss', 'lfs', 'lgs')
 def h_lxs(cx, ins):
-    """LES/LDS/LSS/LFS/LGS r, m16:16|32: offset, then selector; the segment register is loaded (and may fault) before the general register is written (SDM pseudo-code)"""
-    sg = {'les': 'es', 'lds': 'ds', 'lss': 'ss', 'lfs': 'fs', 'lgs': 'gs'}[cx.m]
+    """LSS/LFS/LGS r, m16:16|32: offset, then selector; the segment register is loaded (and may fault) before the general register is written (SDM pseudo-code)"""
+    sg = {'lss': 'ss', 'lfs': 'fs', 'lgs': 'gs'}[cx.m]
     w = cx.ops[0].size
     cx.em('{ u32 ad=%s; u32 o=M%d(ad); u32 s=M16(ad+%du); %s %s }' % (cx.ea(ins, cx.ops[1]), 8 * w, w, seg_load(cx, sg), cx.wr(ins, cx.ops[0], 'o')))
-
-
-@op('retf')
-def h_retf(cx, ins):
-    """RETF [imm16]: pops EIP then CS (and imm16 bytes). Same-level return only (an outer level would need RPL > CPL = 3): valid exactly when the popped CS is SEL_CS (index of CS, RPL 3);
-    RPL < CPL, another index, the null selector are #GP(selector) (SDM Vol 2 RET, protected-mode far return: "#GP(selector) if the return code segment selector RPL is less than CPL / null / not a code segment")."""
-    n = cx.ops[0].imm & 0xffff if cx.ops else 0
-    if n:
-        cx.kinds.add('retn')
-    cx.kinds.add('farret')
-    w = 2 if osz16(ins) else 4
-    cx.em('{ u32 ra=M%d(esp), s=M%d(esp+%du)&0xffffu; %s esp+=%du; c->ra=ra; SYNC_OUT; return; }' % (8 * w, 8 * w, w, gp_cond(cx, 's!=SEL_CS'), 2 * w + n))
-    cx.term = True
-
-
-@op('iretd', 'iret')
-def h_iret(cx, ins):
-    """IRET/IRETD at CPL 3 returning to CPL 3 (SDM Vol 3 6.12.1 "Return from interrupt... without privilege change"): pops EIP, CS, EFLAGS; CS checked like RETF. EFLAGS loads like POPF at CPL 3
-    (EFL_POP: the arithmetic flags and DF, AC/ID; IOPL, IF, TF, NT, RF, VM, VIF, VIP are not changed by a CPL 3 IRET or not modelled: header comment of EFL_POP). A 16-bit IRET pops IP, CS, FLAGS
-    (word): EIP = IP, the high EFLAGS bits stay."""
-    w = 2 if cx.m == 'iret' else 4
-    cx.kinds.add('farret')
-    t = 'EFL_POP(fl);' if w == 4 else '{ u32 k=c->eflx; EFL_POP(fl); c->eflx=k; }'
-    cx.em('{ u32 ra=M%d(esp), s=M%d(esp+%du)&0xffffu, fl=M%d(esp+%du); %s esp+=%du; %s c->ra=ra; SYNC_OUT; return; }' % (
-        8 * w, 8 * w, w, 8 * w, 2 * w, gp_cond(cx, 's!=SEL_CS'), 3 * w, t))
-    cx.term = True
-
-
 
 
 def store16(cx, ins, o, val):
@@ -254,7 +223,7 @@ def h_prefix_only(cx, ins):
 
 
 # ---- class 6: UD ------------------------------------------------------------------------------------------------------------------------------------------------------
-UD_OPCODES = ('ud0', 'ud1', 'ud2')      # defined #UD by the SDM opcode map (the other #UD classes: f_cpufeat.missing, h_absent_ext)
+UD_OPCODES = ('ud0', 'ud1', 'ud2')      # defined #UD by the SDM opcode map (the other #UD classes: cpufeat.missing, h_absent_ext)
 LEGAL_UNIMPLEMENTED = {
     'fxsave': 'FXSR is in the model; the 512-byte image is x87 + SSE state (x87 owner)',
     'fxrstor': 'FXSR is in the model; the 512-byte image is x87 + SSE state (x87 owner)',

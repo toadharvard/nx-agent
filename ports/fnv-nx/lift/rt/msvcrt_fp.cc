@@ -127,19 +127,19 @@ static u32 sse_control(u32 newval, u32 mask)
 }
 
 /* _controlfp(newval, mask), cdecl: Wine _controlfp -> _control87 (mask without _EM_DENORMAL) -> __control87_2 (x87, then SSE) */
-FNVNX_EXPORT("msvcrt.dll", "_controlfp", fnvl_msvcrt_controlfp, "func");
+FNVNX_EXPORT("msvcrt.dll", "_controlfp", fnvl_msvcrt_controlfp, "entry");
 extern "C" void fnvl_msvcrt_controlfp(void)
 {
     u32 newval = M32(esp + 4), mask = M32(esp + 8) & ~EM_DENORMAL;
     u32 flags = x87_control(newval, mask), sse2_cw = sse_control(newval, mask);
     if ((flags ^ sse2_cw) & (MCW_EM | MCW_RC)) flags |= EM_AMBIGUOUS;
     flags |= sse2_cw;
-    eax = flags; c->ra = M32(esp); esp += 4;
+    eax = flags;
 }
 
 /* _clearfp(), cdecl: the status flags of the x87 unit and of MXCSR as _SW_* bits, both cleared. Wine _setfp / _setfp_sse with sw_mask = _MCW_EM (which covers
    every _SW_* bit, so the new status is empty): the x87 status is cleared with fnclex when any of its six bits was set, MXCSR is written when it changed. */
-FNVNX_EXPORT("msvcrt.dll", "_clearfp", fnvl_msvcrt_clearfp, "func");
+FNVNX_EXPORT("msvcrt.dll", "_clearfp", fnvl_msvcrt_clearfp, "entry");
 extern "C" void fnvl_msvcrt_clearfp(void)
 {
     u32 sw = (fnvl_fp_x87_flags() | c->fex) & 0x3f;                 /* fnstsw: host FPSR flags | the bits the host FPSR cannot hold */
@@ -148,30 +148,30 @@ extern "C" void fnvl_msvcrt_clearfp(void)
     u32 old_fpword = c->mxcsr, fpword = old_fpword & ~0x3fu;
     flags |= sw_flags(old_fpword);
     if (fpword != old_fpword) { c->mxcsr = fpword; sse_fpcr(fpword); }
-    eax = flags; c->ra = M32(esp); esp += 4;
+    eax = flags;
 }
 
 /* _fpclass(double), cdecl: Wine _fpclass */
-FNVNX_EXPORT("msvcrt.dll", "_fpclass", fnvl_msvcrt_fpclass, "func");
+FNVNX_EXPORT("msvcrt.dll", "_fpclass", fnvl_msvcrt_fpclass, "entry");
 extern "C" void fnvl_msvcrt_fpclass(void)
 {
     u64 u = M64(esp + 4); u32 e = (u32)(u >> 52) & 0x7ff, s = (u32)(u >> 63), r;
     if (e == 0) r = (u << 1) ? (s ? 0x10 : 0x80) : (s ? 0x20 : 0x40);               /* _FPCLASS_ND / PD, NZ / PZ */
     else if (e == 0x7ff) r = (u << 12) ? (((u >> 51) & 1) ? 0x2 : 0x1) : (s ? 0x4 : 0x200);     /* QNAN / SNAN, NINF / PINF */
     else r = s ? 0x8 : 0x100;                                                          /* NN / PN */
-    eax = r; c->ra = M32(esp); esp += 4;
+    eax = r;
 }
 
 /* _finite(double), _isnan(double), cdecl: Wine _finite, _isnan */
-FNVNX_EXPORT("msvcrt.dll", "_finite", fnvl_msvcrt_finite, "func");
+FNVNX_EXPORT("msvcrt.dll", "_finite", fnvl_msvcrt_finite, "entry");
 extern "C" void fnvl_msvcrt_finite(void)
 {
     u64 u = M64(esp + 4);
-    eax = (u & (~0ull >> 1)) < (0x7ffull << 52); c->ra = M32(esp); esp += 4;
+    eax = (u & (~0ull >> 1)) < (0x7ffull << 52);
 }
-FNVNX_EXPORT("msvcrt.dll", "_isnan", fnvl_msvcrt_isnan, "func");
+FNVNX_EXPORT("msvcrt.dll", "_isnan", fnvl_msvcrt_isnan, "entry");
 extern "C" void fnvl_msvcrt_isnan(void)
 {
     u64 u = M64(esp + 4);
-    eax = (u & (~0ull >> 1)) > (0x7ffull << 52); c->ra = M32(esp); esp += 4;
+    eax = (u & (~0ull >> 1)) > (0x7ffull << 52);
 }

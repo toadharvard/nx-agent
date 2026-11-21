@@ -6,7 +6,7 @@ tracked input; the runtime unit rt.S defines fnvnx_lift_cpu_bytes; the pack is a
 Plain script: exit 0 on pass, one PASS/FAIL line per case. Needs root (sandbox) and the compilers of verify/env.json."""
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import atexit
 import copy
 import json
@@ -21,11 +21,11 @@ REAL = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.d
 VERIFY = os.path.join(REAL, "ports", "fnv-nx", "verify")
 sys.path.insert(0, VERIFY)
 sys.path.insert(0, os.path.join(VERIFY, "tests"))
-from verify import cas  # noqa: E402
-from verify import recipe  # noqa: E402
-import test_guest as tg  # noqa: E402
-import test_plugins as tp  # noqa: E402
-from test_plugins import BASE, ROOT, T, check, git, w  # noqa: E402
+from fnvnx.verify import cas  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
+import fnvnx.verify.tests.test_guest as tg  # noqa: E402
+import fnvnx.verify.tests.test_plugins as tp  # noqa: E402
+from fnvnx.verify.tests.test_plugins import BASE, ROOT, T, check, git, w  # noqa: E402
 
 LIFT = T + "lift/gates/"
 RT = ".data\n.globl fnvnx_lift_cpu_bytes\n.type fnvnx_lift_cpu_bytes,%object\n.size fnvnx_lift_cpu_bytes,4\nfnvnx_lift_cpu_bytes: .word 536\n.text\n.globl fnvl_dispatch\n.type fnvl_dispatch,%function\nfnvl_dispatch: ret\n.size fnvl_dispatch,.-fnvl_dispatch\n"
@@ -113,6 +113,11 @@ def gate(repo, name, cache):
     out = os.path.join(BASE, "out-%s-%s" % (os.path.basename(repo), name))
     os.makedirs(out, exist_ok=True)
     recipe.set_artifacts(recipe.ext_dir(cache), recipe.ARTIFACTS)   # the run's repository, beside the cache
+    link = os.path.join(repo, "ports", "fnvnx")      # the one module path (`fnvnx.<root path>` is ports/fnvnx, a link to the tree, as in the repository): the toy checkout has it too
+    if not os.path.lexists(link):
+        os.symlink("fnv-nx", link)
+        git(repo, "add", "-A")
+        git(repo, "commit", "-q", "-m", "module path")
     p = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "gate_lift.py"), "--gate", name], cwd=repo,
                        env=dict(os.environ, GATE_OUT=out, GATE_CACHE=cache), capture_output=True, text=True)
     f = os.path.join(out, name + ".json")

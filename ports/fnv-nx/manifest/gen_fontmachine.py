@@ -20,8 +20,8 @@ import os
 import re
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import fontfamilies
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.manifest import fontfamilies
 
 inf, fontc, conf, fdir, out = sys.argv[1:6]
 src = open(fontc).read()

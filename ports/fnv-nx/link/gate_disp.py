@@ -28,20 +28,20 @@ A slot no row names (item `P_disp_table[slot]`) is certified when its index half
 With --universe (the code entries: first column the address as hex) every address needs a row in some rows file (`no-entry`).
 A missing or malformed rows file, or a missing ELF, is red (`rows:no-rows`, `rows:format`, `elf:no-elf`).
 
-Gate file `disp` ($GATE_OUT/disp.json, gatefile.py; full list in $GATE_OUT/disp.ids): items = per rows file 1 + rows + empty slots, plus the universe addresses;
+Gate file `disp` ($GATE_OUT/disp.json, gatefile.py: every id): items = per rows file 1 + rows + empty slots, plus the universe addresses;
 uncertified = the ids above `:<reason>`.  Counts only on stdout.  Exit 1 when red.
 """
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import argparse
 import os
 import struct
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from contract import gatefile
-import gateids
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.contract import gatefile
 
 SHT_SYMTAB, SHT_RELA, SHT_REL, SHT_RELR, PT_LOAD, SHN_UNDEF = 2, 4, 9, 19, 1, 0
 M32 = 0xffffffff
@@ -239,7 +239,6 @@ def check_file(elf, rowsdoc):
 def finish(items, bad, detail):
     unc = ['%s:%s' % (k, v) for k, v in sorted(bad.items())]
     gatefile.write('disp', items, items - len(unc), unc, detail)
-    gateids.write_ids('disp', unc)
     print(detail)
     sys.exit(1 if unc else 0)
 

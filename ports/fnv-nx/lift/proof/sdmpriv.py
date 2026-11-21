@@ -5,10 +5,12 @@
 
 Rule (the class): an instruction section of the SDM instruction reference is privileged at CPL 3 when its `Protected Mode Exceptions` block has a `#GP(0)` entry with a sentence of one of the forms
   cpl0    `If [the] CPL is not 0 / > 0 / greater than 0 / != 0`, `If the current privilege level is not 0` (any `or`-disjunct of the sentence that is only that test: the sentence holds whenever CPL > 0)
-  iopl    `If the CPL is greater than (has less privilege) the I/O privilege level`, `If CPL is greater than IOPL ...` (holds at the declared facts cpl = 3, iopl = 0, io_bitmap_grants = none, declared.json)
+  iopl    `If the CPL is greater than (has less privilege) the I/O privilege level`, `If CPL is greater than IOPL ...` (whether it holds is decided by the declared machine record x86sys.json: cpl from cs, iopl; sysspec.py reads it)
 A sentence that conjoins another condition (`... and the PCE flag in CR4 is clear`, `If the TSD flag in CR4 is set and the CPL is greater than 0`) is `cond`: it holds only under a declared fact about that condition; its row says so, no more.
 The mnemonics of a row are the instruction heading's names split on `/` (`INS/INSB/INSW/INSD`), lower case.  Sections of the same name (MOV to/from CR, MOV to/from DR) are told apart by the heading text after the dash.
 Output: `heading<TAB>mnemonics<TAB>class<TAB>sentence<TAB>citation` (citation: SDM heading, volume and page of the section)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import hashlib
 import os
 import re
@@ -16,7 +18,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import sdmfeat as S  # noqa: E402
+import fnvnx.lift.proof.sdmfeat as S  # noqa: E402
 
 CPL = r'(?:the )?(?:CPL|current privilege level)'
 CPL0 = re.compile(r'^' + CPL + r'\s+(?:is not 0|is greater than 0|> ?0|[≠!]=? ?0)\.?$', re.I)

@@ -1,13 +1,14 @@
 """`.fnvl.sites` records (16 bytes: kind, x86 pc, host start, host end) on a compiled unit: each record is kind and pc plain, start and end R_AARCH64_P32_ABS32 in .text, and the range is exactly
-the exclusive sequence (kind 1: ldaxr .. cbnz) or the one store / the one bfxil (kind 2). Compiled by a stage of the recipe (toolchain/tests/plugbuild.py), no direct compiler call.   test_ranges.py"""
+the exclusive sequence (kind 1: ldaxr .. cbnz) or the one store / the one bfxil (kind 2). Compiled by a stage of the recipe (toolchain/tests/plugbuild.py), no direct compiler call.   test_ranges.py (the input GEN is mounted)"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", "..")) # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, re, shutil, subprocess, sys, tempfile
 LIFT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, LIFT); sys.path.insert(0, os.path.join(LIFT, 'tools')); sys.path.insert(0, os.path.join(LIFT, '..', 'toolchain', 'tests'))
-import fnvlift as L
-if len(sys.argv) != 2: sys.exit('usage: %s GEN   (GEN: the GEN output of the lift/rt root, a declared input of the test root)' % os.path.basename(__file__))
-GEN = sys.argv[1]
-import plugbuild as pb
-import prelude
+import fnvnx.lift.fnvlift as L
+GEN = os.environ.get('FNVNX_INPUT_GEN') or sys.exit('FNVNX_INPUT_GEN is not mounted (the GEN output of the lift/rt root, a produced input of tests/inputs.json)')
+from fnvnx.toolchain.tests import plugbuild as pb
+import fnvnx.lift.tools.prelude as prelude
 
 SRC = '''
 extern "C" void L_t(u32 ft0){ u32 cf=0,zf=0,sf=0,of=0,pf=0,af=0,c0=0,c2=0,c3=0;

@@ -18,9 +18,9 @@ a default, compiled with -Werror=switch-enum: it cannot go out of step with the 
 enumerators with one value are a `duplicate case value` compile error. The translation functions are switches over these types with no default
 branch and are compiled with -Werror=switch -Werror=switch-enum, so an enumerator of the spec without a case is a compile error."""
 import json, os, sys
-HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
-import envq        # noqa: E402
-import wine_fourcc  # noqa: E402
+HERE = os.path.dirname(os.path.abspath(__file__))
+from fnvnx.render.d3d9.env import envq  # noqa: E402
+from fnvnx.render.d3d9.env import wine_fourcc  # noqa: E402
 
 WINE = None   # argv[3]: the pinned Wine mirror directory (an input of the recipe stage)
 SPEC = None   # the interface table the bridgefacts D9_SPEC output, argv[2] (an input of the recipe stage)

@@ -2,13 +2,14 @@
 (abspath:literal / envdefault / escape / home) and by recipe.check (gen:file-escape, the same escape rule at `recipe check` time), so the rule exists once.
 Imports nothing of the recipe: recipe.py imports this file."""
 import ast
+import hashlib
 import re
 
 ABS = re.compile(r"/[A-Za-z0-9_.][^\s]*\Z")
 SINK_PREFIX = ("os.", "shutil.", "subprocess.", "glob.", "pathlib.", "sys.path.")
 SINKS = {"open", "io.open", "tarfile.open", "zipfile.ZipFile", "pathlib.Path", "pathlib.PurePath", "pathlib.PosixPath", "fileinput.input",
          "runpy.run_path", "importlib.util.spec_from_file_location"}
-GUARDS = {"require_mounted"}   # recipe.py: the guards a launcher loads a tool through (the target of a dynamic load must be their result)
+GUARDS = {"require_mounted", "require_mounted_module"}   # recipe.py: the guards a launcher loads a tool through (the target of a dynamic load must be their result)
 
 
 def dotted(n):
@@ -246,24 +247,55 @@ def alternatives(node):
     return [node]
 
 
+class Flow(list):
+    """The def-use map of flow_of (a list, one dict per scope) with the per-flow memo of mentions_self."""
+    def __init__(self, *a):
+        super().__init__(*a)
+        self.facts = {}   # id(node) -> (hit, names): the node's own evidence, from ONE ast walk
+        self.memo = {}    # (id(node), idx, depth) -> bool
+
+
+def _node_facts(node, flow):
+    """(hit, names) of the expression NODE: hit when it holds __file__, __path__ or sys.argv[0]; names = the other Name ids it holds (one ast walk, once per node)."""
+    k = id(node)
+    r = flow.facts.get(k)
+    if r is None:
+        hit, names = False, []
+        for m in ast.walk(node):
+            if isinstance(m, ast.Name):
+                if m.id in ("__file__", "__path__"):
+                    hit = True
+                else:
+                    names.append(m.id)
+            elif isinstance(m, ast.Subscript) and dotted(m.value) == "sys.argv" and isinstance(m.slice, ast.Constant) and m.slice.value == 0:
+                hit = True
+        r = flow.facts[k] = (hit, tuple(names), node)   # the node is kept so that its id stays unique for the life of the flow
+    return r
+
+
 def mentions_self(node, idx, flow, sc, depth=0):
-    """True iff the expression NODE (or a name it is assigned from) mentions __file__, __path__ or sys.argv[0]: a path of the file's own location."""
-    for m in ast.walk(node):
-        if isinstance(m, ast.Name):
-            if m.id in ("__file__", "__path__"):
-                return True
-            if depth < 6:
-                i = idx
-                while i is not None:
-                    vals = flow[i].get(m.id)
-                    if vals:
-                        if any(mentions_self(v, i, flow, sc, depth + 1) for v in vals):
-                            return True
-                        break
-                    i = sc[i][1]
-        elif isinstance(m, ast.Subscript) and dotted(m.value) == "sys.argv" and isinstance(m.slice, ast.Constant) and m.slice.value == 0:
-            return True
-    return False
+    """True iff the expression NODE (or a name it is assigned from) mentions __file__, __path__ or sys.argv[0]: a path of the file's own location.
+    A pure function of (node, idx, depth) within one flow, so it is memoised there; the evidence of a node comes from one ast walk."""
+    key = (id(node), idx, depth)
+    memo = flow.memo
+    if key in memo:
+        return memo[key]
+    hit, names, _ = _node_facts(node, flow)
+    res = hit
+    if not res and depth < 6:
+        for nm in names:
+            i = idx
+            while i is not None:
+                vals = flow[i].get(nm)
+                if vals:
+                    if any(mentions_self(v, i, flow, sc, depth + 1) for v in vals):
+                        res = True
+                    break
+                i = sc[i][1]
+            if res:
+                break
+    memo[key] = res
+    return res
 
 
 def read_target(n, mod):
@@ -279,7 +311,7 @@ def read_target(n, mod):
 def flow_of(sc):
     """Per scope, name -> the expressions assigned to it (the def-use map the path rules read)."""
     # def-use: per scope, name -> (constants, names it is built from); fixpoint along the scope chain
-    flow = []
+    flow = Flow()
     for scope, _ in sc:
         d = {}
         if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):   # a parameter default is an assignment of the parameter: every default form (positional, keyword-only, lambda)
@@ -334,8 +366,18 @@ def escapes(path, mod, sc, flow, owner, inside=None):
     return out_f
 
 
+_ESCAPES = {}   # (path, sha256 of src, owner) -> (escapes, in-tree reads): a module shared by many stage closures is analysed once
+
+
 def escapes_of(path, src, owner, inside=None):
-    """The escapes of the tool file PATH with source SRC (see escapes); INSIDE receives the in-tree reads."""
-    mod = Module(path, src)
-    sc = scopes(mod.tree)
-    return escapes(path, mod, sc, flow_of(sc), owner, inside)
+    """The escapes of the tool file PATH with source SRC (see escapes); INSIDE receives the in-tree reads. A pure function of (PATH, SRC, OWNER), cached by content."""
+    key = (path, hashlib.sha256(src.encode()).hexdigest(), owner)
+    r = _ESCAPES.get(key)
+    if r is None:
+        ins = []
+        mod = Module(path, src)
+        sc = scopes(mod.tree)
+        r = _ESCAPES[key] = (escapes(path, mod, sc, flow_of(sc), owner, ins), ins)
+    if inside is not None:
+        inside.extend(r[1])
+    return list(r[0])

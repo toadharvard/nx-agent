@@ -10,6 +10,8 @@ indirect jmp / another entry / `ud` (bytes that do not decode: the lifted body r
 flow from entry point, exports, TLS, EH tables or from a pointer whose consumer transfers control (vptr-store run, jump table); `candidate` = known only as a relocated
 pointer target. Byte accounting: every byte of the executable sections gets one accounting class (tools/CODEMAP.md: may-execute and may-be-read are independent sets, the class is no partition of them) (entry body, PE-directory data, padding, relocation slot, dead gap) or is
 reported UNEXPLAINED by reason; the gate is red then. Output: cfg.facts_out/<module>/{universe,codemap,ranges,noreturn,outside,imports}.tsv, ehtables.json, gate_codemap.json."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, re, sys, json, bisect, hashlib
 from array import array
 from itertools import groupby
@@ -18,19 +20,22 @@ from types import SimpleNamespace
 import capstone
 from capstone import x86 as X
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))      # the tool root: a tool imports its siblings from its own root (the generated stages run it under python3 -I)
-import pemod, ehtables, codemap, residue, jtab as JT
-from fnvlift import Image as LImage; from fnvlift import core as LCore
-TERM = {'ret', 'retf', 'int3', 'hlt', 'ud2', 'iret', 'iretd'}
-PRI = ['entry', 'tls', 'export', 'call', 'tail', 'eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler', 'seh-frame', 'eh-throw', 'ptr']
+import fnvnx.lift.tools.pemod as pemod; import fnvnx.lift.tools.ehtables as ehtables; import fnvnx.lift.tools.codemap as codemap; import fnvnx.lift.tools.residue as residue; import fnvnx.lift.tools.jtab as JT
+from fnvnx.lift.fnvlift import Image as LImage; from fnvnx.lift.fnvlift import core as LCore
+TERM = {'ret', 'retf', 'int3', 'hlt', 'ud2', 'iret', 'iretd', '(ud)'}
+PRI = residue.PRI
 CN = {1: 'entry-nondecomp', 2: 'entry-nondecomp', 3: 'data-pe-header', 4: 'padding', 5: 'data-reloc', 6: 'dead-gap', 9: 'data-unreached', 8: 'UNEXPLAINED'}      # the exe's class names (codemap.py CLS)
 M32 = 0xffffffff
 
 _INSMEMO = {}; _RESMEMO = {}
 def _run(arg, cfg, XEX, REF=frozenset()):
     """cfg: modules (the module table), moddirs (list), facts_out: declared inputs, passed by universe.py"""
-    path, mrow = pemod.locate(arg, cfg.modules, cfg.moddirs)      # modules.tsv row (missing = KeyError) and the file (sha256 + size checked = ValueError)
+    if getattr(cfg, 'exe', None):      # the process image: no modules.tsv row, it is mapped at its preferred base (the loader maps it there; it has no assigned base)
+        path = cfg.exe; _m = pemod.load(path); mrow = SimpleNamespace(name='exe', base=None, size=len(_m.d), sizeimg=_m.sizeimg, pref=_m.base, entry=_m.entry, tls=1 if _m.dirent(9)[0] else 0)
+    else: path, mrow = pemod.locate(arg, cfg.modules, cfg.moddirs)      # modules.tsv row (missing = KeyError) and the file (sha256 + size checked = ValueError)
     name = os.path.splitext(mrow.name)[0]; outd = cfg.facts_out + '/' + name; os.makedirs(outd, exist_ok=True)
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True
+    import fnvnx.lift.tools.gapmd as gapmd; md = gapmd.make(md, cfg.udsail)
     M = pemod.load(path, mrow.base); u32 = M.u32; RL = pemod.relocs(M); relocs = sorted(RL or []); rset = set(relocs); imports = pemod.imports(M)
     T0 = min(a for n, a, z, ro in M.xs); T1 = max(a + z for n, a, z, ro in M.xs); TN = T1 - T0
     V = bytearray(TN); tx = bytearray(b'\xcc' * TN)
@@ -38,7 +43,7 @@ def _run(arg, cfg, XEX, REF=frozenset()):
     text = bytes(tx)
     def intext(a): return T0 <= a < T1 and V[a - T0] == 1
     rvals_all = [(r, v) for r, v in ((r, u32(r)) for r in relocs) if intext(v)]
-    rvals = [(r, v) for r, v in rvals_all if r not in XEX and v not in REF]          # R3 refined (residue.disp_only): the value sites; XEX = the displacement-only sites of the previous round
+    rvals = [(r, v) for r, v in rvals_all if r not in XEX]          # value occurrences root their target; XEX = the displacement-only sites of the previous round (see run())
     ent = {}; roots = set(); queue = deque(); dec = {}; cov = bytearray(TN); ud = set(); xf = set(); misfit = set(); callers = {}; calltg = {}; leaves = set(); jtab = {}; jins = []
     refhit = set()
     def add(a, kind, proven=False):
@@ -104,7 +109,7 @@ def _run(arg, cfg, XEX, REF=frozenset()):
             if fall: st.append(x + sz)
         return seen
     X_ = SimpleNamespace(d=M.d, secs=M.secs, text=text, T0=T0, T1=T1, cov=cov, insns=dec, rset=rset, u32=u32, sec=M.sec, intext=intext, callers=callers, isdata=lambda a: M.sec(a) is not None,
-                         indec=lambda a: None, emit=lambda t, k, s: add(t, k, True), relocs=relocs, extent_insns=extent_insns, rvals=rvals, fsize={}, mark=lambda *a: None, imports=imports,
+                         indec=lambda a: None, emit=lambda t, k, s: add(t, k, True), relocs=relocs, extent_insns=extent_insns, rvals=rvals, mark=lambda *a: None, imports=imports,
                          outdir=outd, cstr=M.cstr, strict=True, entry_of=entry_of)
     eh = ehtables.EH(X_)
     if M.entry: add(M.base + M.entry, 'entry', True)
@@ -140,7 +145,7 @@ def _run(arg, cfg, XEX, REF=frozenset()):
         ex = JT.exclusive(jt_ok, svals)
         def seeded(x):
             if x in callers: return True
-            if x in ent and (ent[x] - {'ptr', 'tail', 'inner'}): return True
+            if x in ent and (ent[x] - {'ptr', 'tail'}): return True
             return any(r not in ex for r in vrefs.get(x, ()))
         n = 0
         for a in sorted(jtab):
@@ -338,7 +343,10 @@ def _run(arg, cfg, XEX, REF=frozenset()):
     # ---- the residue is settled HERE, after universe.tsv / ranges.tsv exist and after the pcsrc facts of this run (pcsrc_s4.json) have been written: residue.closure reads them (tools/residue.py)
     # (the call that runs pcsrc.run_facts(outd, ...) must come before this point)
     import time as _t; _t0 = _t.time()
-    import pcsrc; pcsrc_red, pcsrc_res = pcsrc.run_facts(outd, name, X_.text, X_.T0, X_.u32, X_.rset)
+    HD = '# base=0x%08x: absolute VAs at the preferred image base (not RVAs)' % M.base
+    print('shapes.tsv %d shape keys' % gapmd.shapes_tsv(cfg.shapes, HD, md, text, T0, dec))
+    open(cfg.baddecode, 'w').write(HD + '; columns: entry, undecodable address, the 15 bytes there; every sequence that decode_gap did not decide\n' + ''.join('%08x\t%08x\t%s\n' % (entry_of(a), a, text[a - T0:a - T0 + 15].hex()) for a in sorted(ud)))
+    import fnvnx.lift.tools.pcsrc as pcsrc; pcsrc_red, pcsrc_res = pcsrc.run_facts(outd, name, X_.text, X_.T0, X_.u32, X_.rset, imports)
     sys.stderr.write('timing %s: pcsrc %.1f s (this round)\n' % (name, _t.time() - _t0))     # reads only universe.tsv and ranges.tsv; writes gate_pcsrc.json and pcsrc_s4.json
     # residue (valid executable bytes no entry body reaches and no PE directory names), cut by rule into: padding (nop / int3 instructions at the run's ends), dead gap (the run decodes
     # completely from its first byte, ends at a terminator or at the next reached instruction, and has relocated dwords only at operand fields), relocation slots (the bytes of a
@@ -353,7 +361,7 @@ def _run(arg, cfg, XEX, REF=frozenset()):
     def residual(p, q):
         """[p, q) offsets of one residue run: tools/residue.py (closure complete -> data, else UNEXPLAINED with the closure reason); the sweep is a breakdown, it decides nothing"""
         brk[residue.sweep(md, text, T0, TN, relocs, rsl, cov, p, q)] += q - p
-        if closure_complete: cl[p:q] = bytes([residue.DATA]) * (q - p)
+        if closure_complete: cl[p:q] = bytes(5 if rsl[k] else residue.DATA for k in range(p, q))      # relocation-named bytes no instruction covers are class data-reloc (the exe's class 3: the byte of a relocated slot, the proof is the relocation); the rest is data-unreached
         else: cl[p:q] = b'\x08' * (q - p); unx.append((T0 + p, q - p, closure_reason))
     for m in re.finditer(rb'\x00+', bytes(cl)):
         s, e = m.span(); p = s
@@ -417,7 +425,7 @@ def _run(arg, cfg, XEX, REF=frozenset()):
     na = sum(1 for v in pt if v in proven); nb = sum(1 for v in pt if v not in proven and (pe[v - T0] or v in dread)); nc = len(pt) - na - nb
     mp = Counter(dec[a][1] for a in pset)
     fi = eh.finish(ent)
-    import dic
+    import fnvnx.lift.tools.dic as dic
     DR = dic.jtab_ranges(outd); dic.write(outd, hd, DR)          # data in code: the ranges a proven consumer reads (tools/dic.py)
     DW, DWd = dic.nonoperand_words(md, text, T0, relocs, {(a, dec[a][0]) for e in E for a in exts[e]}, DR)
     print('data_in_code: %d ranges (jtab %d), %d bytes; relocated words overlapping a reached instruction without being its operand: %d (of them inside a data range %d)' % (len(DR), len(DR), sum(b - a for a, b, k, d in DR), len(DW), len(DWd)))
@@ -464,28 +472,62 @@ def _run(arg, cfg, XEX, REF=frozenset()):
     open(outd + '/gate_codemap.json', 'w').write(json.dumps({'schema': 'fnvnx-gate/1', 'name': 'l3.codemap.' + name, 'status': 'green' if green else 'red', 'universe': TN - cc[7], 'certified': TN - cc[7] - nunx, 'uncertified': nunx, 'targets': len(targets), 'targets_certified': cert}) + '\n')
     print('gate %s red=%d sources=%d rows=%d' % (pcsrc_res['name'], pcsrc_red, pcsrc_res['sources'], pcsrc_res['rows']))
     print('gate l3.codemap.%s: %s (bytes %d, unexplained %d; targets %d, certified %d)%s' % (name, 'green' if green else 'red', TN - cc[7], nunx, len(targets), cert, ''.join('; RED: ' + w for w in why)))
-    return (0 if green else 1), {r for r, v in rvals_all if residue.disp_only(md, text, T0, cov, r, misfit)}, REFO, PMF, len(E), sum(1 for e in E if e not in proven), len(refhit)
+    Xs = {r for r, v in rvals_all if residue.disp_only(md, text, T0, cov, r, misfit)}
+    occ = Counter('displacement-only' if r in Xs else 'operand (imm or lea) of a decoded instruction' if T0 <= r < T1 and cov[r - T0] else 'relocated data word' for r, v in rvals_all)
+    tg_all = {v for r, v in rvals_all}; tg_val = {v for r, v in rvals_all if r not in Xs}
+    print('roots by occurrence: %s; relocation targets %d, rooted by a value occurrence %d, excluded (only displacement-only words) %d' % (dict(occ), len(tg_all), len(tg_val), len(tg_all - tg_val)))
+    kind_of = lambda r: 'displacement-only' if r in Xs else 'operand' if T0 <= r < T1 and cov[r - T0] else 'data-word'
+    jw = {}      # the word addresses of every proven jump table -> its base
+    for t in json.load(open(outd + '/ehtables.json')).get('jtab_tables', ()):
+        for w in t['words']: jw[int(w, 16)] = t['base']
+    by = {}
+    for r, v in rvals_all: by.setdefault(v, []).append((r, kind_of(r)))
+    open(outd + '/roots.tsv', 'w').write('# columns: relocation target; rooted (yes = some value occurrence, no = only displacement-only words); occurrences site:kind; table = base of the proven jump table whose word extent contains the target, else -\n' + ''.join('%08x\t%s\t%s\t%s\n' % (v, 'yes' if any(k != 'displacement-only' for _, k in oc) else 'no', ','.join('%08x:%s' % o for o in sorted(oc)), jw.get(v, '-')) for v, oc in sorted(by.items())))
+    return (0 if green else 1), Xs, REFO, PMF, len(E), sum(1 for e in E if e not in proven), len(refhit)
 
 
 def run(arg, cfg):
-    """R3 refined, to its fixed point: X = {relocation sites that are only the displacement of a non-lea memory operand of an instruction of the flow} (residue.disp_only); the flow depends on the entries,
-    the entries on the value sites (not in X). Round k runs the whole producer with X_k excluded and yields X_{k+1} = X(flow of round k); X_0 = empty. Done when X_{k+1} == X_k: every excluded site is a
-    displacement inside the final flow and every entry is justified by a value site or a root. A cycle is an error (never a result); the rounds are not capped (R grows, the states are finite)."""
+    """R3 refined to its fixed point, with ONE refinement (ruling 2026-11-16): X = {relocation sites that are only the displacement of a non-lea memory operand of an instruction of the flow} (residue.disp_only).
+    Soundness: if every relocated word targeting t is such a displacement, the CPU uses t only to address a load or store, so t is never a register or memory value and no transfer can receive it from that word.
+    Value occurrences (an imm operand, a lea displacement, a relocated data word) root their target. The flow depends on the entries and the entries on the value sites (not in X). Round k runs the producer with X_k excluded and
+    yields X_{k+1} = X(flow of round k); X_0 = empty. Done when X_{k+1} == X_k, or (the map is antitone, so it can alternate between a lower and an upper bound) when the rounds have settled into a 2-cycle {L, U}: the answer is L, which satisfies L <= G(L) = U (every excluded site is displacement-only in the flow computed without it). Any other cycle is an error. The reloc-misfit refusal and the on-data drop are deleted: they were heuristics (a decoding that disagrees with the
+    relocations, or bytes of a relocation slot, is not proof that the bytes are never executed)."""
     import io, contextlib
-    X = frozenset(); R = frozenset(); seen = []; refinfo = {}
-    k = -1
-    while True:      # terminates: R only grows and the states (X, R) are finite; a state seen twice is a cycle, which is an error (below); there is no round cap
-        k += 1; buf = io.StringIO()
+
+    def step(X):
+        buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            code, Xo, Ro, PMF, nE, nC, nh = _run(arg, cfg, X, R)
-        refinfo.update(Ro); print('round %d: X %d R %d (+%d refused, %d displacement-only sites)' % (k, len(X), len(R), len(set(Ro) - R), len(Xo)), file=sys.stderr, flush=True)
-        if frozenset(Xo) == X and set(Ro) <= R:
-            sys.stdout.write(buf.getvalue()); print('R3 refinement: fixed point after %d rounds, %d displacement-only relocation sites excluded from the entry rule' % (k + 1, len(X)))
-            print('reloc-consistency: entries %d (candidates %d); refused (unproven, decoding has a relocation-misfit) %d; proven entries with a misfit %d%s' % (nE, nC, len(R), len(PMF), ' RED: ' + ' '.join('%08x' % a for a in PMF[:8]) if PMF else ''))
-            od = cfg.facts_out + '/' + os.path.splitext(pemod.locate(arg, cfg.modules, cfg.moddirs)[1].name)[0]
-            open(od + '/refused.tsv', 'w').write('# columns: entry, relocation-misfit instructions in its decoding, reason; unproven candidate entries refused by reloc-consistency (the bytes go to data, the relocated pointer is a data fact)\n' + ''.join('%08x\t%d\treloc-misfit\n' % (e, refinfo[e]) for e in sorted(R)))
-            bad = residue.entries_on_data(od); print('invariant entries on class-3 data bytes: %d%s' % (len(bad), ' RED: ' + ' '.join('%08x' % a for a in bad[:8]) if bad else ''))
-            return 0      # the facts are written; the verdict is gate_codemap.json / gate_pcsrc.json (status, entries_on_data), judged by the gate that reads them
-        seen.append((X, R)); X = frozenset(Xo); R = R | frozenset(Ro)          # a refusal is intrinsic to the bytes (the misfit) and the proven set only shrinks with the universe: R grows monotonically
-        if (X, R) in seen:
-            raise RuntimeError('R3 refinement does not converge (cycle at round %d)' % k)
+            code, Xo, Ro, PMF, nE, nC, nh = _run(arg, cfg, X, frozenset())
+        return frozenset(Xo), (buf.getvalue(), nE, nC)
+    X, (out, nE, nC), k, fixed = r3_settle(step)
+    sys.stdout.write(out); print('R3 refinement: %s after %d rounds, %d displacement-only relocation sites excluded from the entry rule (all justified in the flow computed without them)' % ('fixed point' if fixed else 'settled at the least fixed point of the two-round map', k + 1, len(X)))
+    print('universe: entries %d (candidates %d)' % (nE, nC))
+    od = cfg.facts_out + '/' + os.path.splitext('exe' if getattr(cfg, 'exe', None) else pemod.locate(arg, cfg.modules, cfg.moddirs)[1].name)[0]
+    bad = residue.entries_on_data(od)      # roots by rule whose bytes are also data-reloc words: reported, never dropped (the invariant is L1's to change)
+    open(od + '/entries_on_data.tsv', 'w').write('# columns: root address, proof id of the data-reloc byte; roots (by a value occurrence) whose bytes are also a relocation-named data word\n' + ''.join('%08x\t%s\n' % (a, residue.data_proof(od, a)) for a in sorted(bad)))
+    print('entries on class-3 data bytes (roots by rule): %d' % len(bad))
+    return 0
+
+
+def r3_settle(step):
+    """The R3 refinement loop of run(), over an abstract round step(X) -> (Xo, result): X is the exclusion set of the round, Xo the displacement-only sites of the flow it produced, result that round's output.
+    -> (X, result, k, fixed): the answer's exclusion set, its round's result, its round index, and whether it is a fixed point.
+    G(X) = Xo is antitone, so the rounds can alternate between a lower and an upper bound. The answer X must satisfy X <= Xo of its own round (every excluded site is displacement-only in the flow computed
+    without it). The least fixed point L of G o G does (L <= U = G(L)); a fixed point is L = U. When the sequence settles (S[k+1] == S[k-1]) the answer is the smaller of the two, with at most one extra round.
+    Any other cycle is an error. Terminates: the sets are finite and a set seen at distance other than 1 or 2 is an error; no round cap."""
+    X = frozenset(); S = []; k = -1; final = None      # S[k] = the exclusion set of round k
+    while True:
+        k += 1; S.append(X)
+        Xo, res = step(X)
+        print('round %d: X %d (%d displacement-only sites)' % (k, len(X), len(Xo)), file=sys.stderr, flush=True)
+        if Xo == X or (final is not None and X == final):
+            if not X <= Xo: raise RuntimeError('R3 refinement: the final exclusion set is not displacement-only in its own flow (round %d)' % k)
+            return X, res, k, Xo == X
+        if k >= 1 and Xo == S[k - 1]:      # settled: S[k-1] and S[k] are L and U in some order
+            lo, hi = (S[k - 1], X) if S[k - 1] <= X else (X, S[k - 1])
+            if not lo <= hi: raise RuntimeError('R3 refinement: the two settled exclusion sets are not nested (round %d)' % k)
+            final = lo
+            if lo == X: return X, res, k, False      # this round is already the answer: lo <= Xo = hi
+            X = final; continue      # one more round with L, whose own Xo must contain it
+        if Xo in S: raise RuntimeError('R3 refinement does not converge (a cycle of length other than 1 or 2 at round %d)' % k)
+        X = Xo

@@ -1,9 +1,11 @@
 """every CMPPS/CMPPD/CMPSS/CMPSD shape x all 256 imm8: imm 0..7 must link (shape Form == concrete Form); imm 8..255 are reserved by the SDM and have no concrete Form (no link claimed)"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import sys; sys.path.insert(0, '.')
 import os
-from fnvlift import inputs
-inputs.configure(x86sys=os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'platform', 'declared', 'x86sys.json'))
-from proof import symform, shape as shp
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import fnvnx.lift.proof.tests.declared_x86sys as declared_x86sys; declared_x86sys.configure()
+from fnvnx.lift.proof import symform, shape as shp
 PRE = ['0fc244240000/5.1.4.1', '660fc244240000/6.1.5.1', 'f30fc244240000/6.1.5.1', 'f20fc244240000/6.1.5.1']
 bad = 0
 for key in PRE:

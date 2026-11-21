@@ -14,7 +14,9 @@ atexit.register(shutil.rmtree, tempfile.tempdir, True)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-import gate_assumptions as G  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import gate_assumptions as G  # noqa: E402
 
 fails = 0
 
@@ -49,11 +51,11 @@ RANGES = {"L1": [100, 199], "L3a": [200, 299], "L3b": [300, 399], "L4": [400, 49
 
 def base():
     return {"format": G.FORMAT, "ranges": RANGES, "retired": [], "entries": [
-        {"id": asm(1), "text": "t", "aliases": ["c"], "status": "OWNER",
+        {"id": asm(1), "text": "t", "used_by": [T + "docs/a.md"], "aliases": ["c"], "status": "OWNER",
          "decision": {"file": "CLAUDE.md", "quote": "1. the compiler is correct;"}},
-        {"id": asm(2), "text": "t", "aliases": [], "status": "OWNER",
+        {"id": asm(2), "text": "t", "used_by": [T + "docs/a.md"], "aliases": [], "status": "OWNER",
          "decision": {"file": "CLAUDE.md", "quote": "2. SHA-256;"}},
-        {"id": asm(10), "text": "t", "aliases": ["x"], "status": "REMOVE",
+        {"id": asm(10), "text": "t", "used_by": [T + "docs/a.md"], "aliases": ["x"], "status": "REMOVE",
          "removed_by": "planned: a gate", "owner": "L1"}]}
 
 
@@ -73,7 +75,7 @@ e, c = run(base())
 check("registry positive", e == [] and c["OWNER"] == 2 and c["REMOVE"] == {"L1": 1} and c["planned"] == 1, (e, c))
 
 d = base()
-d["entries"].append({"id": asm(3), "text": "t", "aliases": [], "status": "OWNER",
+d["entries"].append({"id": asm(3), "text": "t", "used_by": [T + "docs/a.md"], "aliases": [], "status": "OWNER",
                      "decision": {"file": "CLAUDE.md", "quote": "2. SHA-256;"}})
 e, c = run(d)
 check("tenth OWNER entry without the owner's item is red", e != [], e)
@@ -105,12 +107,16 @@ d["entries"][2]["aliases"] = ["c"]
 check("alias of two entries is red", has(run(d)[0], "alias"), run(d)[0])
 
 d = base()
-d["entries"][2]["id"] = asm(11)
-check("an entry that no tracked file cites is dead and red (the users are derived from the text)", "unused" in codes(run(d)[0]), run(d)[0])
+d["entries"][2]["used_by"] = []
+check("dead entry is red", has(run(d)[0], "dead entry"), run(d)[0])
 
 d = base()
-d["entries"][2]["used_by"] = [T + "docs/a.md"]
-check("a hand-kept used_by field is red (it is not a key of an entry)", has(run(d)[0], "keys are not"), run(d)[0])
+d["entries"][2]["used_by"] = [T + "docs/none.md"]
+check("used_by absent file is red", has(run(d)[0], "not a tracked file"), run(d)[0])
+
+d = base()
+d["entries"][2]["used_by"] = [T + "verify/gates.d/g.json"]
+check("used_by file that does not cite the id is red", has(run(d)[0], "does not cite"), run(d)[0])
 
 d = base()
 d["entries"][2]["owner"] = "L9"
@@ -140,6 +146,10 @@ d["entries"][2]["pending"] = "claude/x@abcdef1"
 check("a pending key is red (the field is removed)", has(run(d)[0], "keys are not"), run(d)[0])
 
 d = base()
+d["entries"][2]["used_by"] = [T + "other/branch.md"]
+check("used_by of a file that is not in the tree is red", has(run(d)[0], "not a tracked file"), run(d)[0])
+
+d = base()
 d["entries"][2]["removed_by"] = "gate:later"
 check("removed_by of a gate that does not exist is red", has(run(d)[0], "removed_by"), run(d)[0])
 
@@ -152,8 +162,8 @@ for i, ow, ok in ((250, "L3a", True), (250, "L3b", False), (700, "L6A", True), (
     d = base()
     d["entries"][2]["id"] = asm(i)
     d["entries"][2]["owner"] = ow
-    cited = dict(FILES, **{T + "docs/a.md": FILES[T + "docs/a.md"] + " %s" % asm(i)})
-    e = G.judge_registry(d, set(cited), cited.__getitem__, {"g"})[0]
+    d["entries"][2]["used_by"] = [T + "docs/a.md"]
+    e = run(d)[0]
     check("id %d owner %s range %s" % (i, ow, "green" if ok else "red"), ("id-range" not in codes(e)) == ok, e)
 d = base()
 d["entries"][2]["id"] = asm(1)
@@ -349,7 +359,7 @@ for name, path, body in (("a .py comment", T + "verify/gate_x.py", "x = 1  # res
 rc, res = gate(tree({T + "data.json": '{"a": "assumption"}'}))
 check("gate: a json file is data, not a mention", rc == 0, (rc, res))
 d = base()
-d["entries"].append({"id": asm(3), "text": "t", "aliases": [], "status": "OWNER",
+d["entries"].append({"id": asm(3), "text": "t", "used_by": [T + "docs/a.md"], "aliases": [], "status": "OWNER",
                      "decision": {"file": "CLAUDE.md", "quote": "1. the compiler is correct;"}})
 rc, res = gate(tree({T + "docs/a.md": "x %s %s %s %s\n" % (asm(1), asm(2), asm(3), asm(10))}, d))
 check("gate: a tenth OWNER entry is red", rc == 2, (rc, res))
@@ -369,7 +379,7 @@ check("gate: a retired id in the registry only is green", rc == 0, (rc, res))
 # the full findings file: uncapped, sorted, counted per code, named in the summary line
 d = base()
 for i in range(60):
-    d["entries"].append({"id": asm(100 + i), "text": "", "aliases": [], "status": "REMOVE",
+    d["entries"].append({"id": asm(100 + i), "text": "", "used_by": [T + "docs/a.md"], "aliases": [], "status": "REMOVE",
                          "removed_by": "planned: a gate", "owner": "L5"})
 out = tempfile.mkdtemp()
 td = tree(None, d)

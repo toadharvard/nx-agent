@@ -1,5 +1,56 @@
 {
  "format": "fnvnx-oracle/1",
+ "test_guest_scripts.py": {
+  "references": [
+   {
+    "anchor": "## Link: the guest ELF",
+    "kind": "spec",
+    "path": "ports/fnv-nx/verify/RECIPE.md"
+   }
+  ],
+  "subject": [
+   "ports/fnv-nx/link/guest.ld",
+   "ports/fnv-nx/link/guest_image.ld",
+   "ports/fnv-nx/link/guest.json"
+  ]
+ },
+ "test_modpath.py": {
+  "references": [
+   {
+    "anchor": "### Declared imports of a generator's tool (`imports`)",
+    "kind": "spec",
+    "path": "ports/fnv-nx/verify/RECIPE.md"
+   }
+  ],
+  "subject": [
+   "ports/fnv-nx/verify/recipe.py",
+   "ports/fnv-nx/verify/gate_admit.py"
+  ]
+ },
+ "test_roottables.py": {
+  "references": [
+   {
+    "anchor": "## Declared-machine bodies (owner decision of 2026-11-11, CLAUDE.md \"The declared machine\")",
+    "kind": "spec",
+    "path": "ports/fnv-nx/verify/VERDICT.md"
+   }
+  ],
+  "subject": [
+   "ports/fnv-nx/verify/objstub.py"
+  ]
+ },
+ "test_synth_names.py": {
+  "references": [
+   {
+    "anchor": "## Link: the guest ELF",
+    "kind": "spec",
+    "path": "ports/fnv-nx/verify/RECIPE.md"
+   }
+  ],
+  "subject": [
+   "ports/fnv-nx/verify/recipe.py"
+  ]
+ },
  "tests": {
   "test_a64access.py": {
    "references": [
@@ -281,6 +332,18 @@
     "ports/fnv-nx/farm/setup_verdict_env.sh",
     "ports/fnv-nx/verify/env.json",
     "ports/fnv-nx/verify/a64access.cc"
+   ]
+  },
+  "test_expand_once.py": {
+   "references": [
+    {
+     "anchor": "### `foreach` (one step per table row)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py"
    ]
   },
   "test_extcache_race.py": {
@@ -969,10 +1032,35 @@
     "ports/fnv-nx/verify/recipe.py"
    ]
   },
+  "test_plugin_compiler.py": {
+   "references": [
+    {
+     "anchor": "## Plugins (`fnvnx_order`, `fnvnx_ftoi`, ...)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
   "test_plugins.py": {
    "references": [
     {
      "anchor": "## Plugins (`fnvnx_order`, `fnvnx_ftoi`, ...)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py",
+    "ports/fnv-nx/verify/unitstage.py"
+   ]
+  },
+  "test_pp_input.py": {
+   "references": [
+    {
+     "anchor": "## The preprocessed text of a unit",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/RECIPE.md"
     }
@@ -1111,6 +1199,30 @@
     "ports/fnv-nx/verify/recipe.py"
    ]
   },
+  "test_resolve_once.py": {
+   "references": [
+    {
+     "anchor": "## One resolution per root",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
+  "test_rootfs_memo.py": {
+   "references": [
+    {
+     "anchor": "## verify/recipe.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
   "test_rootsrc.py": {
    "references": [
     {
@@ -1207,6 +1319,19 @@
    ],
    "subject": [
     "ports/fnv-nx/verify/sdcheck.py"
+   ]
+  },
+  "test_selftests_universe.py": {
+   "references": [
+    {
+     "anchor": "## verify/gate_tests.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_tests.py",
+    "ports/fnv-nx/verify/gates.d/selftests.json"
    ]
   },
   "test_sha256_isa.py": {

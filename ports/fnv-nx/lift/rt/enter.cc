@@ -25,14 +25,14 @@
 
    The loop in each of them is the non-local-transfer loop of every lifted function (README): while the address the last `ret` popped (c->ra) is not
    the sentinel of this activation, serve it as an entry through the dispatcher. */
+#define FNVL_RA_WRITE 1
 #include "fnvl.h"
 #include "imp.h"
+#include "fnvnx_target.h"
 struct fnvnx_guest_ret { u32 eax, edx; double st0; };
 extern "C" {
 void fnvl_raise_ud(u32 addr);
 struct cpu **fnvl_host_tls_slot(void);
-void fnvnx_susp_attach(void *cpu, volatile u32 *susp, u32 *ra);   /* platform/win32/thread.cpp: the thread's suspension word and ra, for the life of its frame */
-void fnvnx_susp_detach(void *cpu);
 u32 fnvl_thread_main(u32 eip, u32 sp, u32 teb) __attribute__((noinline));
 void fnvl_attach_main(void *mem, u32 sp, u32 teb) __attribute__((noinline));
 void fnvl_detach_main(void) __attribute__((noinline));
@@ -56,7 +56,7 @@ static inline void fp_park(void)
     u64 a, b;
     __asm__ volatile("mrs %0, fpcr\n mrs %1, fpsr" : "=r"(a), "=r"(b));
     c->hfpcr = (u32)a; c->hfpsr = (u32)b;
-    a = 0; __asm__ volatile("msr fpcr, %0" :: "r"(a));
+    a = FNVNX_FPCR; __asm__ volatile("msr fpcr, %0" :: "r"(a));
 }
 
 extern "C" u32 fnvl_thread_main(u32 eip, u32 sp, u32 teb)
@@ -64,7 +64,6 @@ extern "C" u32 fnvl_thread_main(u32 eip, u32 sp, u32 teb)
     struct cpu cpu;
     cpu_reset(&cpu, sp, teb);
     c = &cpu; *fnvl_host_tls_slot() = c;
-    fnvnx_susp_attach(c, &c->susp, &c->ra);
     eax = ecx = edx = ebx = ebp = esi = edi = 0; esp = sp;
     fp_set(0, 0);
     M32(sp) = FNVL_SENT;
@@ -72,7 +71,6 @@ extern "C" u32 fnvl_thread_main(u32 eip, u32 sp, u32 teb)
     do { u32 t = c->ra; REGS(); fnvl_dispatch(t)(); REGS(); } while (!(c->ra == FNVL_SENT && esp > sp));
     u32 r = eax;
     fp_set(0, 0);
-    fnvnx_susp_detach(c);
     *fnvl_host_tls_slot() = 0;
     return r;
 }
@@ -82,10 +80,9 @@ extern "C" void fnvl_attach_main(void *mem, u32 sp, u32 teb)
     struct cpu *p = (struct cpu *)mem;
     cpu_reset(p, sp, teb);
     *fnvl_host_tls_slot() = p;
-    fnvnx_susp_attach(p, &p->susp, &p->ra);
 }
 
-extern "C" void fnvl_detach_main(void) { fnvnx_susp_detach(*fnvl_host_tls_slot()); *fnvl_host_tls_slot() = 0; }
+extern "C" void fnvl_detach_main(void) { *fnvl_host_tls_slot() = 0; }
 
 /* esp and TEB of the guest thread this host thread carries: during an import call, the esp of the call (it points at the return address) */
 extern "C" void fnvl_current_main(u32 *sp, u32 *teb) { struct cpu *p = *fnvl_host_tls_slot(); *sp = p->r[4]; *teb = p->teb; }
@@ -96,6 +93,10 @@ extern "C" void fnvl_current_main(u32 *sp, u32 *teb) { struct cpu *p = *fnvl_hos
    - fnvl_invoke_regs_main, fnvnx_guest_invoke_regs: a BRIDGE called from a native body (rt/dispatch.c, tools/bridgegen.py). A native body implements an exe function, so it
      runs under the guest FPCR/FPSR itself and nothing was parked: the entry leaves both registers alone, whatever c->hfpcr/c->hfpsr hold.
    The kind is the entry point, not a state: no flag is read at run time. */
+/* the one non-local transfer of an entry body (imp.h): ra and esp are the target's, then the one non-local exit */
+extern "C" __attribute__((noreturn)) void fnvl_native_transfer(u32 eip, u32 sp) { c->ra = eip; esp = sp; fnvl_native_exit(); }
+/* the raise protocol's resume address (imp.h) */
+extern "C" void fnvl_raise_resume(u32 eip) { c->ra = eip; }
 /* the one non-local exit from native frames (imp.h): the frame on top of c->nf holds the __builtin_setjmp point of the entry that called the native code */
 extern "C" __attribute__((noreturn)) void fnvl_native_exit(void) { __builtin_longjmp((void **)c->nf->jb, 1); }
 

@@ -118,9 +118,6 @@ def h_shift(cx, ins):
 
 
 
-@op('wait', 'fnclex', 'fwait')
-def h_nop(cx, ins):
-    pass
 
 
 
@@ -151,53 +148,11 @@ def bitstr(cx, ins, body):
 
 
 
-@op('salc')
-def h_salc(cx, ins):
-    cx.em('eax=(eax&~0xffu)|(cf?0xffu:0u);')
-
-
-
-
-
-
-
-
 @op('cmpxchg8b')
 def h_cmpxchg8b(cx, ins):
     ea = cx.ea(ins, cx.ops[0])
     cx.em('{ u32 ad=%s; u64 d=%s64(ad); if(d==(((u64)edx<<32)|eax)){ zf=1; %s64(ad)=((u64)ecx<<32)|ebx; } else { zf=0; eax=(u32)d; edx=(u32)(d>>32); %s64(ad)=d; } }' % (ea, cx.macc, cx.macc, cx.macc))
 
 
-
-
-@op('aaa', 'aas')
-def h_aaa(cx, ins):
-    if cx.m == 'aaa':
-        cx.em('{ if((eax&0xfu)>9||af){ eax=(eax&0xffff0000u)|((eax+0x106u)&0xffffu); af=cf=1; } else af=cf=0; eax&=~0xf0u; { u32 r=eax&0xffu; zf=r==0; sf=(r>>7)&1; pf=PAR(r); of=0; } }')
-    else:
-        cx.em('{ if((eax&0xfu)>9||af){ eax=(eax&0xffff0000u)|((eax-0x106u)&0xffffu); af=cf=1; } else af=cf=0; eax&=~0xf0u; { u32 r=eax&0xffu; zf=r==0; sf=(r>>7)&1; pf=PAR(r); of=0; } }')
-
-
-@op('daa', 'das')
-def h_daa(cx, ins):
-    if cx.m == 'daa':
-        cx.em('{ u32 al=eax&0xffu, ol=al, oc=cf; cf=0; if((al&0xfu)>9||af){ al=al+6; cf=oc||(al>0xffu); af=1; } else af=0; al&=0xffu; if(ol>0x99u||oc){ al=(al+0x60u)&0xffu; cf=1; } else cf=0; eax=(eax&~0xffu)|al; zf=al==0; sf=(al>>7)&1; pf=PAR(al); of=0; }')
-    else:
-        cx.em('{ u32 al=eax&0xffu, ol=al, oc=cf; cf=0; if((al&0xfu)>9||af){ cf=oc||(al<6); al=(al-6)&0xffu; af=1; } else af=0; if(ol>0x99u||oc){ al=(al-0x60u)&0xffu; cf=1; } eax=(eax&~0xffu)|al; zf=al==0; sf=(al>>7)&1; pf=PAR(al); of=0; }')
-
-
-@op('aam', 'aad')
-def h_aam(cx, ins):
-    imm = ins.bytes[1]
-    if cx.m == 'aad':
-        cx.em('{ u32 al=((eax&0xffu)+((eax>>8)&0xffu)*0x%xu)&0xffu; eax=(eax&0xffff0000u)|al; zf=al==0; sf=(al>>7)&1; pf=PAR(al); cf=of=af=0; }' % imm)
-        return
-    if imm == 0:
-        cx.nonlocal_ = True
-        cx.raises.add(cx.a)
-        cx.em('SYNC_OUT; REGS(); FNVL_RAISE(FNVL_DE0,0x%xu); REGS(); SYNC_IN; goto nonlocal;' % cx.a)
-        cx.term = True
-        return
-    cx.em('{ u32 al=eax&0xffu; u32 q=al/0x%xu, rm=al%%0x%xu; eax=(eax&0xffff0000u)|(q<<8)|rm; zf=rm==0; sf=(rm>>7)&1; pf=PAR(rm); cf=of=af=0; }' % (imm, imm))
 
 

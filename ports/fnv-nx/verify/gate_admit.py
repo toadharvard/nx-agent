@@ -2,10 +2,12 @@
 """Gate "admit" (fnvnx-gate/1): nothing is in the trunk without the gates that close its classes of failure.
     python3 -I gate_admit.py        run in the checkout root (a git worktree), env GATE_OUT; writes GATE_OUT/admit.json
 
-Rule. verify/admit.json ("fnvnx-admit/1") lists the roots of the port tree: {"path", "class", ["recipe"], ["imports"], ["entry"]}; the gate set of a root is derived: the gates of verify/gates.d whose `covers` holds the root class (gatesdir.root_class), so no table here restates it.
+Rule. verify/admit.json ("fnvnx-admit/1") lists the roots of the port tree: {"path", "class", ["recipe"], ["trees"], ["entry"]} (the cross-root Python imports of a root are derived from its sources, derived_imports); the gate set of a root is derived: the gates of verify/gates.d whose `covers` holds the root class (gatesdir.root_class), so no table here restates it.
 `entry` (class tool: required, may be empty): the stage entry points of the root, .py files inside its trees. gate_pure's universe is the
 import closure of these and of the `generated` tools of the recipes; a script only a gate driver runs is not an entry point.
-A row is one root with one tree, its "path"; a `trees` list is red (a second tree is a second root that the first declares in `imports`). Two roots never share a tree; a root may lie inside another (a header root of a product root's include directory, a generated-only product root inside
+`trees` (optional): the list of the directories (or exact files) of one root, at least two, the first equal to "path"; the root's
+universe is their union, and its python is judged in one puregate run, so trees that import each other form ONE root with no
+file moved. Two roots never share a tree; a root may lie inside another (a header root of a product root's include directory, a generated-only product root inside
 a tool root): a file belongs to the NEAREST root, the deepest one that contains it. The root is named by "path" in `imports`.
 `imports` (a root's python cross-root imports): a list of paths of other admitted roots; "pure" (gate_pure.py) judges the root
 with its own directory and the parent directory of each imported root as import bases, so a root's python may import another
@@ -42,7 +44,9 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import gatesdir  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import gatesdir  # noqa: E402
 
 TREE = "ports/fnv-nx"
 ADMIT = TREE + "/verify/admit.json"
@@ -54,42 +58,40 @@ HOST_READERS = (TREE + "/verify", TREE + "/farm")
 
 
 def trees(r):
-    """The tree of an admit root, as a list of one: its path."""
-    return [r.get("path", "")]
+    """The trees of an admit root: its `trees` list, else [path]."""
+    t = r.get("trees")
+    return list(t) if isinstance(t, list) else [r.get("path", "")]
+
+
+from fnvnx.verify.toolflags_policy import IMPORT_TOP as MODULE_TOP  # noqa: E402  # the one top-level module name of every project module (checked against the pinned host Python by recipe.module_top_errors)
+
+
+def module_name(path, tree):
+    """The ONE module path of a root or tree PATH: `fnvnx.` + its path relative to TREE with `/` replaced by `.` (render/total -> `fnvnx.render.total`), or None below/outside TREE."""
+    rel = os.path.relpath(os.path.normpath(path), tree)
+    if rel.startswith("..") or rel == ".":
+        return None
+    return ".".join([MODULE_TOP] + rel.split(os.sep))
+
+
+def module_file(name):
+    """The tree-relative path stem of the qualified module NAME (`fnvnx.render.total.x` -> `render/total/x`), or None when NAME is not under MODULE_TOP."""
+    parts = name.split(".")
+    return "/".join(parts[1:]) if parts[0] == MODULE_TOP and len(parts) > 1 else None
 
 
 def import_roots(imports, tree):
     """{module prefix: root path} of the roots a root DECLARES in admit.json `imports` (IMPORTS: their repo paths; TREE: the project tree, ports/fnv-nx): the ONE rule of
-    cross-root Python imports. A declared root R is importable under exactly one module path: its path relative to TREE with `/` replaced by `.` (render/total ->
-    `render.total`, so `import render.total.x`). Every consumer calls this: recipe.foreign_imports, the /imp mount (R is mounted at /imp/<that relative path>, /imp is
+    cross-root Python imports. A declared root R is importable under exactly one module path: `fnvnx.` + its path relative to TREE with `/` replaced by `.` (render/total ->
+    `fnvnx.render.total`, so `import fnvnx.render.total.x`; `fnvnx` is the one top-level name, so no project module can shadow a standard-library or pinned one: `platform`). Every consumer calls this: recipe.foreign_imports, the /imp mount (R is mounted at /imp/fnvnx/<that relative path>, /imp is
     the PYTHONPATH), gate_pure (the --base of the run is TREE) and gate_abspath. The packages are namespace packages (PEP 420): no __init__.py is invented. A bare
     import of a module of another root (`import x` for render/total/x.py) is not a spelling of this rule: it is red, with the qualified name as the hint."""
     out = {}
     for r in imports:
-        rel = os.path.relpath(os.path.normpath(r), tree)
-        if rel.startswith(".."):
-            raise ValueError("import root %s lies outside %s" % (r, tree))
-        out[".".join(rel.split(os.sep))] = r
-    return out
-
-
-def import_namespaces(prefixes):
-    """The dotted prefixes that are namespace packages of PREFIXES (`render` for `render.total`): importable, no file of their own."""
-    return {".".join(p.split(".")[:k]) for p in prefixes for k in range(1, len(p.split(".")))}
-
-
-def import_roots(imports, tree):
-    """{module prefix: root path} of the roots a root DECLARES in admit.json `imports` (IMPORTS: their repo paths; TREE: the project tree, ports/fnv-nx): the ONE rule of
-    cross-root Python imports. A declared root R is importable under exactly one module path: its path relative to TREE with `/` replaced by `.` (render/total ->
-    `render.total`, so `import render.total.x`). Every consumer calls this: recipe.foreign_imports, the /imp mount (R is mounted at /imp/<that relative path>, /imp is
-    the PYTHONPATH), gate_pure (the --base of the run is TREE) and gate_abspath. The packages are namespace packages (PEP 420): no __init__.py is invented. A bare
-    import of a module of another root (`import x` for render/total/x.py) is not a spelling of this rule: it is red, with the qualified name as the hint."""
-    out = {}
-    for r in imports:
-        rel = os.path.relpath(os.path.normpath(r), tree)
-        if rel.startswith(".."):
-            raise ValueError("import root %s lies outside %s" % (r, tree))
-        out[".".join(rel.split(os.sep))] = r
+        nm = module_name(r, tree)
+        if nm is None:
+            raise ValueError("import root %s lies outside (or is) %s" % (r, tree))
+        out[nm] = r
     return out
 
 
@@ -107,38 +109,85 @@ def recipe_paths(r):
     return out + [v["recipe"] for v in vs.values() if isinstance(v, dict) and "recipe" in v] if isinstance(vs, dict) else out
 
 
-def imports_errors(roots):
-    """Errors of the declared imports of ROOTS (list of admit root dicts): an unknown root, itself, a repeat, a cycle."""
-    by = {r.get("path"): r for r in roots}
-    errs, edges = [], {}
-    for r in roots:
-        imp = r.get("imports", [])
-        p = r.get("path")
-        if not isinstance(imp, list) or any(not isinstance(i, str) for i in imp):
-            errs.append("root %s: imports is not a list of paths" % p)
-            continue
-        if len(set(imp)) != len(imp):
-            errs.append("root %s: imports repeats a root" % p)
-        for i in imp:
-            if i == p:
-                errs.append("root %s imports itself" % p)
-            elif i not in by:
-                errs.append("root %s: import %s is not an admitted root" % (p, i))
-        edges[p] = [i for i in imp if i in by and i != p]
-    state = {}
+_IMPORT_MEMO = {}   # (abspath, mtime_ns, size) -> ([dotted module names a file imports], [line of a dynamic import])
 
-    def visit(n, stack):
-        state[n] = 1
-        for m in sorted(edges.get(n, [])):
-            if state.get(m) == 1:
-                errs.append("imports cycle: " + " -> ".join(stack[stack.index(m):] + [n, m] if m in stack else [n, m]))
-            elif m not in state:
-                visit(m, stack + [n])
-        state[n] = 2
-    for n in sorted(edges):
-        if n not in state:
-            visit(n, [])
-    return errs
+
+def file_imports(path):
+    """([dotted names a tracked .py file imports at any depth], [lines of dynamic imports]): by `ast` over Import and ImportFrom (`from m import a` names m and m.a; a relative
+    import names nothing: it stays inside its package), and over importlib.import_module / __import__ calls, whose literal argument is a name and whose non-literal one is a
+    dynamic import. An unparsable file names nothing (the python gates judge it)."""
+    import ast
+    st = os.stat(path)
+    key = (os.path.abspath(path), st.st_mtime_ns, st.st_size)
+    if key not in _IMPORT_MEMO:
+        names, dyn = [], []
+        try:
+            with open(path, "rb") as f:
+                tree = ast.parse(f.read())
+        except (SyntaxError, ValueError):
+            tree = None
+        for n in ast.walk(tree) if tree is not None else ():
+            if isinstance(n, ast.Import):
+                names += [a.name for a in n.names]
+            elif isinstance(n, ast.ImportFrom) and not n.level and n.module:
+                names += [n.module] + [n.module + "." + a.name for a in n.names]
+            elif isinstance(n, ast.Call):
+                fn = n.func.attr if isinstance(n.func, ast.Attribute) else n.func.id if isinstance(n.func, ast.Name) else None
+                if fn in ("import_module", "__import__"):
+                    a0 = n.args[0] if n.args else None
+                    if isinstance(a0, ast.Constant) and isinstance(a0.value, str):
+                        names.append(a0.value)
+                    else:
+                        dyn.append(n.lineno)
+        _IMPORT_MEMO[key] = (names, dyn)
+    return _IMPORT_MEMO[key]
+
+
+def derived_imports(rows, files, repo="."):
+    """({root path: sorted paths of the OTHER roots whose modules its tracked .py files import}, [errors]): the ONE rule of cross-root Python imports, derived from the
+    sources, never declared. ROWS: the admit root dicts; FILES: the tracked paths. A file belongs to the nearest root (longest tree). An import resolves by its
+    qualified module path (import_roots: the deepest root whose prefix it names); a standard-library, pinned or root-local module is no edge. A dynamic import
+    (importlib.import_module / __import__ with a non-literal argument) is an error: its edge cannot be derived. A bare module of another root (`import x`) is no
+    spelling of this rule (the stage tools' import closure makes it red, recipe.foreign_imports)."""
+    paths = sorted({r.get("path", "") for r in rows})
+    prefixes = {}
+    for p in paths:
+        nm = module_name(p, TREE)
+        if nm:
+            prefixes[nm] = p
+    trees_of = sorted(((t, r["path"]) for r in rows for t in trees(r)), key=lambda x: -len(x[0]))
+    edges = {p: set() for p in paths}
+    errs = []
+    for f in files:
+        if not f.endswith(".py"):
+            continue
+        own = next((p for t, p in trees_of if f == t or f.startswith(t + "/")), None)
+        if own is None:
+            continue
+        names, dyn = file_imports(os.path.join(repo, f))
+        errs += ["%s:%d: a dynamic import (importlib.import_module or __import__ with a non-literal argument): its root edge cannot be derived" % (f, ln) for ln in dyn]
+        for nm in names:
+            hit = [pre for pre in prefixes if nm == pre or nm.startswith(pre + ".")]
+            if hit:
+                r = prefixes[max(hit, key=len)]
+                if r != own:
+                    edges[own].add(r)
+    closed = {}
+    for p in edges:   # a module of a root imports modules of other roots: a root's import roots are the transitive closure of the edges (the stage mounts only the closure files of those trees)
+        seen, todo = set(), list(edges[p])
+        while todo:
+            q = todo.pop()
+            if q != p and q not in seen:
+                seen.add(q)
+                todo += edges.get(q, ())
+        closed[p] = sorted(seen)
+    return closed, errs
+
+
+def imports_errors(roots):
+    """Errors of the `imports` field of ROOTS (admit root dicts): there is none, the imports of a root are derived (derived_imports)."""
+    return ["root %s: admit.json `imports` is derived from the sources of the root (derived_imports): delete the field" % r.get("path")
+            for r in roots if "imports" in r]
 
 
 def is_test_file(f):
@@ -146,42 +195,7 @@ def is_test_file(f):
     return b == "build.json" or (b.startswith("test_") and b.endswith(".py")) or "/tests/" in f
 
 
-def cross_root_bare(files, admit, read):
-    """{file: reason} of the tracked .py files that import a module of ANOTHER admitted root by its bare name (RULE QUALIFIED-IMPORT, one module path per module): the
-    module table is the top-level .py files of each admitted root, and a root's module is imported by its qualified path (`contract.store`, `lift.proof.formgate`: the root's
-    path below TREE, `/` as `.`, import_roots) from every file of every root. A bare name that is a sibling in the file's own directory, or a top-level module of the file's own
-    root, is the file's own (it resolves first); any other bare name of a module of a root is the finding. READ(path) -> text (a file that does not parse is not judged here)."""
-    import ast
-    rts = sorted({r["path"] for r in admit.get("roots", []) if isinstance(r.get("path"), str) and r.get("class") != "doc"}, key=len, reverse=True)
-    root_of = lambda f: next((r for r in rts if f.startswith(r + "/")), None)   # noqa: E731
-    mods = {}
-    for f in files:
-        r = root_of(f)
-        if r and f.endswith(".py") and f.rsplit("/", 1)[0] == r:
-            mods.setdefault(f.rsplit("/", 1)[1][:-3], []).append(f)
-    std = set(sys.stdlib_module_names)
-    bad = {}
-    for f in files:
-        if not f.endswith(".py"):
-            continue
-        r = root_of(f)
-        try:
-            tree = ast.parse(read(f))
-        except (OSError, SyntaxError, ValueError):
-            continue
-        for n in ast.walk(tree):
-            names = [a.name for a in n.names] if isinstance(n, ast.Import) else [n.module] if isinstance(n, ast.ImportFrom) and not n.level and n.module else []
-            for full in names:
-                m = full.split(".")[0]
-                hits = mods.get(m)
-                if m in std or not hits or any(x.rsplit("/", 1)[0] in (f.rsplit("/", 1)[0], r) for x in hits):
-                    continue
-                bad.setdefault(f, "imports %s bare: a module of %s (qualified: %s)" % (
-                    m, ", ".join(sorted({root_of(x) for x in hits})), ", ".join(sorted(".".join(os.path.relpath(root_of(x), TREE).split(os.sep) + [m]) for x in hits))))
-    return bad
-
-
-def judge(files, admit, exists, ref_paths=frozenset(), read=None):
+def judge(files, admit, exists, ref_paths=frozenset(), repo=None):
     """-> (uncertified {path: reason}, root errors [str]); pure function of its arguments. REF_PATHS: the tracked paths that a tests/oracle.json
     reference (spec, contract, model) points at; the files of a root of class ref must all be among them."""
     roots, errors = [], []
@@ -192,8 +206,9 @@ def judge(files, admit, exists, ref_paths=frozenset(), read=None):
         why = []
         if "gates" in r:
             why.append('a row lists "gates": the gate set is derived from gates.d `covers`; a row names root and class only')
-        if "trees" in r:
-            why.append('a row names one tree, its "path": a second tree is a second root, with the import declared in `imports`')
+        if "trees" in r and not (isinstance(r["trees"], list) and len(r["trees"]) >= 2 and r["trees"][0] == path
+                                 and len(set(r["trees"])) == len(r["trees"]) and all(isinstance(t, str) for t in r["trees"])):
+            why.append("trees is not a list of at least two distinct paths starting with path")
         if cls == "tool":
             en = r.get("entry")
             if not isinstance(en, list) or any(not isinstance(e, str) or not e.endswith(".py") or not exists(e)
@@ -231,6 +246,8 @@ def judge(files, admit, exists, ref_paths=frozenset(), read=None):
                         why.append("recipe %r is not an existing file inside the root" % (rec,))
         roots.append((trees(r) if not why else [path], why))
     errors += imports_errors(admit.get("roots", []))
+    if repo is not None:
+        errors += derived_imports(admit.get("roots", []), files, repo)[1]
     paths = [t for ts, _ in roots for t in ts]
     errors += ["trees %s is named twice" % t for t in sorted({t for t in paths if paths.count(t) > 1})]   # nested roots are fine: a file belongs to the nearest one
     cls_of = {r.get("path", ""): r.get("class") for r in admit.get("roots", [])}
@@ -248,9 +265,6 @@ def judge(files, admit, exists, ref_paths=frozenset(), read=None):
             bad[f] = "root %s is a ref root: %s" % (hit[0][0], "a build file or a test is not a reference" if is_test_file(f)
                                                    else "the file is not the path of a reference of any tests/oracle.json")
     errors += ["root %s: %s" % (ts[0], "; ".join(why)) for ts, why in roots if why]
-    if read is not None:
-        for f, why in cross_root_bare(files, admit, read).items():
-            bad.setdefault(f, why)
     return bad, errors
 
 
@@ -269,16 +283,13 @@ def main():
                         ref_paths.update(x["path"] for x in e.get("references", []) if isinstance(x, dict) and x.get("kind") in ("spec", "contract", "model") and isinstance(x.get("path"), str))
             except (OSError, ValueError, AttributeError):
                 pass          # gate oracle judges a malformed declaration; here it names no reference
-    def read(p):
-        with open(p, encoding="utf-8") as fh:
-            return fh.read()
-    bad, errors = judge(files, admit, os.path.isfile, ref_paths, read)
+    bad, errors = judge(files, admit, os.path.isfile, ref_paths, ".")
     red = bool(bad or errors)
     certified = 0 if errors else len(files) - len(bad)
     detail = "%d files, %d roots; %s" % (len(files), len(admit.get("roots", [])),
                                          "; ".join(sorted(errors))[:400] if errors else "every file under a gated root")
     res = {"format": "fnvnx-gate/1", "name": "admit", "status": "red" if red else "green", "universe": len(files),
-           "certified": certified, "uncertified": sorted(bad)[:50], "detail": detail}
+           "certified": certified, "uncertified": sorted(bad), "uncertified_n": len(bad), "detail": detail}
     with open(os.path.join(out, "admit.json"), "w") as f:
         json.dump(res, f, indent=1, sort_keys=True)
         f.write("\n")

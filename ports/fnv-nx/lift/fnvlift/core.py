@@ -7,6 +7,8 @@ import bisect
 import re
 import capstone
 from capstone import x86 as X
+import sys
+from . import prov
 
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
 md.detail = True
@@ -70,6 +72,10 @@ class Ctx:
         self.lo, self.hi = addr, addr + size
         self.insns, self.tables, self.taken = insns, tables, taken
         self.L = []
+        self.P = []                              # prov (off by default): the category of each line of L; PX: rewrites of lines after emission (index, category, added bytes); insb: bytes per instruction
+        self.PX = []
+        self.insb = {}
+        self.tag = None
         self.callrets = []
         self.usesfs = False
         self.kinds = set()
@@ -79,10 +85,14 @@ class Ctx:
         self.calls, self.tails = set(), set()    # direct call targets / jumps to entries outside the function (meta, closure of the bench)
         self.nonlocal_ = False                   # a `goto nonlocal` / `goto after_tail` was emitted: the function needs the loop
         self.imports = False
+        self.paths = {}                          # instruction address -> its emission path (the rule of dispatch: `form`, `form+xfer`, `handler:<module>.<name>`); the generate driver writes it as the path column of shapes.tsv
+        self.xfer = False                        # set by f_flow when the current instruction's control-transfer tail was emitted
         self.raises = set()                      # addresses of instructions that can raise: ContinueExecution resumes there, so they are labels of the loop
 
     def em(self, t):
         self.L.append(t)
+        if prov.ON:
+            self.P.append(prov.classify(sys._getframe(1), self.tag))
 
     def lab(self, a):
         return 'L_%08x' % a
@@ -218,11 +228,17 @@ def explore(img, lo, hi, code, start=None, extra=(), fall_hi=None):
 EMIT = None   # the emitter of integer instructions from the proven DSL forms (proof/lift_dsl.py emit_form(cx, ins) -> None | SKIP), called before the hand handlers; None = the hand handlers only. Set by the caller with set_emit (an argument of the generator, no environment); fnvlift imports nothing from proof
 
 
-def set_emit(fn):
-    global EMIT
+MISSING = None   # the CPUID-UD gate (proof/cpufeat.py `missing`): ins -> the flag expressions the declared CPU denies. proof is above fnvlift, so the lifter takes the gate as a function, like EMIT; it has no default
+
+
+def set_emit(fn, missing):
+    """the two functions the layer above gives the lifter: the Form emitter `fn` (or None: the hand handlers only) and the CPUID-UD gate `missing` (required: the lifter never runs without it)"""
+    global EMIT, MISSING
     if fn is not None and not callable(fn):
         raise ValueError('emit %r (want a function or None)' % (fn,))
-    EMIT = fn
+    if not callable(missing):
+        raise ValueError('missing %r (want the CPUID-UD gate function)' % (missing,))
+    EMIT, MISSING = fn, missing
 
 
 JTAB = None      # facts of tools/jtab.py: {site: (lo, hi, targets)} from the `jtab_tables` records of ehtables.json; set by set_jtab()
@@ -256,21 +272,34 @@ def tab_tails(img, insns, lo, hi):
     return sorted(out)
 
 
+def hpath(fn):
+    return 'handler:%s.%s' % (fn.__module__.split('.')[-1], fn.__name__)
+
+
 def dispatch(cx, ins):
-    from . import f_cpufeat, f_sys
+    """emit one instruction; cx.paths[cx.a] records which emission path took it (EMIT from the Form: `form`, or `form+xfer` when the transfer tail of f_flow was emitted too; else the handler)"""
+    from . import f_sys
+    if MISSING is None:
+        raise RuntimeError('core.dispatch: no CPUID-UD gate (core.set_emit(emit, missing))')
     if getattr(ins, 'ud_gap', False):      # a Sail-decided #UD sequence (f_sys.UdIns): no Form, no operands
+        cx.paths[cx.a] = hpath(f_sys.ud_site)
         f_sys.ud_site(cx)
         return
-    if f_cpufeat.missing(ins):         # CPUID-UD rule (f_cpufeat.py): a form the model's CPUID denies is #UD before any handler of any family runs
+    if MISSING(ins):         # CPUID-UD rule (proof/cpufeat.py): a form the model's CPUID denies is #UD before any handler of any family runs
+        cx.paths[cx.a] = hpath(f_sys.ud_site)
         f_sys.ud_site(cx)
         return
+    cx.xfer = False
     if EMIT is not None and EMIT(cx, ins) is not SKIP:
+        cx.paths[cx.a] = 'form+xfer' if cx.xfer else 'form'
         return
     h = OPS.get(cx.m)
     if h is not None and h(cx, ins) is not SKIP:
+        cx.paths[cx.a] = hpath(h)
         return
     for pred, fn in SHAPE_HANDLERS:
         if pred(cx, ins):
+            cx.paths[cx.a] = hpath(fn)
             fn(cx, ins)
             return
     raise Unsupported('insn ' + (cx.pfx + ' ' if cx.pfx else '') + cx.m)
@@ -311,7 +340,8 @@ def gs_guard(cx, ins):
     from . import f_sys
     if ins.mnemonic.split(' ')[-1] in NO_ACCESS:
         return
-    if any(o.type == X.X86_OP_MEM and o.mem.segment == X.X86_REG_CS and o.access & capstone.CS_AC_WRITE for o in ins.operands):
+    form = EMIT is not None and getattr(EMIT, 'covers', lambda i: False)(ins)      # emitted from its Form: the Form carries the code-segment store faults and the null-selector fault of the registers in carried_null (proof/forms.py)
+    if not form and any(o.type == X.X86_OP_MEM and o.mem.segment == X.X86_REG_CS and o.access & capstone.CS_AC_WRITE for o in ins.operands):
         # CS-store: CS is a readable, executable, not writable code segment, so a store through it is #GP(0) (SDM Vol 3 5.3.1 "Limit and Type Checking": writing to a code segment); a load through CS is legal.
         # TRANSITIONAL: "is a store" is taken from capstone's operand access here (hand path); on the DSL path it comes from the certified Form (an explicit AV fault that L3b's builder emits for a store with effective segment CS) once
         # item 23 moves the shape there, and this check then goes away.
@@ -330,6 +360,7 @@ def gs_guard(cx, ins):
             sg = o.mem.segment or (X.X86_REG_SS if o.mem.base in (X.X86_REG_ESP, X.X86_REG_EBP) else X.X86_REG_DS)
             if sg in SEGI: eff.add(SEGI[sg])
     if ins.mnemonic.split(' ')[-1] == 'xlatb': eff.add(3)             # implicit ds:[ebx+al]
+    if form: eff -= EMIT.carried_null()
     g = sorted(i for i in eff if may_null(i))
     if not g:
         return
@@ -343,7 +374,7 @@ def gs_guard(cx, ins):
         if not (r['exception_code'] == 0xC0000005 and r['parameters'] == [0, 0xffffffff] and r['flags'] == 0 and r['eip_advance'] == 0 and r['address'] == 'the faulting instruction'):
             raise Unsupported('null_seg_access row is not the access violation the runtime raises')
         cx.em(f_sys.gp_cond(cx, cond))
-    if any(o.type == X.X86_OP_MEM and o.mem.segment == X.X86_REG_GS and o.access & capstone.CS_AC_WRITE for o in ins.operands):
+    if not form and any(o.type == X.X86_OP_MEM and o.mem.segment == X.X86_REG_GS and o.access & capstone.CS_AC_WRITE for o in ins.operands):
         cx.em(f_sys.gp_cond(cx, 'SELK(c->sel[SEG_GS])==SELK(SEL_CS)'))
 
 
@@ -361,6 +392,17 @@ def may_null(i):
     if path not in _SEGW:
         d = json.load(open(path)); assert d['format'] == 'fnvnx-segwrites/2', d['format']; _SEGW[path] = d['images']
     return _SEGW[path][inputs.get('image')][n]['guard']
+
+
+def sel_set(n):
+    """the selectors the segment register `n` (es ds fs gs ss) can hold in the image being lifted: the sorted list of the SEGWRITES fact (tools/segwrites.py `selectors`), or None = unbounded (the field is absent
+    or null).  The facts are the one source: no byte is scanned here."""
+    import json
+    from . import inputs
+    path = inputs.get('segwrites')
+    if path not in _SEGW:
+        d = json.load(open(path)); assert d['format'] == 'fnvnx-segwrites/2', d['format']; _SEGW[path] = d['images']
+    return _SEGW[path][inputs.get('image')].get(n, {}).get('selectors')
 
 
 def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
@@ -388,6 +430,7 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
         m = ins.mnemonic
         ops = ins.operands
         nxt = a + ins.size
+        i0 = len(cx.L)
         em('%s: ;' % cx.lab(a))
         if a == start or a in uent:
             em('TRACE(0x%xu);' % a)        # every pass over an entry address is a trace event (bench), wherever the function was entered
@@ -405,6 +448,7 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
         cx.b0 = ins.opcode[0]
         cx.modrm = ins.modrm
         if bad_lock:
+            cx.paths[a] = hpath(f_sys.ud_site)
             f_sys.ud_site(cx)                  # LOCK on an instruction that cannot take it (or with a register destination): #UD
         elif f_sys.locked(ins, m, locked):
             # R9 atomic rule (rt/fnvl.h LK_*): the body runs on a private copy of the memory operand, the commit is a compare-and-swap, a lost race restores the registers and flags and runs it again
@@ -427,17 +471,23 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
                 f_flow.jump_out(cx, nxt)
         if cx.xm == 's':
             xc.fix_lines(cx, a, n0)
+        if prov.ON:
+            cx.insb[a] = sum(len(l) + 1 for l in cx.L[i0:])
     for a in sorted(bad):      # bytes that do not decode: the CPU raises #UD there
         cx.nonlocal_ = True
         em('%s: ; SYNC_OUT; REGS(); FNVL_RAISE(%s,0x%xu); REGS(); SYNC_IN; goto nonlocal;' % (cx.lab(a), 'FNVL_UD', a))
     if not order or start != order[0]:       # also an entry whose first byte does not decode: its body is the #UD at that address
         cx.L.insert(0, 'goto %s;' % cx.lab(start))
+        if prov.ON:
+            cx.P.insert(0, ('lift2', 'lift2:entry goto'))
+            cx.PX[:] = [(i + 1, k, d) for i, k, d in cx.PX]
     if cx.nonlocal_:
         labs = sorted(set(x for x in cx.callrets + owns + list(tables_all(tables)) + taken + sorted(cx.raises | bad) if x in insns or x in bad))
         cases = ' '.join('case 0x%xu: %sgoto %s;' % (x, xc.case_pre(cx, x), cx.lab(x)) for x in labs)
         em('after_tail: ; if(esp>E){ SYNC_OUT; return; }')
         em('nonlocal: ; for(;;){ u32 t=c->ra; if(esp>E){ SYNC_OUT; return; } switch(t){ %s default: break; } SYNC_OUT; REGS(); fnvl_dispatch(t)(); REGS(); SYNC_IN; }' % cases)
     body = '\n'.join(cx.L)
+    body0 = body
     # R4 raise-site flush rule (rt/fnvl.h RAISE_OUT / RAISE_IN): every explicit call of the OS dispatcher flushes the EFLAGS and x87 condition-bit locals into struct cpu before it and reloads them after
     fl = 'SYNC_X_IN;' if 'sse' in kinds else ''
     body = body.replace('SYNC_OUT;', 'SYNC_OUT;' + ('SYNC_X_OUT;' if 'sse' in kinds else ''))
@@ -445,10 +495,12 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
     decl = ''.join('extern "C" void L_%08x(void);\n' % t for t in sorted(cx.calls | cx.tails))
     txt = '%sextern "C" void L_%08x(void)\n{ DECL; SYNC_IN;%s%s%s u32 E=esp; %s\n%s\n}\n' % (
         decl, start, xc.decl(cx), fl, ' u32 fsb=c->fs;' if cx.usesfs else '', '', body)
+    if prov.ON:
+        prov.finish(cx, body0, body, txt, decl, xc.decl(cx))
     if cx.usesfs:
         kinds.add('fs')
     meta = dict(addr=start, size=size, selfcalls=cx.selfcalls, callrets=cx.callrets, kinds=sorted(kinds), n=len(order), tables=len(tables),
-                calls=sorted(cx.calls), tails=sorted(cx.tails), noentry=sorted(cx.noentry), tabtails=tab_tails(img, insns, lo, hi))
+                calls=sorted(cx.calls), tails=sorted(cx.tails), noentry=sorted(cx.noentry), tabtails=tab_tails(img, insns, lo, hi), paths=dict(cx.paths))
     return txt, meta
 
 

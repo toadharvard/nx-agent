@@ -19,9 +19,9 @@ def die(msg): sys.stderr.write("gen_bridge: " + msg + "\n"); sys.exit(2)
 ROWS = {}   # native_symbol -> (ret, args): the bridge row of every thunk (D9_ROWS)
 for _l in open(sys.argv[3]).read().splitlines():
     _c = _l.split("\t"); ROWS[_c[6]] = (_c[4], _c[5])
-from gen_impl import cname  # noqa: E402
-from gen_expr import Ctx  # noqa: E402
-from gen_expr import REFS  # noqa: E402
+from fnvnx.render.d3d9.gen.gen_impl import cname  # noqa: E402
+from fnvnx.render.d3d9.gen.gen_expr import Ctx  # noqa: E402
+from fnvnx.render.d3d9.gen.gen_expr import REFS  # noqa: E402
 
 
 

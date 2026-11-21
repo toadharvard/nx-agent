@@ -172,9 +172,10 @@ A site no rule resolves is red in `gates/gate_eh.py` (never skipped), as is a ta
 
 ## Entries: the universe
 
-`tools/universe.py` computes every entry by recursive descent from the decomp function list, call and tail-jump
-targets, the PE entry point and every .reloc'd pointer into `.text` (vtables, callback tables, EH funclets), and
-classifies every byte of `.text`. The exit gate "100 % of exe functions lifted" is measured on that list.
+`tools/universe.py` is the one engine for the exe and every module (`tools/modlift.py`): the roots are the PE entry point, the exports, the TLS callbacks,
+the EH/SEH entries and every relocation target in an executable section that some value occurrence names (an immediate, a `lea` displacement or a relocated
+data word); the universe is the closure of the roots over instruction flow. It classifies every byte of the executable sections. No list of function starts
+is a root. The exit gate "100 % of exe functions lifted" is measured on that universe.
 
 ## The dispatcher table: one generator (`tools/dispgen.py`)
 

@@ -20,9 +20,8 @@ def r3_v_reladdr(a):
     ok = "a0" in cell and not EXCL.search(sent)
     return ok, "MS:%s:%d (register table: v# RelAddr %s; the 'Indexing Registers' prose describes aL indexing without 'only', so it excludes nothing); corroborated by wine 9.0 libs/vkd3d/libs/vkd3d-shader/d3dbc.c:%d (relative-address token of any source register)" % (rp, cn, cell, wn)
 S1 = "MS:dx9-graphics-reference-asm-"
-def legacy_rows(cdir, models, ops, a):
-    sys.path.insert(0, os.path.abspath(cdir))
-    import sm_cases
+def legacy_rows(models, ops, a):
+    from fnvnx.render.shaders.total import sm_cases
     out, conf, resolved = [], [], []
     def R(m, k, f, st, src, rule=""): out.append(dict(model=m, kind=k, feature=f, status=st, source=src, rule=rule))
     inmodel = lambda st, key, m: m in ops.get("%s:%s" % (st, key), {}).get("models", [])

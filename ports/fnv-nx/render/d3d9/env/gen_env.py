@@ -5,7 +5,7 @@ exit 2, naming it): devtype / adapter-format independence, format classes, usage
 Profiles differ only where reported by the `profile differences` line."""
 import hashlib, os, re, struct, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE); import envq  # noqa: E402
+from fnvnx.render.d3d9.env import envq  # noqa: E402
 # OUT SPEC TSV_DIR D3DTYPES_H WINE_DIR D3D9_H D3D9CAPS_H ENV_PIN RULES_IN: the one place that parses the arguments (no default)
 envq.load(sys.argv[4], sys.argv[2], sys.argv[5], sys.argv[6], sys.argv[7])
 TSV_DIR = sys.argv[3]; ENV_PIN = sys.argv[8]; RULES_IN = sys.argv[9]   # ENV_PIN.txt and env_rules.cpp.in: stage arguments from the declared env directory
@@ -151,7 +151,7 @@ def derive(R, DEV):
     leaf = {n: (off, sz) for n, off, sz, k in envq.leaves(ST, "D3DCAPS9")}; capw = lambda img, n: int.from_bytes(img[leaf[n][0]:leaf[n][0] + leaf[n][1]], "little")
     T["DECLTYPES"] = capw(T["CAPS"][0], "DeclTypes")
     if capw(T["CAPS"][1], "DeclTypes") != T["DECLTYPES"]: die("DeclTypes is the same for every device type (nx_env_decltype_supported has no device argument)")
-    if capw(T["CAPS"][0], "DevCaps") & (envq.CAPS["D3DDEVCAPS_RTPATCHES"] | envq.CAPS["D3DDEVCAPS_RTPATCHHANDLEZERO"] | envq.CAPS["D3DDEVCAPS_NPATCHES"]): die("DevCaps has no RTPATCHES / RTPATCHHANDLEZERO / NPATCHES: the device promises no higher-order surfaces, so the bodies of dev/copy_misc.cpp are Wine 9.0's (dlls/d3d9/device.c d3d9_device_DrawRectPatch / d3d9_device_DrawTriPatch: FIXME + D3D_OK, d3d9_device_DeletePatch: FIXME + D3DERR_INVALIDCALL; rows 48-50 of verify/wine_fixme.tsv) and a recording that reports patch caps needs a real implementation instead")
+    if capw(T["CAPS"][0], "DevCaps") & (envq.CAPS["D3DDEVCAPS_RTPATCHES"] | envq.CAPS["D3DDEVCAPS_RTPATCHHANDLEZERO"] | envq.CAPS["D3DDEVCAPS_NPATCHES"]): die("DevCaps has no RTPATCHES / RTPATCHHANDLEZERO / NPATCHES: the device promises no higher-order surfaces, so the bodies of dev/copy_misc.cpp are Wine 9.0's (dlls/d3d9/device.c d3d9_device_DrawRectPatch / d3d9_device_DrawTriPatch: FIXME + D3D_OK, d3d9_device_DeletePatch: FIXME + D3DERR_INVALIDCALL; rows 48-50 of render/d3d9/wine_fixme.tsv) and a recording that reports patch caps needs a real implementation instead")
     if capw(T["CAPS"][0], "StretchRectFilterCaps") & ~(envq.CAPS["D3DPTFILTERCAPS_MINFPOINT"] | envq.CAPS["D3DPTFILTERCAPS_MINFLINEAR"] | envq.CAPS["D3DPTFILTERCAPS_MAGFPOINT"] | envq.CAPS["D3DPTFILTERCAPS_MAGFLINEAR"]): die("StretchRectFilterCaps holds only MIN/MAG POINT/LINEAR bits (nxenv_stretch_filter)")
     T["STRETCHCAPS"] = capw(T["CAPS"][0], "StretchRectFilterCaps")
     T["QMASK"] = QMASK

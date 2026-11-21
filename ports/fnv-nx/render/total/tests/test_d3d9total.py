@@ -17,7 +17,7 @@ rule and must make exactly the ids that check guards uncertified (red):
 The assertion mutations are made on the pinned mirror itself: the test takes the checkout of the translator recipe's mojoshader external from the
 build cache, mutates one file, commits the tree into a bare repository placed in the cache under the new commit, and points the scratch recipe at the new
 commit and tree hash. Plus the stage's tree hash equals verify/cas.py ingest (files, exec bit, symlink, empty dir, and the fetched external)."""
-import argparse, importlib.util, json, os, re, shutil, subprocess, sys, tempfile
+import argparse, json, os, re, shutil, subprocess, sys, tempfile
 from concurrent.futures import ThreadPoolExecutor
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -26,12 +26,11 @@ PORT = os.path.normpath(os.path.join(TOTAL, "..", ".."))
 REPO = os.path.normpath(os.path.join(PORT, "..", ".."))
 PORT_REL = "ports/fnv-nx"
 ROOT = PORT_REL + "/render/total/d3d9total"
-sys.path.insert(0, os.path.join(PORT, "verify"))
-import recipe  # noqa: E402
-_spec = importlib.util.spec_from_file_location("d3d9total_stage", os.path.join(TOTAL, "d3d9total", "stage.py"))
-G = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(G)
-G.ARGS = argparse.Namespace(treehash=os.path.join(PORT, "contract", "treehash.py"), wine=None)
+import types
+_pkg = sys.modules.setdefault("fnvnx", types.ModuleType("fnvnx")); _pkg.__path__ = [PORT]   # a host-run driver: `fnvnx` is ports/fnv-nx (the stage mounts it at /imp/fnvnx)
+from fnvnx.verify import recipe  # noqa: E402
+from fnvnx.render.total.d3d9total import stage as G  # noqa: E402
+G.ARGS = argparse.Namespace(wine=None)
 URL = os.environ.get("ARTIFACTS_URL")
 if not URL:
     raise SystemExit("ARTIFACTS_URL (the artifacts repository of the externals) is required")

@@ -3,14 +3,14 @@
   fnvl_cpuref.h   FNVL_CPUREF_FAMILY/MODEL/STEPPING, FNVL_CPUID1_EAX (SDM Vol 2A cpuid leaf 1 encoding of the identity), FNVL_CPUID1_ECX/EDX, FNVL_MAX_BASIC (included by rt/fnvl_abi.h)
   rcpref.h           FNVL_RCP_REF_VENDOR/FAMILY/MODEL/STEPPING (proof/gate_fpexact.py reads exactly these four defines)
   cpumodel_tab.inc  the vendor, leaf 2/4, 0x80000001 and brand tables of rt/cpumodel.c
-Deterministic, standalone (reads only the two records).   gen_cpuref.py OUTDIR  (recipe stage: inputs the two records of verify/; outputs gen/<the three files>)"""
+Deterministic, standalone (reads only the two records).   gen_cpuref.py OUTDIR INROOT  (recipe stage: inputs the two records of verify/; outputs gen/<the three files>)"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..")) # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import json, os, sys
+ROOT = sys.argv[2]      # the mount of the stage's declared inputs (/in)
 def record(name):
-    """a tracked record of verify/: from the recipe stage's input mount /in when it exists, else from the tree of this file"""
-    rel = 'ports/fnv-nx/verify/' + name
-    for root in ('/in', os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', '..')):
-        if os.path.exists(os.path.join(root, rel)): return json.load(open(os.path.join(root, rel)))
-    raise SystemExit(name + ' not found')
+    """a tracked record of verify/, from the stage's input mount ROOT (argv[2]; the tool derives nothing from its own place)"""
+    return json.load(open(os.path.join(ROOT, 'ports/fnv-nx/verify/' + name)))
 ref = record('cpuref.json'); mod = record('cpuid_model.json')
 I = lambda x: int(x, 0) if isinstance(x, str) else x
 def le32(s): return int.from_bytes(s.encode().ljust(((len(s) + 3) // 4) * 4, b'\0'), 'little')
@@ -24,9 +24,8 @@ def eax1(fam, model, step):
 def hx(v): return '0x%08xu' % v
 def w(p, t): open(p, 'w').write(t)
 EAX = eax1(ref['family'], ref['model'], ref['stepping'])
-for _d in ('/in/ports/fnv-nx/lift/fnvlift', os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'fnvlift')):
-    if os.path.exists(os.path.join(_d, 'cpumodel_bits.py')): sys.path.insert(0, _d); break
-import cpumodel_bits          # the one derivation of the declared machine's feature words, shared with the lifter's feature gate (fnvlift/f_cpufeat.py)
+sys.path.insert(0, os.path.join(ROOT, 'ports/fnv-nx/lift/fnvlift'))
+from fnvnx.lift.fnvlift import cpumodel_bits          # the one derivation of the declared machine's feature words, shared with the lifter's feature gate (proof/cpufeat.py)
 _w = cpumodel_bits.model_words(mod)
 ECX = _w['leaf1_ecx']; EDX = _w['leaf1_edx']
 E1 = [0, 0, _w['ext1_ecx'], _w['ext1_edx']]

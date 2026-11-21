@@ -28,7 +28,8 @@
   {
    "tool": "ports/fnv-nx/lift/tools/gen_faults.py",
    "args": [
-    "/out/gen"
+    "/out/gen",
+    "/in"
    ],
    "inputs": [
     "ports/fnv-nx/lift/fnvlift/faults.json"
@@ -41,7 +42,8 @@
   {
    "tool": "ports/fnv-nx/lift/tools/gen_cpuref.py",
    "args": [
-    "/out/gen"
+    "/out/gen",
+    "/in"
    ],
    "inputs": [
     "ports/fnv-nx/verify/cpuref.json",
@@ -102,6 +104,19 @@
    ],
    "outputs": [
     "gen/fnvl_abi.h"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/gen_copy.py",
+   "args": [
+    "/in/ports/fnv-nx/lift/rt/fnvl_fpc.h",
+    "/out/gen/fnvl_fpc.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/rt/fnvl_fpc.h"
+   ],
+   "outputs": [
+    "gen/fnvl_fpc.h"
    ]
   },
   {
@@ -185,6 +200,16 @@
   },
   {
    "root": "ports/fnv-nx/contract/exporthdr",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/contract/target",
+   "output": "INCLUDE"
+  }
+ ],
+ "include_uses": [
+  {
+   "root": "ports/fnv-nx/contract/target",
    "output": "INCLUDE"
   }
  ],

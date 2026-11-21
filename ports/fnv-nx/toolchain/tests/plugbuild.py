@@ -11,7 +11,7 @@ Recipe stages emit objects only; tests read the object back with the pinned binu
 Tests run as `python3 -I FILE` from the checkout root, so a test inserts its own directory in sys.path to import this."""
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import json
 import os
 import re
@@ -22,12 +22,11 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REAL = os.path.normpath(os.path.join(HERE, '..', '..', '..', '..'))    # checkout root
-sys.path.insert(0, os.path.join(HERE, '..', '..', 'link'))
-from verify import scratch  # noqa: E402
-import elfobj  # noqa: E402
-from verify import recipe  # noqa: E402
-from verify import sandbox  # noqa: E402
-from verify import cas  # noqa: E402
+from fnvnx.verify import scratch  # noqa: E402
+from fnvnx.link import elfobj  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
+from fnvnx.verify import sandbox  # noqa: E402
+from fnvnx.verify import cas  # noqa: E402
 import glob  # noqa: E402
 
 T = 'ports/fnv-nx/'

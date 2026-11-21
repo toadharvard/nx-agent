@@ -4,7 +4,7 @@
      fnvl_raise(code, at)            hardware fault of the instruction at guest address `at` (code: the FNVL_* list of fnvl.h, a total switch) -- called by lifted code
      fnvl_raise_av(access, addr, at) access violation (access 0 read, 1 write, 8 execute); the host fault handler calls it with the guest eip
      fnvl_os_RtlUnwind, fnvl_os_RaiseException   guest entries of the two kernel32 services (stdcall: arguments on the guest stack, `ret 16`)
-   Contract after return: ContinueExecution -> the guest state that the CONTEXT's ContextFlags name is loaded from it (ctx_restore: the exact inverse of ctx_capture, field for field) and c->ra = Context.Eip; a handler that left by a
+   Contract after return: ContinueExecution -> the guest state that the CONTEXT's ContextFlags name is loaded from it (ctx_restore: the inverse of ctx_capture for 48 of the 70 CONTEXT fields, the 14 that Wine's restore ignores too are not read; the 8 fields FOP, FCS, FDS, FSW bits ES/B and EFlags TF/NT/RF have no state in struct cpu: journal/inbox/l3b-w9-ctx.md) and c->ra = Context.Eip; a handler that left by a
    non-local transfer (the exe's __except_handler3/4 jump to their except block) -> registers and c->ra exactly as the handler left them. The
    lifted raise site then runs the non-local loop, which serves Eip when it is a label of the faulting function (the faulting instruction, an
    except/catch continuation) or an entry; it cannot serve any other address (documented limit). Unhandled: fnvl_os_unhandled(record, context)
@@ -141,7 +141,7 @@ static void ctx_restore(u32 x) {
     if (fl & CX_SEGMENTS) { fnvl_seg_set(c, SEG_GS, M32(x + C_GS)); fnvl_seg_set(c, SEG_FS, M32(x + C_FS)); fnvl_seg_set(c, SEG_ES, M32(x + C_ES)); fnvl_seg_set(c, SEG_DS, M32(x + C_DS)); }
     if (fl & CX_INTEGER) { edi = M32(x + C_EDI); esi = M32(x + C_ESI); ebx = M32(x + C_EBX); edx = M32(x + C_EDX); ecx = M32(x + C_ECX); eax = M32(x + C_EAX); }
     if (fl & CX_CONTROL) {
-        ebp = M32(x + C_EBP); c->ra = M32(x + C_EIP); fnvl_seg_set(c, SEG_CS, M32(x + C_CS)); c->eflags = M32(x + C_EFL); esp = M32(x + C_ESP); fnvl_seg_set(c, SEG_SS, M32(x + C_SS));
+        ebp = M32(x + C_EBP); fnvl_raise_resume(M32(x + C_EIP)); fnvl_seg_set(c, SEG_CS, M32(x + C_CS)); c->eflags = M32(x + C_EFL); esp = M32(x + C_ESP); fnvl_seg_set(c, SEG_SS, M32(x + C_SS));
     }
     if (!segs_ok) fnvl_raise_av(0, 0xffffffffu, c->ra);
 }
@@ -210,7 +210,7 @@ extern "C" void fnvl_raise(u32 code, u32 at) {
     switch (code) {
 #include "seh_faults.inc"                                  /* every fault code served by table: generated from fnvlift/faults.json (tools/gen_faults.py) */
     case FNVL_DBGSRV:                                          /* Wine 9.0 unix/signal_i386.c handle_interrupt case 0x2d */
-        if (eax == 1 || eax == 3 || eax == 4 || eax == 5) { c->ra = at + 3; return; }     /* BREAKPOINT_PRINT / LOAD_SYMBOLS / UNLOAD_SYMBOLS / COMMAND_STRING: the service is done, execution continues 3 bytes on, no exception */
+        if (eax == 1 || eax == 3 || eax == 4 || eax == 5) { fnvl_raise_resume(at + 3); return; }     /* BREAKPOINT_PRINT / LOAD_SYMBOLS / UNLOAD_SYMBOLS / COMMAND_STRING: the service is done, execution continues 3 bytes on, no exception */
         nt = 0x80000003u; addr = at + 3; eip = at + 2; np = 3; info[0] = eax; info[1] = ecx; info[2] = edx;    /* Eip += 3, ExceptionAddress = Eip, then setup_raise_exception's Context.Eip-- */
         break;
     }
@@ -227,26 +227,27 @@ extern "C" void fnvl_raise_av(u32 access, u32 addr, u32 at) {
 }
 
 /* guest entry, stdcall: RaiseException(code, flags, nargs, args) */
-FNVNX_EXPORT("kernel32.dll", "RaiseException", fnvl_os_RaiseException, "func");
+FNVNX_EXPORT("kernel32.dll", "RaiseException", fnvl_os_RaiseException, "entry");
 extern "C" void fnvl_os_RaiseException(void) {
     u32 ra = M32(esp), code = M32(esp + 4), fl = M32(esp + 8), n = M32(esp + 12), args = M32(esp + 16), sp = esp + 20, info[15];
     if (n > 15) n = 15;
     for (u32 i = 0; i < n; i++) info[i] = M32(args + 4 * i);
     esp = sp;                                              /* the caller's state after the call returns */
-    fnvl_raise_rec_ctx(code, fl, ra, n, info, ra, sp, CX_EXCEPTION, SW_EFL);
-    c->ra = c->ra;                                         /* ContinueExecution: c->ra = Context.Eip (the return address), registers loaded */
+    if (!fnvl_raise_rec_ctx(code, fl, ra, n, info, ra, sp, CX_EXCEPTION, SW_EFL)) fnvl_native_exit();   /* a handler left by a non-local transfer */
+    fnvl_native_transfer(c->ra, esp);                      /* ContinueExecution: Context.Eip and the registers it loaded */
 }
 
 /* guest entry, stdcall, no arguments: kernel32!DebugBreak = EXCEPTION_BREAKPOINT reported at the return address; continuing resumes there */
-FNVNX_EXPORT("kernel32.dll", "DebugBreak", fnvl_os_DebugBreak, "func");
+FNVNX_EXPORT("kernel32.dll", "DebugBreak", fnvl_os_DebugBreak, "entry");
 extern "C" void fnvl_os_DebugBreak(void) {
     u32 ra = M32(esp), sp = esp + 4, info[1] = { 0 };
     esp = sp;
-    fnvl_raise_rec_ctx(0x80000003u, 0, ra, 1, info, ra, sp, CX_EXCEPTION, SW_EFL);
+    if (!fnvl_raise_rec_ctx(0x80000003u, 0, ra, 1, info, ra, sp, CX_EXCEPTION, SW_EFL)) fnvl_native_exit();   /* a handler left by a non-local transfer */
+    fnvl_native_transfer(c->ra, esp);                      /* ContinueExecution: Context.Eip and the registers it loaded */
 }
 
 /* guest entry, stdcall: RtlUnwind(TargetFrame, TargetIp, ExceptionRecord, ReturnValue) */
-FNVNX_EXPORT("kernel32.dll", "RtlUnwind", fnvl_os_RtlUnwind, "func");
+FNVNX_EXPORT("kernel32.dll", "RtlUnwind", fnvl_os_RtlUnwind, "entry");
 extern "C" void fnvl_os_RtlUnwind(void) {
     u32 ra = M32(esp), target = M32(esp + 4), rec = M32(esp + 12), rv = M32(esp + 16), sp0 = esp, sp = esp + 20;
     if (!rec) { rec = sp0 - REC_SIZE; zero(rec, REC_SIZE); M32(rec) = 0xC0000027u; M32(rec + 12) = ra; sp0 = rec; }
@@ -255,9 +256,8 @@ extern "C" void fnvl_os_RtlUnwind(void) {
     u32 fs0 = c->fs, frame = M32(fs0);
     while (frame != 0xffffffffu && frame != target) {
         u32 disp = esp - 16, r = 1; zero(disp, 16); M32(disp) = frame; esp = disp;
-        if (!call_handler(M32(frame + 4), rec, frame, ctx, disp, &r)) return;      /* the handler left non-locally */
+        if (!call_handler(M32(frame + 4), rec, frame, ctx, disp, &r)) fnvl_native_exit();      /* the handler left non-locally */
         esp = disp + 16;
         M32(fs0) = M32(frame); frame = M32(frame);                                   /* unlink */
     }
-    esp = sp; c->ra = ra;                                                            /* return to the caller (ret 16) */
 }

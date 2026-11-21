@@ -10,9 +10,10 @@ Universe = the stage certificates (entry x translator flag set) plus the link ce
 import json, os, re, sys
 
 REPO = os.getcwd()
-sys.path.insert(0, os.path.join(REPO, "ports", "fnv-nx", "verify"))
-import recipe  # noqa: E402
-import gate_build  # noqa: E402
+import types
+_pkg = sys.modules.setdefault("fnvnx", types.ModuleType("fnvnx")); _pkg.__path__ = [os.path.join(REPO, "ports", "fnv-nx")]   # a host-run driver: `fnvnx` is ports/fnv-nx (the stage mounts it at /imp/fnvnx)
+from fnvnx.verify import recipe  # noqa: E402
+from fnvnx.verify import gate_build  # noqa: E402
 
 ROOT = "ports/fnv-nx/render/shaders/sm_link_sum"
 

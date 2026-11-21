@@ -6,6 +6,8 @@
     packstage.py disp ...      dispgen.py    disp.cc from entries.tsv
     packstage.py inc ...       prelude.py    inc/fnvl_prelude.h and inc/imp.h: the runtime's headers inlined, from the declared rt headers (never a copy in the external)
 Each name runs the named tool's own main with the remaining arguments, unchanged."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import sys
 
@@ -17,18 +19,18 @@ def main(argv):
         sys.stderr.write(__doc__ + '\n'); return 2
     sub, rest = argv[0], argv[1:]
     if sub == 'copy':
-        import cli, packcopy
+        import fnvnx.lift.tools.cli as cli; import fnvnx.lift.tools.packcopy as packcopy
         (a, b), _ = cli.parse('usage: packstage.py copy PACK OUT', rest, (2, 2)); packcopy.main(a, b); return 0
     if sub == 'entries':
-        import cli, packentries
+        import fnvnx.lift.tools.cli as cli; import fnvnx.lift.tools.packentries as packentries
         (a, b, c, m, d), _ = cli.parse('usage: packstage.py entries PACK_ENTRIES IMP_ENTRIES BRIDGE_TSV MODULES_TSV OUT', rest, (5, 5)); packentries.main(a, b, c, m, d); return 0
     if sub == 'inc':
-        import prelude
+        import fnvnx.lift.tools.prelude as prelude
         return prelude.main(rest)
     if sub == 'disp':
-        import dispgen
+        import fnvnx.lift.tools.dispgen as dispgen
         dispgen.main(rest); return 0
-    import impgen
+    import fnvnx.lift.tools.impgen as impgen
     sys.argv = ['impgen.py'] + rest; impgen.main(); return 0
 
 

@@ -38,8 +38,8 @@ Output (exe-derived; keep out of the public repository):
 """
 import bisect, collections, os, struct, sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import funcfacts
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.manifest import funcfacts
 X = funcfacts.X
 
 DYN = {"LoadLibraryA", "LoadLibraryW", "LoadLibraryExA", "LoadLibraryExW",
@@ -378,8 +378,7 @@ def main(d, root, out, bridge_tsv, dllkind_py, dllkind_sha):
                 fd.write("%s\t0x%08x\t%s\t%s\t%s\n" % (n, site, nm, op, hm))
             fc.write("%s\t%s\t%d\t%d\t%s\n" % (n, kind.get(n, "root"), len(m.imports), m.exports,
                                                  "-" if n == root else "static" if n in static_names else "dynamic"))
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        import regsites
+        from fnvnx.manifest import regsites
         regsites.write(mods, out)
         for n in sorted(k for k in kind if k not in mods):          # met names that are not analysed modules
             fc.write("%s\t%s\t-\t-\t%s\n" % (n, kind[n], "static"))

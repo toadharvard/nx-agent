@@ -5,7 +5,7 @@ Domains are COMPLETE finite sets: every D3DFORMAT enum value of d3d9types.h + th
 D3DMULTISAMPLE_TYPE enum value + invalid ones; every single usage bit of the 32-bit word + all pairs of the bits that are not masked by Wine
 (see render/d3d9/env/README.md for why single bits + pairs cover the usage function)."""
 import json, os, re, sys
-import wine_fourcc
+from fnvnx.render.d3d9.env import wine_fourcc
 fcc = wine_fourcc.fcc
 
 

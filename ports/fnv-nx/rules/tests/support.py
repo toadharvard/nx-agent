@@ -8,10 +8,7 @@ import sys
 
 Ent01 = os.path.dirname(os.path.abspath(__file__))
 RULES = os.path.normpath(os.path.join(Ent01, '..'))
-if RULES not in sys.path:
-    sys.path.insert(0, RULES)
-
-import core  # noqa: E402
+from fnvnx.rules import core  # noqa: E402
 
 FAILS = []
 

@@ -14,15 +14,17 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
-import objstub  # noqa: E402
-import scratch  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import objstub  # noqa: E402
+from fnvnx.verify import scratch  # noqa: E402
 
 scratch.install()
 
 sys.path.insert(0, HERE)
-import test_recipe as TR  # noqa: E402
-import recipe  # noqa: E402
-import cas  # noqa: E402
+from fnvnx.verify.tests import test_recipe as TR  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
+from fnvnx.verify import cas  # noqa: E402
 
 CC = "aarch64-linux-gnu-gcc"
 ROOT = tempfile.mkdtemp(prefix="objstub-")
@@ -213,7 +215,7 @@ for abi in ("ilp32", "lp64"):
     check(T("LLVM (a64access) decodes the same words as objdump"), od == cs and len(od) > 10, (len(od), len(cs)))
 
 # --- the target profile of a root decides how its objects are judged (gate_objstub.profile_findings)
-import gate_objstub
+from fnvnx.verify import gate_objstub
 def hdr(cls, machine):
     pth = tempfile.mkstemp(dir=ROOT, suffix=".o")[1]
     open(pth, "wb").write(b"\x7fELF" + bytes([cls, 1, 1]) + bytes(9) + (1).to_bytes(2, "little") + machine.to_bytes(2, "little") + bytes(40))
@@ -609,6 +611,18 @@ check("declared table: header comment and three valid rows (win-doc and wine-9.0
 GAL = "34\tGalaxyInit\tno-galaxy\tgalaxy-sdk:IGalaxy/Init:Init\tu32\t1\t-"
 open(tf_, "w").write(HDR_REAL + "\n" + GAL + "\n")
 check("declared table: a galaxy-sdk row with fact no-galaxy is accepted", rdt(tf_).get(34, ("",))[1:3] == ("no-galaxy", "galaxy-sdk:IGalaxy/Init:Init"), "")
+HDR_STEAM = HDR_REAL.replace(" | galaxy-sdk:<page>:<function>", " | galaxy-sdk:<page>:<function> | steamworks-sdk:<header>#<function>")
+for what, row, want in (("accepted", "36\tSteamAPI_Init\tno-galaxy\tsteamworks-sdk:public/steam/steam_api.h#SteamAPI_Init\tu32\t0\t-", True),
+                        ("malformed: the function after a colon", "36\tSteamAPI_Init\tno-galaxy\tsteamworks-sdk:steam_api.h:SteamAPI_Init\tu32\t0\t-", False),
+                        ("malformed: no function", "36\tSteamAPI_Init\tno-galaxy\tsteamworks-sdk:steam_api.h#\tu32\t0\t-", False),
+                        ("malformed: no header", "36\tSteamAPI_Init\tno-galaxy\tsteamworks-sdk:#SteamAPI_Init\tu32\t0\t-", False)):
+    open(tf_, "w").write(HDR_STEAM + "\n" + row + "\n")
+    try:
+        rdt(tf_)
+        got = True
+    except ValueError:
+        got = False
+    check("declared table: a steamworks-sdk source, " + what, got, want)
 for what, row in (("an undeclared fact", "35\tx\tno-wifi\twin-doc:a/b:f\tu32\t1\t-"), ("an undeclared source prefix", "35\tx\tno-galaxy\tgog-sdk:a/b:f\tu32\t1\t-")):
     open(tf_, "w").write(HDR_REAL + "\n" + row + "\n")
     try:
@@ -730,7 +744,7 @@ wv = objstub.winerror_load(wx, wpin)
 check("winerror_load: decimals, hex with a cast, (WSABASEERR+N) and an alias of another define", wv["ERROR_INVALID_HANDLE"] == 6 and wv["HR_X"] == 0x80070005 and wv["WSAEINTR"] == 10004 and wv["EINTR_ALIAS"] == 10004 and wv["ERROR_ALIAS"] == 6, wv)
 
 # gate on the toy product root of test_recipe.py
-import verdict  # noqa: E402
+from fnvnx.verify import verdict  # noqa: E402
 
 RV = ("#include \"toy.h\"\nvoid fnvnx_reach_violation(unsigned) __attribute__((noreturn));\n"
       "int f_c(int x) { if (x > 3) fnvnx_reach_violation(42); return x + TOY; }\n")
@@ -800,7 +814,7 @@ check("a malformed facts file: red, input error", rc == 2 and g["status"] == "re
 WC = '#include "toy.h"\nvoid fnvnx_wine_fixme(unsigned);\nint f_c(int x) { (void)x; fnvnx_wine_fixme(5); return 7; }\n'
 for tag, tbl, want in (("row matches", "5\tm\twine-9.0:dlls/x/y.c:f\tu32\t7\n", "green"), ("row value differs", "5\tm\twine-9.0:dlls/x/y.c:f\tu32\t8\n", "red"),
                        ("malformed table", "5\tm\tnot-a-ref\tu32\t7\n", "input")):
-    wr = TR.make_guest_repo("os-wine-" + tag.replace(" ", "-"), rec=TR.mut(link=None), files={"toy/constants.tsv": CONST, "toy/c.c": WC, "verify/wine_fixme.tsv": tbl})
+    wr = TR.make_guest_repo("os-wine-" + tag.replace(" ", "-"), rec=TR.mut(link=None), files={"toy/constants.tsv": CONST, "toy/c.c": WC, "toy/wine_fixme.tsv": tbl})
     rc, g, _, txt, st = gate(wr, ROOT + "/gw" + tag.replace(" ", "-"), GC)
     check("gate, wine_fixme table, case %s: expected %s" % (tag, want), (rc == 0 and g["certified"] == g["universe"] and g["wine_fixme"] == {"5": 1} and st[0] == "green") if want == "green" else
           (rc == 2 and ("wine-fixme-mismatch 1" in g["detail"] if want == "red" else "input error" in g["detail"])), (g, txt))
@@ -856,9 +870,11 @@ check("a root whose errno.h does not compile: red errno-probe (the probe does no
 # the accessor is derived, no root declares it: a host root and a target root get theirs from their own libc's errno.h, and the key is no recipe key any more
 ec = tempfile.mkdtemp(prefix="objstub-errno-")
 check("errno accessor derived for a host compiler (x86-64 glibc: the call of __errno_location), no declaration",
-      objstub.errno_probe("x86_64-linux-gnu-gcc-13", [], ec) == ("call", "__errno_location"), objstub.errno_probe("x86_64-linux-gnu-gcc-13", [], ec))
+      objstub.errno_probe("x86_64-linux-gnu-gcc-13", [], ec, "t0") == ("call", "__errno_location"), objstub.errno_probe("x86_64-linux-gnu-gcc-13", [], ec, "t0"))
 check("errno accessor derived for the AArch64 compiler (a call of the libc's accessor), no declaration",
-      objstub.errno_probe("aarch64-linux-gnu-gcc-13", ["-mabi=lp64"], ec) == ("call", "__errno_location"), objstub.errno_probe("aarch64-linux-gnu-gcc-13", ["-mabi=lp64"], ec))
+      objstub.errno_probe("aarch64-linux-gnu-gcc-13", ["-mabi=lp64"], ec, "t1") == ("call", "__errno_location"), objstub.errno_probe("aarch64-linux-gnu-gcc-13", ["-mabi=lp64"], ec, "t1"))
+from fnvnx.verify import unitstage as _us
+check("objstub's probe environment is the one PROBE_ENV of unitstage", objstub.PROBE_ENV == _us.PROBE_ENV, (objstub.PROBE_ENV, _us.PROBE_ENV))
 rk = TR.mut(); rk["errno_accessor"] = "__errno"
 check("a recipe that declares errno_accessor is rejected (the accessor is derived, the key does not exist)", any("errno_accessor" in e_ for e_ in TR.errs(rk)), TR.errs(rk))
 # a body with a data island in the final image is unjudged, and unjudged is red

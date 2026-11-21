@@ -3,7 +3,9 @@
 import json, os, sys, tempfile, subprocess
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, ".."))
-import recipe
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import recipe
 recipe.read_recipe = lambda repo, path: json.load(open(os.path.join(repo, path)))   # the synthetic recipes have no profile: the plain reader
 
 fails = []
@@ -68,7 +70,8 @@ with tempfile.TemporaryDirectory() as d:
     check("foreign_search_dirs: a link out of the external is foreign by its real path", recipe.foreign_search_dirs([e + "/link"], [e]), [e + "/link"])
     check("foreign_search_dirs: no external, every directory is foreign", recipe.foreign_search_dirs([e + "/inc"], []), [e + "/inc"])
 # unitstage: an include of a mounted `include_uses` directory is accepted, one that no input names is refused
-import argparse, unitstage
+import argparse
+from fnvnx.verify import unitstage
 with tempfile.TemporaryDirectory() as d:
     os.makedirs(d + "/src"); os.makedirs(d + "/store")
     json.dump({"exes": {"g++": 1}, "inputs": []}, open(d + "/rt.json", "w")); json.dump({"argv": []}, open(d + "/fl.json", "w"))

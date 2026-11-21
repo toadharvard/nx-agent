@@ -21,13 +21,12 @@ import os
 import sys
 from collections import Counter
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import core            # noqa: E402
-import mscgate         # noqa: E402
-import s10_startup     # noqa: E402
-import s1_compile      # noqa: E402
-import s2_bodies       # noqa: E402
-import s8_asm          # noqa: E402
+from fnvnx.rules import core            # noqa: E402
+from fnvnx.rules import mscgate         # noqa: E402
+from fnvnx.rules import s10_startup     # noqa: E402
+from fnvnx.rules import s1_compile      # noqa: E402
+from fnvnx.rules import s2_bodies       # noqa: E402
+from fnvnx.rules import s8_asm          # noqa: E402
 
 MODULES = [s10_startup, s1_compile, s2_bodies, s8_asm]
 SOURCE_SUFFIXES = ('.cpp', '.h', '.hpp', '.inl', '.c')

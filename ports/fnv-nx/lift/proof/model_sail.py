@@ -13,40 +13,57 @@ How one instruction is run (details in README.md, section Sail):
   makes the encoding a ModelGap: the model does not define the behaviour.
 Upper halves of the 64-bit registers are free z3 variables <reg>_hi (rax_hi ...); the results are the low 32 bits, so
 a result that depended on an upper half would show up as a prover counter-example, which is the independence check."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import hashlib, os, re, subprocess, sys
 import z3
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-# The toolchain is an explicit input: configure(work, ir, isla) is called by the program that runs the prover (shapeprove.py --sail-work/--sail-ir/--isla;
+# The toolchain is an explicit input: configure(work, ir, isla, cfg) is called by the program that runs the prover (shapeprove.py --sail-work/--sail-ir/--isla;
 # the tests take the same three from their declared inputs). Nothing is read from the environment and no path is defaulted: before configure() every
 # use is an ArgError. The z3 shared libraries are those of the z3 python module this process imported (the pinned wheel), not a path.
-WORK = IR = ISLA = CACHE = None
-CFG = os.path.join(HERE, 'x86.toml')
+WORK = IR = ISLA = CFG = CACHE = None      # CFG: the isla config of the run (x86.toml), the ISLACFG output of the isla root
 Z3LIB = os.path.join(os.path.dirname(os.path.abspath(z3.__file__)), 'lib')
 
 class ArgError(Exception):
     """a required input of the model (work directory, proof IR, isla executable) was not passed"""
 
-def configure(work, ir, isla):
-    global WORK, IR, ISLA, CACHE, _irsha
-    for n, v in (('sail work directory', work), ('proof IR', ir), ('isla executable', isla)):
+def configure(work, ir, isla, cfg):
+    global WORK, IR, ISLA, CFG, CACHE, _irsha
+    for n, v in (('sail work directory', work), ('proof IR', ir), ('isla executable', isla), ('isla config', cfg)):
         if not v: raise ArgError('model_sail.configure: %s is required' % n)
-    WORK, IR, ISLA, CACHE, _irsha = os.path.abspath(work), os.path.abspath(ir), os.path.abspath(isla), os.path.join(os.path.abspath(work), 'sail_cache'), None
+    WORK, IR, ISLA, CFG, CACHE, _irsha = os.path.abspath(work), os.path.abspath(ir), os.path.abspath(isla), os.path.abspath(cfg), os.path.join(os.path.abspath(work), 'sail_cache'), None
 
 def _need():
-    if IR is None: raise ArgError('model_sail: configure(work, ir, isla) was not called (explicit arguments --sail-work --sail-ir --isla)')
+    if IR is None: raise ArgError('model_sail: configure(work, ir, isla, cfg) was not called (explicit arguments --sail-work --sail-ir --isla --isla-cfg)')
+
+def work():
+    _need(); return WORK
+
+def ir_file():
+    """the pinned x86_proof.ir that configure() was given (its sha256 is derived: ir_sha)"""
+    _need(); return IR
+
+def isla():
+    _need(); return ISLA
+
+def cache_dir():
+    _need(); return CACHE
 ADDR = 0x401000
 GPR = {'rax': 'eax', 'rcx': 'ecx', 'rdx': 'edx', 'rbx': 'ebx', 'rsp': 'esp', 'rbp': 'ebp', 'rsi': 'esi', 'rdi': 'edi'}
 FLAGBIT = {'cf': 0, 'pf': 2, 'af': 4, 'zf': 6, 'sf': 7, 'of': 11}
 # functions made branch-free (isla -L) so that flag helpers do not fork; the list is part of the cache key
 LINEARIZE = ['bool_to_bits', 'bits_to_bool', 'zf_spec']
 # functions whose calls are printed (-D p) so that a model exception can be reported with its message
-ERRFNS = ['x86_fault<b>', 'x86_fault<u>', 'x86_model_error<B128>', 'x86_model_error<B16>', 'x86_model_error<B32>',
-          'x86_model_error<B48>', 'x86_model_error<B64>', 'x86_model_error<B80>', 'x86_model_error<u>']
+def errfns():
+    """the functions whose calls are printed (-D p) so that a model exception can be reported with its message: every function of the IR named x86_fault<..> or x86_model_error<..> (derived from the IR, sorted)"""
+    from fnvnx.lift.proof import irdeps
+    return sorted(n for n in (irdeps.decode(z) for z in irdeps.load(ir_file()).fns) if re.fullmatch(r'x86_(?:fault|model_error)<[A-Za-z0-9]+>', n))      # the instances over a plain type; the four tuple instances (x86_model_error<z8..z9>) need isla's probe spelling: not probed, as before (reported)
 SEG = ('-I', 'msrs=[#x0000000000000000; 7]', '-I', 'ctrs=[#x0000000000000000; 17]', '-I', 'seg_visibles=[#x002b; 6]', '-I', 'seg_hidden_attrs=[#x0c9a; 6]',
        '-I', 'seg_hidden_bases=[#x0000000000000000; 6]', '-I', 'seg_hidden_limits=[#xffffffff; 6]', '-I', 'ms_reg=false', '-I', 'fault_reg=false',
        '-I', 'app_view=true', '-I', 'marking_view=false', '-I', 'log_register_writes=false')
 
+# Segment limits stay the flat literals of SEG for all six registers: a smaller declared limit (the TEB segment 0x38) is passed only by an access beyond it, which is an access fault that does not occur under ASM-006 (verify/ASSUMPTIONS.json: the exe makes no wild accesses).
 # architectural faults the DSL forms do not model (state outside the form's domain): the obligation is restricted to the non-faulting states
 FAULT_OK = {':SEGMENT-LIMIT-FAIL', ':OUT-OF-SEGMENT-INSTRUCTION-POINTER'}     # the second: a branch target whose unwrapped (64-bit) value leaves the 4 GiB code segment
 
@@ -73,35 +90,62 @@ def sym_constraint(code, ranges, eip_sym):
     if eip_sym: cs += ['(= code_base ((_ extract 47 0) rip))', '(bvult rip #x%016x)' % EIP_LIMIT]
     return '(and %s)' % ' '.join(cs)
 
-SEG_FREE = tuple(x for i, x in enumerate(SEG) if x != 'seg_visibles=[#x002b; 6]' and not (i + 1 < len(SEG) and SEG[i + 1] == 'seg_visibles=[#x002b; 6]'))
+FREE_SEG_REGS = ('seg_visibles=[#x002b; 6]', 'seg_hidden_attrs=[#x0c9a; 6]')      # the registers a Form that reads a selector leaves free: the selectors and their hidden attributes, tied by seg_domain (bases and limits stay the flat literals: the declared descriptors are flat)
+SEG_FREE = tuple(x for i, x in enumerate(SEG) if x not in FREE_SEG_REGS and not (i + 1 < len(SEG) and SEG[i + 1] in FREE_SEG_REGS))
 SYMSEL = False      # set by prove.prove_one: the Form reads the segment selectors (sel_*), so the six selectors of the initial state are free (isla gives each element a fresh symbol) instead of the literal 0x2b
 SELREG = ('es', 'cs', 'ss', 'ds', 'fs', 'gs')      # isla prints the register seg_visibles (vector(6, dec, bits(16))) as (_ vec v0 .. v5), element i = rt/fnvl.h SEG_* i (checked: push ds / es / gs proved only in this order)
 
-def run_isla(code, timeout=600, sym=None, ctrs=None):
+def run_env_sha():
+    """sha256 of everything besides the IR text that determines an isla run (K, irdeps.py): the isla config, the pinned isla (sail_pins rows isla and isla-cargo-lock), the register inputs of the run (SEG, sym_constraint's text), the linearized
+    functions, the address / eip window and the cache-key version"""
+    h = hashlib.sha256()
+    h.update(open(CFG, 'rb').read())
+    with open(os.path.join(HERE, 'sail_pins.txt')) as fh:
+        for ln in fh:
+            f = ln.split()
+            if f and f[0] in ('isla', 'isla-cargo-lock', 'isla-vendor'): h.update(('|'.join(f) + '\n').encode())
+    import inspect
+    h.update(repr((SEG, SEG_FREE, LINEARIZE, EIP_LIMIT, ADDR, 'v2', inspect.getsource(sym_constraint))).encode())
+    return h.hexdigest()
+
+def closure_sha(fns):
+    """K key of a run: irdeps.closure_sha over the pinned IR file for the executed functions `fns` (LAST['fns'])"""
+    from fnvnx.lift.proof import irdeps
+    return irdeps.sha_of_file(ir_file(), fns, run_env_sha())
+
+FNS = []     # the functions the last run_isla executed (isla call events), sorted; K
+PROBE_LINE = re.compile(r'^\[\x1b\[\d+m\d+\s+\x1b\[0m\]: ')
+ERRCALL = re.compile(r'^\[\x1b\[\d+m\d+\s+\x1b\[0m\]: Calling x86_(?:fault|model_error)<')
+CALLING = re.compile(r'\]: Calling (\S+?)\(', re.M)
+
+def run_isla(code, sym=None, ctrs=None):
     """raw isla output (stdout, stderr) for one encoding, from the on-disk cache when present.  sym = (ranges, eip_sym): a SHAPE run, see sym_constraint"""
     _need()
     if not os.path.exists(IR): raise RuntimeError('missing %s: run ports/fnv-nx/farm/sail_build.sh' % IR)
     args = list(SEG_FREE if SYMSEL else SEG)
     if ctrs is not None:      # the control registers of the run (17 words, CR0 = element 0, CR4 = element 4: config.sail __SetConfig): proof/udsail.py's system-state variants
         assert len(ctrs) == 17; args[args.index('ctrs=[#x0000000000000000; 17]')] = 'ctrs=[%s]' % ', '.join('#x%016x' % w for w in ctrs)
-    args += sum([['--probe', f] for f in ERRFNS], []) + sum([['-L', f] for f in LINEARIZE], [])
+    args += sum([['--probe', f] for f in errfns()], []) + sum([['-L', f] for f in LINEARIZE], [])     # the cache key (kept: old outputs stay valid); the run itself probes every call, see below
     cons = sym_constraint(code, *sym) if sym else ''
-    key = hashlib.sha256(('|'.join([ir_sha(), hashlib.sha256(open(CFG, 'rb').read()).hexdigest(), ' '.join(args), code.hex(), str(ADDR), 'v1'] + ([str(timeout)] if timeout != 600 else []) + ([cons] if sym else []))).encode()).hexdigest()
+    key = hashlib.sha256(('|'.join([ir_sha(), hashlib.sha256(open(CFG, 'rb').read()).hexdigest(), ' '.join(args), code.hex(), str(ADDR), 'v1'] + ([cons] if sym else []))).encode()).hexdigest()
     os.makedirs(CACHE, exist_ok=True); base = os.path.join(CACHE, key)
-    if os.path.exists(base + '.out') and os.path.exists(base + '.err'): return open(base + '.out').read(), open(base + '.err').read()
+    if all(os.path.exists(base + e) for e in ('.out', '.err', '.fns')):
+        with open(base + '.fns') as fh: FNS.clear(); FNS.extend(fh.read().split())
+        with open(base + '.out') as fo, open(base + '.err') as fe: return fo.read(), fe.read()
     if sym:
         regs = [] if sym[1] else ['-I', 'code_base=#x%012x' % ADDR, '-I', 'rip=#x%016x' % ADDR]
         regs += ['--reset-constraint', cons]
     else: regs = ['-I', 'code_base=#x%012x' % ADDR, '-I', 'code_bytes=#x' + code.ljust(16, b'\0')[::-1].hex(), '-I', 'rip=#x%016x' % ADDR]
-    cmd = [ISLA, '-A', IR, '-C', CFG, '-T', '1', '--timeout', str(timeout), 'x86_fetch_decode_execute', '()'] + regs + args + ['-D', 'p', '--traces', '--error-traces', '-s']
+    run_args = list(SEG_FREE if SYMSEL else SEG) + ['--probe-all'] + sum([['-L', f] for f in LINEARIZE], [])           # --probe-all only logs: every call event "Calling NAME(" names a function the run executed (K, irdeps.py)
+    cmd = [ISLA, '-A', IR, '-C', CFG, '-T', '1', 'x86_fetch_decode_execute', '()'] + regs + run_args + ['-D', 'p', '--traces', '--error-traces', '-s']
     env = dict(os.environ, LD_LIBRARY_PATH=Z3LIB)
-    try: r = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=timeout + 20)     # isla's own --timeout is not honoured while z3 is busy
-    except subprocess.TimeoutExpired:
-        return 'Error Timeout\n(trace\n  (write-reg |Final result| nil (_ poison)))\n', 'hard timeout %ds\n' % (timeout + 20)
+    r = subprocess.run(cmd, capture_output=True, text=True, env=env)     # no time limit (proof/bounds.py): the result never depends on a clock; a run that does not end is killed with its stage, no record
     if r.returncode not in (0, 1): raise RuntimeError('isla failed (%d): %s' % (r.returncode, r.stderr[-400:]))
-    open(base + '.out.tmp', 'w').write(r.stdout); open(base + '.err.tmp', 'w').write(r.stderr)
-    os.replace(base + '.err.tmp', base + '.err'); os.replace(base + '.out.tmp', base + '.out')
-    return r.stdout, r.stderr
+    fns = sorted(set(CALLING.findall(r.stderr))); FNS.clear(); FNS.extend(fns)
+    err = '\n'.join(l for l in r.stderr.split('\n') if not PROBE_LINE.match(l) or ERRCALL.match(l))             # the probe log is ~4 MB: keep the error-function calls (isla_errors, _post) and the non-probe lines
+    open(base + '.out.tmp', 'w').write(r.stdout); open(base + '.err.tmp', 'w').write(err); open(base + '.fns.tmp', 'w').write('\n'.join(fns) + '\n')
+    os.replace(base + '.err.tmp', base + '.err'); os.replace(base + '.out.tmp', base + '.out'); os.replace(base + '.fns.tmp', base + '.fns')
+    return r.stdout, err
 
 # ---------------------------------------------------------------------------------------------- s-expressions
 TOK = re.compile(r'\(|\)|\|[^|]*\||"[^"]*"|[^\s()]+')
@@ -247,6 +291,10 @@ def run_path(tag, trace, pre, fault=False, extra=None):
         elif h == 'assume': pass                      # the --reset-constraint of a shape run: holds by construction of `extra` (sym_constraint)
         elif h == 'read-reg':
             r = regname(ev[1]); v = unwrap(ev[3])
+            if r == 'seg_hidden_attrs' and isinstance(ev[3], list) and ev[3][:2] == ['_', 'vec']:       # free hidden attributes: element i = the variable attr_<segment>, tied to the selector by seg_domain
+                for s, e in zip(SELREG, ev[3][2:]):
+                    if e in env.pending and e not in env.v: env.v[e] = z3.BitVec('attr_' + s, 16)
+                continue
             if r == 'seg_visibles' and isinstance(ev[3], list) and ev[3][:2] == ['_', 'vec']:       # free selectors: element i of the pre-state = the DSL variable sel_<segment>
                 for s, e in zip(SELREG, ev[3][2:]):
                     if e in env.pending and e not in env.v: env.v[e] = z3.BitVec('sel_' + s, 16)
@@ -278,24 +326,24 @@ def merge(paths, pick):
     for p in reversed(paths[:-1]): r = z3.If(p.pc, pick(p), r)
     return r
 
-class ModelTimeout(Exception):
-    """isla did not finish within the timeout (prove-side result class `timeout`)"""
+class ModelBound(Exception):
+    """a cached isla output that ended at isla's own Error Timeout (an output of a run made before the bound rule): prove-side result class `bound` (red), never a verdict"""
 LAST = {}
 
 def model_post(code, pre):
     return _post(code, pre, run_isla(code), None)
 
-def model_post_shape(code, fields, pre, eip_sym=True, timeout=600):
+def model_post_shape(code, fields, pre, eip_sym=True):
     """model_post for a whole encoding shape: `code` = representative bytes, fields = {name: (offset, size) | None} (imm / disp byte ranges), the bytes of
     the fields are the z3 variables fld_<name> (BitVec 8*size), eip is pre['eip'] (a variable when eip_sym: then code_base = rip = pre['eip'] and the
-    assumption eip < EIP_LIMIT (ASM-013) is part of `assume`; otherwise the constant 0x401000, assumption A-EIP in the certificate)"""
+    assumption eip < EIP_LIMIT (ASM-013) is part of `assume`; otherwise the constant 0x401000, the certificate's A-EIP row)"""
     rg = [(o, n) for o, n in (f for f in fields.values() if f)]; var = {nm: z3.BitVec('fld_' + nm, 8 * f[1]) for nm, f in fields.items() if f}
     byte = {}
     for nm, (o, n) in ((nm, f) for nm, f in fields.items() if f):
         for k in range(n): byte[o + k] = z3.Extract(8 * k + 7, 8 * k, var[nm])
     cb = z3.Concat(*[byte.get(i, z3.BitVecVal(code[i] if i < len(code) else 0, 8)) for i in reversed(range(16))])
     extra = {'code_bytes': cb, 'code_base': z3.ZeroExt(16, pre['eip'])}
-    out = run_isla(code, timeout, (tuple(rg), eip_sym))
+    out = run_isla(code, (tuple(rg), eip_sym))
     r = _post(code, pre, out, extra, z3.ULT(pre['eip'], z3.BitVecVal(EIP_LIMIT, 32)) if eip_sym else None)
     if eip_sym:                                      # terms of the dict, flattened, rewritten, put back
         flat = [(k, None, v) for k, v in r.items() if not isinstance(v, dict) and k not in ('domain', 'complete')] + [(k, n, x) for k, v in r.items() if isinstance(v, dict) for n, x in v.items()]
@@ -336,7 +384,7 @@ def zext_add_pairs(terms):
     return pairs
 
 def eip_nowrap(terms, eip):
-    """rewrite of model terms under the domain eip < EIP_LIMIT (it holds as a hypothesis of every query of a shape run): the 32-bit sum eip + K (K a small constant: the
+    """rewrite of model terms under the domain eip < EIP_LIMIT (every query of a shape run holds it as a hypothesis, ASM-013): the 32-bit sum eip + K (K a small constant: the
     offsets of the bytes of ONE instruction) zero-extended to a wider sort equals the wide sum zext(eip) + K, because eip + K < 2^32 cannot wrap.
     Without it z3 cannot see that the fetch index (rip + offset) - code_base is a constant and bit-blasts the 128-bit shifts of code_bytes.
     Also the unconditional zext_add_pairs identity.  terms -> simplified terms with every `zero_extend(eip + K)` / `concat(0, eip + K)` replaced"""
@@ -359,16 +407,46 @@ def eip_nowrap(terms, eip):
         if not pairs: return terms
         terms = [z3.simplify(z3.substitute(t, *pairs.values())) for t in terms]
 
+def seg_attrs_of(rec, sel):
+    """the model's hidden-attribute word (16 bits) of the descriptor the record gives selector `sel`: type, S, DPL, P from the descriptor's high dword bits 15:8, AVL, L, D/B, G from bits 23:20 (the layout of the literal seg_hidden_attrs of SEG, 0x0c9a for the 0x00cf9a00 descriptor; model/segmentation_structures.sail:84-98 bitfield data_segment_descriptor_attributesbits: g 11, d_b 10, l 9, avl 8, p 7, dpl 6:5, s 4, type msb 3, e 2, w 1, a 0)"""
+    d = rec['gdt']['descriptors']['0x%02x' % ((sel >> 3) * 8)]['high_dword']
+    return ((d >> 8) & 0xff) | (((d >> 20) & 0xf) << 8)
+
+
+def seg_domain():
+    """the pre-states of a run whose Form reads a selector: each segment register holds a NON-NULL selector the declared machine lets it hold (its initial selector, mov_to_sreg, for CS the far-jump targets; read through x86sys) and
+    its hidden attributes are those of that selector's descriptor, a code selector in a data register excepted (see the MODEL CLAUSE note).  The null selector is outside it: its fault is the record's null_seg_access row (the Windows rule, no Sail model clause), proved by the Form's own spec."""
+    from fnvnx.lift.fnvlift import x86sys
+    rec = x86sys.REC; cl = []
+    for s in SELREG:
+        held = {x86sys.SEL[s]} | (set(x86sys.MOV_TO_SREG[s][0]) if s in x86sys.MOV_TO_SREG else set())
+        if s == 'cs': held.update(rec['jmp_far']['jumps']['selectors'])
+        held = {v for v in held if v >> 3}      # the null selector (index 0) is outside the domain
+        if s != 'cs': held = {v for v in held if (v >> 3) not in x86sys.CODE_INDEX}      # MODEL CLAUSE: store_bytes_to_ea reads the writable bit w = bit 1 of the type, which is the READ bit of a code descriptor, and has no code-type test but seg_reg == 1 (CS): a code selector in a data register is outside what the model decides; the DSL's fault for it is checked against the SDM spec (sysspec_store.py)
+        sel, att = z3.BitVec('sel_' + s, 16), z3.BitVec('attr_' + s, 16)
+        cl.append(z3.Or(*[z3.And(sel == v, att == seg_attrs_of(rec, v)) for v in sorted(held)]))
+    return z3.And(*cl)
+
+
 def _post(code, pre, out_err, extra, extra_assume=None):
     out, err = out_err; blocks = split_blocks(out); ok, bad = [], []
     for hdr, tr in blocks:
         (ok if hdr and hdr.startswith('Result: (_ unit)') else bad).append((hdr, tr))
+    ncalls = len(re.findall(r'Calling x86_', err)); msgs = isla_errors(err); ordered_k = None
+    if bad and SYMSEL:            # a fault path whose condition is infeasible under the segment domain (seg_domain) is outside the run's pre-states, not a model fault; the attribution of messages to paths needs one error call per path
+        ordered = [re.sub(r'\\+"', '"', m).strip('"') for m in re.findall(r'Calling x86_(?:fault|model_error)<\w+>\(\["(.*?)"\]\)', err)]
+        if len(ordered) == len(bad) == ncalls:
+            dom = seg_domain(); keep = []
+            for i, (_, tr) in enumerate(bad):
+                sv = z3.Solver(); sv.add(dom, *run_path('d%d' % i, tr, pre, True, extra).pc)
+                if sv.check() != z3.unsat: keep.append(i)
+            bad = [bad[i] for i in keep]; ncalls = len(bad); ordered_k = [ordered[i] for i in keep]; msgs = sorted(set(ordered_k))
     if bad:
-        msgs = isla_errors(err); first = bad[0][0] or ''
-        if (ok or getattr(FAULT_OK, 'declared', False)) and msgs and set(msgs) <= FAULT_OK and len(re.findall(r'Calling x86_', err)) == len(bad): faults = [tr for _, tr in bad]; bad = []
+        first = bad[0][0] or ''
+        if (ok or getattr(FAULT_OK, 'declared', False)) and msgs and set(msgs) <= FAULT_OK and ncalls == len(bad): faults = [tr for _, tr in bad]; bad = []
         else: faults = []
     else: faults = []
-    if bad and extra is not None and (any((h or '').startswith('Error Timeout') for h, _ in bad) or 'hard timeout' in err): raise ModelTimeout(err[-120:].replace('\n', ' '))
+    if bad and extra is not None and any((h or '').startswith('Error Timeout') for h, _ in bad): raise ModelBound(err[-120:].replace('\n', ' '))
     if bad:
         raise ModelGap('model exception on %d of %d paths: %s' % (len(bad), len(blocks), '; '.join(msgs[:2]) if msgs else first[:80]))
     if not ok and not faults: raise ModelGap('isla returned no path: ' + err[-120:].replace('\n', ' '))
@@ -379,11 +457,22 @@ def _post(code, pre, out_err, extra, extra_assume=None):
     else: ret = {'regs': {r: merge(paths, lambda p: p.regs[r]) for r in pre['regs']}, 'flags': {f: merge(paths, lambda p: p.flags[f]) for f in FLAGBIT},
             'mem': merge(paths, lambda p: p.mem), 'eip': merge(paths, lambda p: p.eip)}
     asm = [s for p in paths for s in p.side]
-    LAST.clear(); LAST.update(paths=len(ok), fault_paths=len(faults))
+    LAST.clear(); LAST.update(paths=len(ok), fault_paths=len(faults), fns=list(FNS))
     side = list(asm); nofault = None
-    if faults: nofault = z3.Not(z3.Or(*[run_path('f%d' % i, tr, pre, True, extra).pc for i, tr in enumerate(faults)])); asm.append(nofault)
+    nowrite = z3.BoolVal(True)      # no fault path: the model never takes :NON-WRITABLE-SEGMENT
+    if faults:
+        nowrite = None
+        fpcs = [run_path('f%d' % i, tr, pre, True, extra).pc for i, tr in enumerate(faults)]
+        nofault = z3.Not(z3.Or(*fpcs)); asm.append(nofault)
+        if ordered_k is not None and len(ordered_k) == len(faults): ordered = ordered_k
+        else: ordered = [re.sub(r'\\+"', '"', m).strip('"') for m in re.findall(r'Calling x86_(?:fault|model_error)<\w+>\(\["(.*?)"\]\)', err)]
+        if len(ordered) == len(faults):          # the error calls of the run, one per fault path, in the order of the paths; any other count: no attribution (nowrite stays None and prove.py refuses a store form)
+            wp = [z3.And(*pc) if pc else z3.BoolVal(True) for pc, m in zip(fpcs, ordered) if m == ':NON-WRITABLE-SEGMENT']
+            nowrite = z3.Not(z3.Or(*wp)) if wp else z3.BoolVal(True)
     if asm: ret['assume'] = z3.And(*asm)
     ret['side'] = z3.And(*side) if side else z3.BoolVal(True)       # closed constraints on free values (undefined / nondeterministic results): satisfiable for every pre-state iff satisfiable at all
     ret['nofault'] = nofault if nofault is not None else z3.BoolVal(True)       # the pre-state conditions under which the model does not fault
+    if SYMSEL: extra_assume = seg_domain() if extra_assume is None else z3.And(extra_assume, seg_domain())
     if extra_assume is not None: ret['domain'] = extra_assume
+    if nowrite is not None: ret['nowrite'] = nowrite
     return ret

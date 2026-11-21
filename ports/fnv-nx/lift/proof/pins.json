@@ -1,0 +1,14 @@
+{
+ "format": "fnvnx-pins/1",
+ "note": "files of other layers that this branch holds as a byte-identical copy: never edited here; when the owner changes one, merge the owner's commit and update this row (path, owner, the owner's commit it was taken from, git blob id, sha256); `external` rows are pinned inputs held in fnv-nx-build (repo, ref, commit, file, sha256), fetched and checked by their tests",
+ "files": [
+  {
+   "path": "ports/fnv-nx/platform/declared/x86sys.json",
+   "owner": "L5",
+   "blob": "dadf3a26b14e251627168f973d17f37a6d0bd402",
+   "sha256": "9680b01f7c09bae2eeed08eb4d3101cc920037fea28e524ec555c1d5f065f451",
+   "commit": "4ec8cd2c14c11be134cb81a25222d9f3ed419101"
+  }
+ ],
+ "external": []
+}

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """lift/pack/build.json is a pure function of liftrecipe.recipe: regenerate it from the external it names (ref, commit, tree_sha256) into a scratch file and diff
 it against the tracked file. A hand edit (a duplicate key, a stale plugin_cxx, a plugin entry with source/args) is red."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import json
 import os
 import sys
@@ -9,7 +11,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 LIFT = os.path.normpath(os.path.join(HERE, '..', '..'))
 sys.path.insert(0, os.path.join(LIFT, 'tools'))
-import liftrecipe
+import fnvnx.lift.tools.liftrecipe as liftrecipe
 
 TRACKED = os.path.join(LIFT, 'pack', 'build.json')
 

@@ -48,3 +48,10 @@ static inline void fnvl_ret_st0(double d) { dyn_push(fv_f64(d)); }
    fnvl_native_exit: leave the native frames by the non-local exit to the entry's __builtin_setjmp point; the entry returns to its lifted caller with c->ra pending. Does not return. */
 extern "C" u32 fnvl_native_guest(void);
 extern "C" __attribute__((noreturn)) void fnvl_native_exit(void);
+/* The one non-local transfer of an entry body (a guest-state body whose bridge row is bind entry): control goes to guest address `eip` with the guest stack at `esp` and the registers as the body
+   left them, and the bridge does not run its return code (it would pop the entry's own return address). Sets ra and esp, then leaves through fnvl_native_exit to the bridge's frame; the
+   bridge returns to its lifted caller with ra pending (README control-transfer rule). Does not return. Defined in rt/enter.cc, the only entry-side TU that may write ra (rt/fnvl.h). */
+extern "C" __attribute__((noreturn)) void fnvl_native_transfer(u32 eip, u32 esp);
+/* The raise protocol's resume address (rt/seh.cc ContinueExecution, the DBGSRV service): a hardware raise is called by lifted code directly, with no entry frame, and returns with ra = the
+   resume address; the lifted caller then goes on from ra (README, control-transfer rule). This sets ra and nothing else. Defined in rt/enter.cc beside fnvl_native_transfer. */
+extern "C" void fnvl_raise_resume(u32 eip);

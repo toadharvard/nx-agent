@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Sharded prover of ENCODING SHAPES (rule R2): one obligation per shape, immediate / displacement / relative-target bytes (and eip) symbolic.
-  shapeprove.py --shapes FILE --shard K/N --out DIR [--timeout SEC] [--eip sym|fixed] [--slice STRIDE] [--only SUBSTR]
+  shapeprove.py --shapes FILE --shard K/N --out DIR [--eip sym|fixed] [--slice STRIDE] [--only SUBSTR] --sail-work DIR --sail-ir FILE --isla EXE
 FILE: shapes.tsv (first column = shape key; '#' lines ignored; the output of proof/census.py); a key is re-derived by shape.shape_key from
 its representative bytes, so the canonical key (shape.py) is the unit whatever the census format.  Integer family only (shape.family == 'int'); the other
 families have their own provers.  Order: sorted canonical keys; shard K/N (K = 1..N) takes the shapes whose position is = K-1 mod N.  --slice STRIDE keeps
@@ -9,7 +9,7 @@ Output DIR/shapeprove_K_of_N.jsonl, one JSON line per shape (resumable: shapes a
   shape, form_key, dsl_sha (sha256 of the serialization of the SYMBOLIC Form: symform.shape_sha(shape) recomputes it without z3), model_sha (IR sha256),
   model_terms_sha, result, defects, `assumptions`, split, eip_dependence, note
 Obligation = prove.prove_one (imported, not forked): no pre-state AND no value of the field variables (free in the unsat query = universally quantified)
-gives a DSL post-state different from the Sail post-state.  Results: proved | FAILED(dsl) | FAILED(model-defect:ids) | model-gap | timeout, and the classes of a
+gives a DSL post-state different from the Sail post-state.  Results: proved | FAILED(dsl) | FAILED(model-defect:ids) | model-gap | bound (a z3 query `unknown` at proof/bounds.py Z3_RLIMIT, red, never a verdict), and the classes of a
 shape that has no obligation to run: no-form (no DSL builder / builder precondition) | builder-branches-on-field (file:line) | field-decode (capstone fits
 no hypothesis of symform.py) | decode (the representative is not one instruction).
 Certificate field `assumptions` (ids):
@@ -20,10 +20,12 @@ Certificate field `assumptions` (ids):
               (non-wrapping) address leaves [0, 2^32) (model_sail.FAULT_OK); symcheck.py checks it for every relative target of the exe
 Split record: always 'none' (no field is case-split: isla runs on the symbolic bytes without forking on them in a way that needs it; the paths it forks
 into are exhaustive with their path conditions in the merge)."""
-import argparse, collections, json, os, sys
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
+import argparse, collections, json, os, sys, time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import z3
-from proof import shape as shp, symform, prove, model_sail
+from fnvnx.lift.proof import bounds, shape as shp, symform, prove, model_sail, certbasis, treeid, x86sys
 
 def load_shapes(path):
     """canonical integer-family shape keys, sorted"""
@@ -36,13 +38,19 @@ def load_shapes(path):
             ck = shp.shape_key(ins[0]); fam = shp.family(ins[0])
         except shp.ShapeError: out.add(('decode', k)); continue
         out.add((fam, ck))
-    return sorted(k for f, k in out if f == 'int'), sorted(k for f, k in out if f == 'decode')
+    return sorted(k for f, k in out if f in ('int', 'sys')), sorted(k for f, k in out if f == 'decode')
 
 def pre_state(eip_sym):
     p = {'regs': {r: z3.BitVec(r, 32) for r in prove.REGS}, 'flags': {f: z3.BitVec(f, 1) for f in prove.FLAGS}, 'mem': z3.Array('mem', z3.BitVecSort(32), z3.BitVecSort(8))}
     p['eip'] = z3.BitVec('eip', 32) if eip_sym else z3.BitVecVal(model_sail.ADDR, 32); return p
 
+def fns_fields():
+    """K: the functions the model run executed and the closure_sha over them (irdeps.py); absent when no isla run happened"""
+    fns = model_sail.LAST.get('fns')
+    return {'model_fns': fns, 'closure_sha': model_sail.closure_sha(fns)} if fns else {}
+
 def one(key, args):
+    model_sail.LAST.clear()
     rec = {'shape': key, 'model_sha': model_sail.ir_sha(), 'eip_mode': args.eip}
     def fin(result, note='', **kw):
         rec.update(result=result, note=note[:300], split='none', **kw); return rec
@@ -58,32 +66,87 @@ def one(key, args):
     asm = ['A-FLAT', 'A-EIPRANGE' if eip_sym else 'A-EIP']
     try:
         res, note, extra = prove.prove_one(model_sail, F, rep, sf.form.key, args, pre=pre, fields={k: v for k, v in fields.items() if v},
-                                           model=lambda: model_sail.model_post_shape(rep, fields, pre, eip_sym, int(args.timeout)))
+                                           model=lambda: model_sail.model_post_shape(rep, fields, pre, eip_sym))
     except model_sail.ModelGap as e: res, note, extra = 'model-gap', 'GAP ' + str(e)[:200], {}
-    except model_sail.ModelTimeout as e: res, note, extra = 'timeout', 'isla: ' + str(e), {}
+    except model_sail.ModelBound as e: res, note, extra = bounds.BOUND, 'isla: ' + str(e), {}
     if model_sail.LAST.get('fault_paths'): asm.append('A-SEGLIM')
     ids = res[len('FAILED(model-defect:'):-1].split(',') if res.startswith('FAILED(model-defect:') else []
     return fin('FAILED(model-defect)' if ids else res, note, defects=ids, assumptions=asm,
-               model_terms_sha=extra.get('model_sha256'), isla_paths=model_sail.LAST.get('paths'), isla_fault_paths=model_sail.LAST.get('fault_paths'))
+               model_terms_sha=extra.get('model_sha256'), def0=extra.get('def0'), declared=extra.get('declared'), platform_sha256=extra.get('platform_sha256'), obligations=list(prove.OBLIGATIONS), prover_sha=certbasis.prover_sha(), isla_paths=model_sail.LAST.get('paths'), isla_fault_paths=model_sail.LAST.get('fault_paths'), **fns_fields())
+
+def stale_reason(rec):
+    """V3 -> x86sys stamp rule: None when EVERY part of the certificate equals what this tree computes for the key (so the record is a certificate of the current declared machine), else the first differing part.
+    Pure comparison, no run: Form sha under the configured x86sys, the pinned IR, the obligation set this prover generates, the prover identity (prove/model_sail/symform/certbasis)."""
+    if rec.get('result') not in ('proved', 'agree-except-declared'): return 'not-a-certificate'
+    if rec.get('model_sha') != model_sail.ir_sha(): return 'model'
+    if rec.get('prover_sha') != certbasis.prover_sha(): return 'prover'
+    if rec.get('obligations') != list(prove.OBLIGATIONS): return 'obligations'
+    if rec.get('dsl_sha') is None or rec.get('dsl_sha') != symform.shape_sha(rec['shape']): return 'dsl'      # a failing shape_sha is a defect: it raises
+    return None
+
+def stamp(rec, xsha):
+    if rec.get('x86sys_sha256') is not None or stale_reason(rec) is not None: return rec
+    return dict(rec, x86sys_sha256=xsha)
+
+def migrate(rec, args):
+    """K migration of a record of this model (model_sha = the pinned IR) made before the closure key: rerun ONLY the isla model run of its shape (deterministic: same IR, config, inputs; the run is cached by the
+    same key) and add model_fns + closure_sha.  The proof is not redone: the run that is repeated is the run the proof used."""
+    if rec.get('model_sha') != model_sail.ir_sha() or rec.get('result') != 'proved': return rec
+    if rec.get('model_fns'): return dict(rec, closure_sha=model_sail.closure_sha(rec['model_fns']))     # re-key (closure rule changed, env v2): pure recomputation over the recorded executed set, on the IR the record was proved against
+    if rec.get('closure_sha'): return rec
+    rep, fields = symform.parse_key(rec['shape']); eip_sym = rec.get('eip_mode', 'sym') == 'sym'
+    model_sail.LAST.clear(); model_sail.model_post_shape(rep, fields, pre_state(eip_sym), eip_sym)
+    return dict(rec, **fns_fields())
 
 def main():
-    ap = argparse.ArgumentParser(); ap.add_argument('--shapes', required=True); ap.add_argument('--shard', default='1/1'); ap.add_argument('--out', required=True)
-    ap.add_argument('--timeout', type=float, default=600); ap.add_argument('--eip', choices=('sym', 'fixed'), default='sym'); ap.add_argument('--slice', type=int, default=1)
-    ap.add_argument('--only'); ap.add_argument('--limit', type=int)
-    ap.add_argument('--sail-work', required=True); ap.add_argument('--sail-ir', required=True); ap.add_argument('--isla', required=True)
-    a = ap.parse_args(); model_sail.configure(a.sail_work, a.sail_ir, a.isla); k, n = [int(x) for x in a.shard.split('/')]; assert 1 <= k <= n
+    ap = argparse.ArgumentParser(); ap.add_argument('--shapes', required=False, default=None); ap.add_argument('--shard', default='1/1'); ap.add_argument('--out')
+    ap.add_argument('--eip', choices=('sym', 'fixed'), default='sym'); ap.add_argument('--slice', type=int, default=1)
+    ap.add_argument('--only'); ap.add_argument('--migrate', metavar='JSONL', help='K: copy the records of JSONL (a shard of this model) to the shard file, adding model_fns / closure_sha to the proved ones'); ap.add_argument('--limit', type=int)
+    ap.add_argument('--sail-work', required=True); ap.add_argument('--sail-ir', required=True); ap.add_argument('--isla', required=True); ap.add_argument('--isla-cfg', required=True)
+    ap.add_argument('--one', metavar='KEY', help='prove exactly this shape (recipe step: one row of the queue table) and write its record to --record; the record is a function of the inputs alone (no wall time, no tree id)')
+    ap.add_argument('--shape-sha', help='with --one: the queue row\'s shape_sha; the Form of this tree must be the Form the queue was built from'); ap.add_argument('--record', help='with --one: the file of the record (one json line)')
+    ap.add_argument('--z3lib', help='the directory of the libz3 that isla runs with (the isla root\'s Z3LIB); default: the lib of the python z3 package')
+    certbasis.add_inputs_args(ap, True)
+    x86sys.add_arg(ap)
+    a = ap.parse_args(); model_sail.configure(a.sail_work, a.sail_ir, a.isla, a.isla_cfg)
+    certbasis.configure_inputs(a)
+    if a.z3lib: model_sail.Z3LIB = os.path.abspath(a.z3lib)
+    xsha = x86sys.configure(a.x86sys)
+    if a.one:
+        if not (a.shape_sha and a.record): ap.error('--one needs --shape-sha and --record')
+        if symform.shape_sha(a.one) != a.shape_sha: raise ValueError('shape_sha of this tree differs from the queue row (the queue was built from another tree)')       # a stale row is a red step, never a record
+        rec = one(a.one, a); rec['x86sys_sha256'] = xsha
+        with open(a.record, 'w') as fh: fh.write(json.dumps(rec, sort_keys=True) + '\n')
+        return 0
+    if not a.out: ap.error('--out is required')
+    k, n = [int(x) for x in a.shard.split('/')]; assert 1 <= k <= n
     os.makedirs(a.out, exist_ok=True); path = os.path.join(a.out, 'shapeprove_%d_of_%d.jsonl' % (k, n))
+    if a.migrate:
+        with open(a.migrate) as fi, open(path, 'a') as out:
+            for ln in fi:
+                if ln.strip(): out.write(json.dumps(stamp(migrate(json.loads(ln), a), xsha), sort_keys=True) + '\n'); out.flush()
+        return 0
     keys, bad = load_shapes(a.shapes); keys = keys[::a.slice]
+    qsha = {l.split()[0]: l.split()[1] for l in open(a.shapes) if l.strip() and not l.startswith('#') and len(l.split()) > 1}     # the queue row's shape_sha: the Form of the tree must be the Form the queue was built from
     if a.only: keys = [x for x in keys if a.only in x]
     mine = [x for i, x in enumerate(keys) if i % n == k - 1][:a.limit]
-    done = set(json.loads(l)['shape'] for l in open(path)) if os.path.exists(path) else set()
+    tree = treeid.current(); done = treeid.resume(path, tree)
     print('shard %d/%d: %d shapes (%d integer shapes in the universe after --slice %d), %d already done, %d undecodable representatives' % (k, n, len(mine), len(keys), a.slice, len(done), len(bad)), flush=True)
     with open(path, 'a') as out:
         for key in mine:
             if key in done: continue
-            out.write(json.dumps(one(key, a), sort_keys=True) + '\n'); out.flush()
+            t0 = time.time()
+            try:
+                if key in qsha and symform.shape_sha(key) != qsha[key]: raise ValueError('shape_sha of this tree differs from the queue row (the queue was built from another tree)')
+                rec = one(key, a)
+            except Exception as e:                 # a prover exception on a shape is a record (error + the traceback hash), never a missing one
+                import hashlib, traceback
+                tb = traceback.format_exc(); rec = {'shape': key, 'result': 'error', 'note': ('%s: %s' % (type(e).__name__, e))[:300], 'traceback_sha': hashlib.sha256(tb.encode()).hexdigest()[:16], 'model_sha': model_sail.ir_sha()}
+                print(tb, file=sys.stderr, flush=True)
+            rec['seconds'] = round(time.time() - t0, 2); rec['tree'] = tree; rec['x86sys_sha256'] = xsha           # the wall time of the shape (not part of the certificate): the shard count is derived from its distribution
+            out.write(json.dumps(rec, sort_keys=True) + '\n'); out.flush()
     rs = [json.loads(l) for l in open(path)]; c = collections.Counter(r['result'] for r in rs)
     print('shard %d/%d done: %d shapes  ' % (k, n, len(rs)) + ' '.join('%s=%d' % x for x in sorted(c.items())))
-    return 0
+    return 1 if c.get('error') or len(rs) < len(mine) else 0
 
 if __name__ == '__main__': sys.exit(main())

@@ -24,10 +24,10 @@ Function boundaries: the entries of the L3a function facts (funcfacts.py, `--fac
 """
 import os, re, struct, sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import funcfacts
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.manifest import funcfacts
 
-import pemanifest
+from fnvnx.manifest import pemanifest
 
 
 def main(exe, out):

@@ -2,12 +2,17 @@
 prove.py classifies a disagreement as FAILED(model-defect:<id>) only if the whole disagreement lies in the region of a declared defect
 (the obligation with that region excluded is unsat); anything else is FAILED(dsl).  A region only EXCLUDES pre-states from a field's
 obligation after the fact, it never changes the DSL form.
+The four former entries (rot-count-modulo, ror-cf, rot-of-count0, sar-cf-big-count) were model defects fixed by the transcription patches of the pinned IR (x86ir, bump IR 7c307464: zrol_spec, zror_spec, zsar_spec); they are deleted, not gated (by-construction row #8).
+A region here is a MODEL GAP (the pinned model does not implement the instruction as the SDM states): the SDM text is the decision, the model source is cited.
 entry: id, keys (regex on the form key), parts = [(fields or None = every other field, region(ctx) -> z3 Bool)], sdm."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import re, z3
+from fnvnx.lift.proof.shape import PFX
 ALL = None
 def prefix_skip(code):
     i = 0
-    while code[i] in (0x66, 0x67, 0xf0, 0xf2, 0xf3, 0x2e, 0x36, 0x3e, 0x26, 0x64, 0x65): i += 1
+    while code[i] in PFX: i += 1
     return i
 class Ctx:
     def __init__(s, code, pre, key, fields=None):
@@ -20,16 +25,9 @@ class Ctx:
         else: s.n = z3.BitVecVal(0, 32)
         s.ecx0 = ecx == 0
 DEFECTS = [
- dict(id='rot-count-modulo', keys=r'^(rol|ror)\|[rm](8|16),', parts=[(ALL, lambda c: z3.UGT(c.n, c.w))],
-      sdm='ROL/ROR: tempCOUNT <- (COUNT & COUNTMASK) MOD SIZE; the model (prelude.sail rotate_left_bits/rotate_right_bits) rotates by the unreduced count'),
- dict(id='ror-cf', keys=r'^ror\|', parts=[({'cf'}, lambda c: z3.UGE(c.n, 2))],
-      sdm='ROR: "the CF flag contains the value of the bit rotated from the least-significant to the most-significant bit" = MSB of the result; the model takes bit 0 of the result'),
- dict(id='rot-of-count0', keys=r'^(rol|ror)\|', parts=[({'of'}, lambda c: c.n == 0)],
-      sdm='ROL/ROR: "if the masked count is 0, the flags are not affected"; the model leaves OF undefined'),
- dict(id='sar-cf-big-count', keys=r'^sar\|[rm](8|16),', parts=[({'cf'}, lambda c: z3.UGE(c.n, c.w))],
-      sdm='SAR: CF is the last bit shifted out (the SDM exempts only SHL/SHR from this for count >= size); the model leaves CF undefined'),
  dict(id='rep-prefix-ignored', keys=r'^rep', parts=[({'ecx', 'eip'}, lambda c: z3.BoolVal(True)), (ALL, lambda c: c.ecx0)],
-      sdm='REP/REPE/REPNE: repeat the string instruction ECX times (nothing when ECX = 0), decrementing ECX; the model executes the body once, ignores the prefix, leaves ECX and sets EIP to the next instruction'),
+      model='sail-x86-from-acl2 0c6c023d (sail_pins.txt) is generated from the ACL2 x86isa model, acl2/acl2 (sail_pins.txt row acl2) books/projects/x86isa/machine/instructions/string.lisp: for MOVS (the other string instructions of that file were not read) with a REP prefix and rCX = 0 the instruction is skipped (lines 162-165, "continue to the next instruction"); otherwise ONE iteration runs, rCX is decremented and rIP is left unchanged so that the instruction is executed again (lines 213-220); the model never runs the whole repetition in one step',
+      sdm='SDM REP/REPE/REPNE: repeat the string instruction ECX times (nothing when ECX = 0), decrementing ECX; the model executes ONE iteration per instruction execution (ACL2 string.lisp 213-220), decrementing ECX and leaving EIP at the instruction'),
 ]
 def regions(key, ctx_args, fields=None):
     """[(id, sdm, {field: region})] for the entries whose key regex matches; region None for fields not listed under ALL"""

@@ -16,14 +16,16 @@ addr + size when relative); a decoder whose value fits none of them raises Field
 derivation is a hypothesis about capstone; its soundness for every instruction of the exe is established exhaustively by symcheck.py.
 Builders may only compute with the field (DSL nodes).  A builder that BRANCHES on it (compares, truth value, int()) raises SymbolicBranch(file:line):
 that builder cannot be made symbolic by substitution (class `builder-branches-on-field`)."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, sys, traceback
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import hashlib
-from fnvlift import dsl
-from fnvlift.dsl import N, mk, C, V, F, mask
+from fnvnx.lift.fnvlift import dsl
+from fnvnx.lift.fnvlift.dsl import N, mk, C, V, F, mask
 from capstone import x86 as X
-from proof import forms, shape as shp
-from proof.detrand import Rng
+from fnvnx.lift.proof import forms, shape as shp
+from fnvnx.lift.proof.detrand import Rng
 
 M32 = 0xffffffff
 def eip(): return V('eip', 32)
@@ -181,8 +183,9 @@ def derive(rep, fields):
     if fields['disp'] and not disp: raise FieldDecodeError('no memory operand depends on the displacement bytes (%s)' % ins.mnemonic)
     return imm, disp
 
-def symbuild(key):
-    """SymForm of a shape.  Raises KeyError (no DSL builder for the mnemonic), FieldDecodeError, SymbolicBranch, AssertionError (builder precondition)"""
+def symins(key):
+    """the ADAPTER instruction of a shape (symbuild's input) and its field data: -> (SymIns, fields, widths, imm, disp).  One function: symbuild builds the Form from it,
+    and a spec checker (simdcheck.py) reads the operands' effective addresses from the same operands."""
     rep, fields = parse_key(key); ins = decode(rep, 0)
     alias = _CMPALIAS.get(ins.mnemonic) if fields['imm'] and not any(o.type == X.X86_OP_IMM for o in ins.operands) else None
     imm, disp = ({}, derive(rep, dict(fields, imm=None))[1]) if alias else derive(rep, fields)
@@ -196,7 +199,12 @@ def symbuild(key):
     if alias:
         assert fields['imm'][1] == 1, 'cmp imm8 field is not one byte'
         ops.append(PredImm(SV(dsl.zext(F('imm', 8), 32), '%s operand 2 (imm)' % alias)))
-    sins = SymIns(ins, ops, alias)
+    return SymIns(ins, ops, alias), fields, widths, imm, disp, ins
+
+
+def symbuild(key):
+    """SymForm of a shape.  Raises KeyError (no DSL builder for the mnemonic), FieldDecodeError, SymbolicBranch, AssertionError (builder precondition)"""
+    sins, fields, widths, imm, disp, ins = symins(key)
     try: f = forms.build(sins, eip())
     except SymbolicBranch as e:
         tb = [t for t in traceback.extract_tb(sys.exc_info()[2]) if os.path.basename(t.filename).startswith('forms')]

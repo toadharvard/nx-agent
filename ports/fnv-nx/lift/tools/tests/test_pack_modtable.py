@@ -2,10 +2,12 @@
   liftgen.check_images: the image set is the exe plus EVERY row of the table; each image was lifted from the file its row pins, at the row's assigned base, and its universe lies in the row's range.
   packentries.stamp: entries.tsv ends with `# module_table sha256 <hex of modules.tsv>`; the entries stage is red on a missing, repeated, misplaced or different stamp.
 Negative cases are the defects this rule closes: a base of another table (galaxy.dll once static: libvorbis at 0x2130000), a missing row, a duplicate image, a foreign file, an entry outside the range, a stale stamp.   test_pack_modtable.py"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import hashlib, json, os, sys, tempfile
 LIFT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, LIFT); sys.path.insert(0, os.path.join(LIFT, 'tools'))
-import liftgen, packentries
+import fnvnx.lift.tools.liftgen as liftgen; import fnvnx.lift.tools.packentries as packentries
 
 fails = 0
 def check(name, ok):

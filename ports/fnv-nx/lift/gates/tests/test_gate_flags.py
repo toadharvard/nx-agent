@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Self-test of gates/gate_flags.py (flag liveness, item 21) and of proof/flagagree.py on hand-assembled x86-32 bytes (no game data).   python3 -I tests/test_gate_flags.py
+"""Self-test of gates/gate_flags.py (flag liveness, item 21) and of gates/flagagree.py on hand-assembled x86-32 bytes (no game data).   python3 -I tests/test_gate_flags.py
 Each case is one body at 0x1000; the gate must give the stated result: None = green, else the (flag, origin, class) rows of the red reads.
 Origins: E = as at the entry of the body, C = as after a call, U = left undefined by an instruction."""
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os
 import sys
 import unittest
@@ -12,7 +12,8 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
-import gate_flags as g
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), '..', 'fnvlift', 'tests')); import fnvnx.lift.fnvlift.tests._inputs as _inputs; _inputs.configure_declared()      # the declared-machine inputs, as the lifter's program passes them
+import fnvnx.lift.gates.gate_flags as g
 
 A = 0x1000
 
@@ -121,7 +122,7 @@ class T(unittest.TestCase):
     def test_def0_defpior_emission(self):
         """DEF0 / DEFPRIOR (def_check.py): the lines the real emitter produces for the Forms of every opcode-space instruction that has a Form satisfy the rules, and
         the read-back is not vacuous: it reports a free flag that is not 0 and a free register that is written unconditionally"""
-        import def_check as dc
+        import fnvnx.lift.gates.def_check as dc
         n = free = 0
         for pre in (b'', b'\x0f'):
             for op in range(256):
@@ -158,7 +159,7 @@ class T(unittest.TestCase):
         self.assertEqual((len(rows), reads), (1, 1))
 
     def test_entry_consumer(self):
-        import flagcause
+        import fnvnx.lift.gates.flagcause as flagcause
         uni = {0x10: ('ptr', ['candidate']), 0x20: ('ptr', ['candidate']), 0x30: ('ptr', ['candidate', 'call'])}
         jt = frozenset([0x10])
         self.assertEqual([flagcause.consumer(e, uni, jt) for e in (0x10, 0x20, 0x30, 0x40)], ['jtab', 'unknown-consumer', 'call', 'unknown-consumer'])
@@ -261,7 +262,7 @@ class UndefWhen(unittest.TestCase):
     (AF of shl/shr/sar/shld/shrd: undefined for a non-zero count, unchanged for count 0); an unconditional one stays `f = 0;`"""
     def test_emission(self):
         import capstone
-        from proof import forms
+        from fnvnx.lift.proof import forms
         md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True
 
         def lines(hx):
@@ -277,7 +278,7 @@ class UndefWhen(unittest.TestCase):
 
 class Agree(unittest.TestCase):
     def test_agreement_rows(self):
-        from lift.proof import flagagree
+        import fnvnx.lift.gates.flagagree as flagagree
         reps = {'and': bytes.fromhex('21d8'), 'cmp': bytes.fromhex('39c0'), 'imul': bytes.fromhex('0fafc1'), 'shl0': bytes.fromhex('c1e000'),
                 'rol1': bytes.fromhex('d1c0'), 'test_mem': bytes.fromhex('845e00')}
         n, bad = flagagree.agreement(reps)

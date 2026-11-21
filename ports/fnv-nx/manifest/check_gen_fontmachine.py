@@ -3,9 +3,10 @@
 
   check_gen_fontmachine.py            (run with python3 -I)
 """
-import os, struct, subprocess, sys, tempfile
+import os, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
 GEN = os.path.join(HERE, "gen_fontmachine.py")
 INF = '[Fonts]\nHKLM,%FontSubStr%,"Helv",,"MS Sans Serif"\nHKLM,%FontSubStr%,"Arial CE,238",,"Arial,238"\n'
 FONTC = '''    /* Latin 1 (United States) */
@@ -35,31 +36,43 @@ def want(name, ok):
         fails.append(name)
 
 
-def sfnt(family):   # a minimal sfnt whose `name` table holds one nameID 1 record (platform 3, UTF-16BE): the family is read from the file's own bytes
-    raw = family.encode("utf-16-be")
-    name = struct.pack(">HHH", 0, 1, 18) + struct.pack(">6H", 3, 1, 0x409, 1, len(raw), 0) + raw
-    return struct.pack(">IHHHH", 0x00010000, 1, 16, 0, 0) + struct.pack(">4sIII", b"name", 0, 28, len(name)) + name
+def sample_font():   # any installed TrueType file stands for "a font of the closure": its own family name is the alias target
+    out = subprocess.run(["fc-list", "--format", "%{file}\t%{family[0]}\n"], capture_output=True, text=True).stdout.splitlines()
+    return next((l.split("\t") for l in out if l.split("\t")[0].endswith(".ttf")), None)
 
 
 with tempfile.TemporaryDirectory() as td:
     os.mkdir(os.path.join(td, "fonts"))
     rc, e, _ = run(td)
     want("refuses empty fonts dir", rc != 0 and "no font file" in e)
-    FAM = "Liberation Sans"
-    open(os.path.join(td, "fonts", "x.ttf"), "wb").write(sfnt(FAM))
-    conf = CONF
-    rc, e, a = run(td, conf=conf)
-    want("accepts", rc == 0 and a and "kAcp = 1252" in a and '{ "MS Shell Dlg", "Tahoma" }' in a and '{ "Arial CE,238", "Arial,238" }' in a
-         and '{ "MS Sans Serif", "sserife.fon" }' in a and '{ "FONTS.FON", "vgasys.fon" }' in a)
-    want("replacement only for a family with a file", a is not None and ('{ "Arial", "%s" }' % FAM) in a and "Absent" not in a)
-    rc2, _, b = run(td, conf=conf)
-    want("deterministic", a == b)
-    rc, e, _ = run(td, fontc="/* none */", conf=conf)
-    want("refuses absent row", rc != 0 and "absent" in e)
-    rc, e, _ = run(td, fontc=FONTC.replace('"sseriff.fon",', ""), conf=conf)
-    want("refuses short row", rc != 0 and "9 string fields" in e)
-    rc, e, _ = run(td, inf="[Fonts]\n", conf=conf)
-    want("refuses no substitutes", rc != 0 and "no FontSubstitutes" in e)
+    sf = sample_font()
+    want("a sample font exists", sf is not None)
+    if sf:
+        import shutil
+        shutil.copy(sf[0], os.path.join(td, "fonts", "x.ttf"))
+        conf = CONF.replace("Liberation Sans", sf[1])
+        rc, e, a = run(td, conf=conf)
+        want("accepts", rc == 0 and a and "kAcp = 1252" in a and '{ "MS Shell Dlg", "Tahoma" }' in a and '{ "Arial CE,238", "Arial,238" }' in a
+             and '{ "MS Sans Serif", "sserife.fon" }' in a and '{ "FONTS.FON", "vgasys.fon" }' in a)
+        want("replacement only for a family with a file", a is not None and ('{ "Arial", "%s" }' % sf[1]) in a and "Absent" not in a)
+        rc2, _, b = run(td, conf=conf)
+        want("deterministic", a == b)
+        rc, e, _ = run(td, fontc="/* none */", conf=conf)
+        want("refuses absent row", rc != 0 and "absent" in e)
+        rc, e, _ = run(td, fontc=FONTC.replace('"sseriff.fon",', ""), conf=conf)
+        want("refuses short row", rc != 0 and "9 string fields" in e)
+        rc, e, _ = run(td, inf="[Fonts]\n", conf=conf)
+        want("refuses no substitutes", rc != 0 and "no FontSubstitutes" in e)
+fd = os.environ.get("FNVNX_FONTS")   # the pure family reader equals fc-scan (FreeType) on every file of the declared set
+if fd and os.path.isdir(fd):
+    from fnvnx.manifest import fontfamilies
+    ref = {}
+    for l in subprocess.run(["fc-scan", "--format", "%{file}\t%{family}\n", fd], capture_output=True, text=True).stdout.splitlines():
+        f, n = l.split("\t", 1)
+        ref.setdefault(os.path.basename(f), set()).update(x.lower() for x in n.split(","))
+    for n in sorted(os.listdir(fd)):
+        mine = {x.lower() for x in fontfamilies.families(open(os.path.join(fd, n), "rb").read())}
+        want("families of " + n, mine == ref.get(n, set()))
 if fails:
     print("check_gen_fontmachine FAILED:", ", ".join(fails)); sys.exit(1)
 print("check_gen_fontmachine: ok")

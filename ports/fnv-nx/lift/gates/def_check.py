@@ -12,6 +12,8 @@ CHECK. For each shape with a Form, the C lines the lifter emits for it (Form.to_
 the flag is `f = 0;` or `f = <when> ? <value> : 0;`; for every free register the assignment is guarded `if (<when>) r = ...;`. A line that does not match is a mismatch.
 Counts (global over the shapes and, weighted, over the instruction sites): forms, forms with free outputs, free flag outputs (DEF0), free non-flag outputs
 (DEFPRIOR), uncertified (every free output until L3b's certificate of its (shape, output) refinement is in: red, owner L3b), flag outputs the emission changed (a flag write with `when`, or an undefined flag, that did not hold 0 before DEF0), uncovered, mismatches."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import json
 import os
 import re
@@ -22,8 +24,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import capstone
 from capstone import x86 as X
 
-from proof import forms, shape, lift_dsl
-import gate_flags as g
+from fnvnx.lift.proof import forms, shape, lift_dsl
+import fnvnx.lift.gates.gate_flags as g
 
 _FLAG = re.compile(r'^(cf|pf|af|zf|sf|of|df) = (.*);$')
 
@@ -105,11 +107,12 @@ def lifted_by(ins):
     """which builder of the lifter takes an instruction that has no Form: the mnemonic handler (OPS, by its module) or the first FALLBACK whose predicate holds
     (the order of fnvlift.core.dispatch), else 'none' (a lift gap). The probe context carries what the predicates read."""
     import types
-    from fnvlift import core, f_cpufeat, f_sys, f_sse, f_x87, f_int, f_flow, f_simd_int, f_x87_ctl     # noqa: F401  (register their handlers)
+    from fnvnx.lift.proof import cpufeat
+    from fnvnx.lift.fnvlift import core, f_sys, f_sse, f_x87, f_int, f_flow, f_simd_int, f_x87_ctl     # noqa: F401  (register their handlers)
     m = ins.mnemonic.split()[-1]
     cx = types.SimpleNamespace(m=m, ops=list(ins.operands), b0=ins.opcode[0], modrm=ins.modrm, pfx='')
     try:
-        if f_cpufeat.missing(ins): return 'cpufeat-UD'
+        if cpufeat.missing(ins): return 'cpufeat-UD'
     except Exception: pass
     h = core.OPS.get(m)
     if h is not None: return 'ops:' + h.__module__.split('.')[-1]
@@ -129,8 +132,8 @@ def run(uni):
             res['no_form'] += 1; res['no_form_sites'] += n
             how = lifted_by(ins)
             if how == 'cpufeat-UD':
-                from fnvlift import f_cpufeat
-                for f, leaf, reg, bit, val in f_cpufeat.gates(ins):
+                from fnvnx.lift.proof import cpufeat
+                for f, leaf, reg, bit, val in cpufeat.gates(ins):
                     if not val:
                         k = '%s: CPUID.%x.%s[%d] = %d' % (f, leaf, reg, bit, val); g = res['cpufeat_gates'].setdefault(k, dict(shapes=0, sites=0, mnemonics=[])); g['shapes'] += 1; g['sites'] += n
                         if ins.mnemonic.split()[-1] not in g['mnemonics']: g['mnemonics'].append(ins.mnemonic.split()[-1])
@@ -166,7 +169,7 @@ def run(uni):
 
 def main(argv):
     if len(argv) < 6 or argv[0] != '--sdmrows' or argv[2] != '--cpumodel' or len(argv) % 2: print('usage: def_check.py --sdmrows SDMROWS.JSON --cpumodel CPUID_MODEL.JSON IMAGE FACTS [IMAGE FACTS ...]', file=sys.stderr); return 2
-    from fnvlift import inputs; inputs.configure(sdmrows=argv[1], cpumodel=argv[3]); argv = argv[4:]
+    from fnvnx.lift.fnvlift import inputs; inputs.configure(sdmrows=argv[1], cpumodel=argv[3]); argv = argv[4:]
     res = run(universe(list(zip(argv[::2], argv[1::2]))))
     d = os.environ.get('GATE_OUT')
     if d:

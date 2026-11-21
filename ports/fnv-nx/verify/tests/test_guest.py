@@ -13,8 +13,10 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import test_plugins as tp
-from test_plugins import BASE, ROOT, T, REC, PLUGS, SRC, check, git, w, make_repo, errs, build, disasm, mut, recipe, cas, REAL, VERIFY
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify.tests import test_plugins as tp
+from fnvnx.verify.tests.test_plugins import BASE, ROOT, T, REC, PLUGS, SRC, check, git, w, make_repo, errs, build, disasm, mut, recipe, cas, REAL, VERIFY
 
 
 
@@ -131,7 +133,7 @@ def main():
 
     ra, ta = build(gr, "GA")
     check("guest root builds on the external compiler", ra["status"] == "green", ra.get("failure"))
-    pl = recipe.plugin_languages(drv("gcc"), drv("g++"), {p["name"]: p["path"] for p in ra.get("plugins", [])})
+    pl = recipe.plugin_languages(recipe.front_end_progs(drv("gcc"), drv("g++")), {p["name"]: p["path"] for p in ra.get("plugins", [])})
     check("plugin_languages: cc1plus and cc1 load all 8 plugins (the C++ front end's symbols are weak references, not load requirements: CC1PLUS-SYMS)",
           pl["cxx"] == list(recipe.PLUGIN_SOURCES) and pl["c"] == list(recipe.PLUGIN_SOURCES), pl)
     if ra["status"] != "green":

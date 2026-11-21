@@ -84,7 +84,7 @@ def main(argv):
                     reached.setdefault(toks[-1], []).append("dynamic %s %s" % (r["module"], r["site"]))
                 else:
                     errs.append("dynsites %s %s: names %s without a resolved function name (measurement build)" % (r["module"], r["site"], g))
-    recs = []   # (module, name) of every FNVNX_EXPORT record of the platform tree (contract/include/fnvnx_export.h)
+    recs = []   # (module, name) of every FNVNX_EXPORT record of the platform tree (contract/exporthdr/include/fnvnx_export.h)
     for d, _, fs in os.walk(os.path.join(root, "platform")):
         for f in sorted(fs):
             if f.endswith((".c", ".cc", ".cpp", ".h", ".inc")):

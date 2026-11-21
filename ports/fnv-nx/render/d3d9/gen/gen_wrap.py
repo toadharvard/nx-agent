@@ -4,10 +4,10 @@
    field kind that has no emitter (no fallbacks).  See README.md."""
 import hashlib, json, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE); sys.dont_write_bytecode = True
-from gen_expr import GenError                                  # noqa: E402
-from gen_meth import Meth                                      # noqa: E402
-import gen_tab as T                                            # noqa: E402
+sys.dont_write_bytecode = True
+from fnvnx.render.d3d9.gen.gen_expr import GenError                                  # noqa: E402
+from fnvnx.render.d3d9.gen.gen_meth import Meth                                      # noqa: E402
+from fnvnx.render.d3d9.gen import gen_tab as T  # noqa: E402
 
 
 def generate(spec, raw, out):

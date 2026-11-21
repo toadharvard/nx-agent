@@ -9,12 +9,15 @@ lifted (fnvlift, capstone); the stage writes
   labels.txt                case number, root, what it tests
 There is no x86 oracle for msvcrt.dll: every expected value is derived by hand from the MSVC / Wine 9.0 semantics and stated at its case.
 Trace convention: a guest event EV(k) appends the hex digit k to the word TR; a case that ends in a return gives TR in eax. Output words O0.. hold values a case stores.
-usage: gen.py <out dir>"""
+usage: gen.py OUT_DIR LIFT_DIR --x86sys F --sdmrows F --cpumodel F --rcptab F --rcpcert F      (the lifter's declared inputs: lifted.buffer_arguments)"""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import json, os, re, struct, sys, tempfile
-HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.join(HERE, '..', '..', '..')
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # the tool root (/tool)
 sys.path.insert(0, sys.argv[2])   # lift/, whose fnvlift package is a declared input
-import fnvlift as L, phf, impgen
+import argparse; import fnvnx.lift.tools.lifted as lifted
+import fnvnx.lift.fnvlift as L
+import fnvnx.lift.tools.phf as phf; import fnvnx.lift.tools.impgen as impgen
 from keystone import Ks, KS_ARCH_X86, KS_MODE_32
 
 BASE, SLOT, MAINMAX, CODE_END, IAT, DATA, GSTACK, HSTACK, STOP, TEXT, TEB = 0x401000, 0x300, 0x180, 0x420000, 0x421000, 0x430000, 0x60000000, 0x70000000, 0x7e000000, 0xE0000000, 0x50000000
@@ -33,7 +36,6 @@ BRIDGE = [('msvcrt.dll', n, cv, rt, ar, 'fnvl_msvcrt_' + SYM[n], 'l3') for n, cv
 BRIDGE.append(('msvcrt.dll', '??2@YAPAXI@Z', 'cdecl', 'i', 'i', 'c_new', 'sym'))
 KEY = None      # name -> import key: impgen.rows of the bridge.tsv written below (the one key rule), set by gen()
 SLOTS = {r[1]: IAT + 4 * i for i, r in enumerate(BRIDGE)}
-EH_KEYS = {0x000fffd0: 'fnvl_msvcrt_eh_nested_catch', 0x000fffe0: 'fnvl_msvcrt_eh_nested_collide'}      # rt/msvcrt.h: the runtime's own registrations
 class Fake:
     def __init__(s, code): s.d = code; s.secs = [('.text', BASE, len(code), 0, len(code))]; s.rset = set(); s.taken = []; s.base = BASE
     def bytes(s, a, n): return s.d[a - BASE:a - BASE + n]
@@ -310,7 +312,9 @@ def ident(n): return re.sub(r'[^0-9A-Za-z]', '_', n)
 
 
 def main():
-    w = sys.argv[1]; os.makedirs(w, exist_ok=True)
+    ap = argparse.ArgumentParser(); ap.add_argument('out'); ap.add_argument('lift'); lifted.buffer_arguments(ap); a = ap.parse_args()
+    w = a.out; os.makedirs(w, exist_ok=True)
+    lifted.configure_buffer(a, tempfile.mkdtemp(dir='/dev/shm'))      # the lifter's inputs: the one way (tools/lifted.py)
     P = program(); P.build()
     labels = [(P.addr[n], l) for n in P.order for l in P.owns[n]]
     img = Fake(P.code); starts = {P.addr[n] for n in P.order} | {l for _, l in labels}; img.entries = set(starts)
@@ -322,9 +326,9 @@ def main():
     open(work + '/need.tsv', 'w').write(''.join('%08x\t%s\t%s\tkey\t%08x\n' % (SLOTS[r[1]], r[0], r[1], KEY[r[1]]) for r in BRIDGE))
     ent, blocked, hit, absent = impgen.generate(work + '/bridge.tsv', work, [work + '/need.tsv'], None)      # a bind-l3 row without a body in the runtime is an undefined symbol at the link
     if not (len(ent) == len(BRIDGE) and not blocked and not hit and not absent): sys.exit('msvcrttest gen: %d entries, blocked %s hit %s absent %s' % (len(ent), blocked, hit, absent))
-    syms = {x: 'L_%08x' % x for x in starts}; syms.update({k: s for k, s, *_ in ent}); syms.update(EH_KEYS)
+    syms = {x: 'L_%08x' % x for x in starts}; syms.update({k: s for k, s, *_ in ent})
     if {n: k for k, s, d, n, b in ent} != {r[1]: KEY[r[1]] for r in BRIDGE}: sys.exit('msvcrttest gen: the import keys differ from the key rule')
-    open(w + '/guest.cc', 'w').write('#include "fnvl.h"\n' + '\n'.join(texts)); open(w + '/imp.cc', 'w').write(open(work + '/imp.cpp').read())
+    open(w + '/guest.cc', 'w').write('#include "fnvl_prelude.h"\n' + '\n'.join(texts)); open(w + '/imp.cc', 'w').write(open(work + '/imp.cpp').read())
     hh = phf.build(list(syms)); open(w + '/tab.cc', 'w').write(phf.table_c(syms, hh))
     A = P.addr; rows, term, lab = [], [], []
     inc = ['#define CODE_BASE 0x%xu' % BASE, '#define CODE_END 0x%xu' % CODE_END, '#define IAT_BASE 0x%xu' % IAT, '#define DATA_BASE 0x%xu' % DATA, '#define TEB_ADDR 0x%xu' % TEB,

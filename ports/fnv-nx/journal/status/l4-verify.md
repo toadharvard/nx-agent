@@ -509,3 +509,12 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
     - It runs recipe.check, the gl4/bootrt/bootguest builds and the bootguest guest link.
     - It runs test_bootrt, test_bootgpu, test_bootmachine and test_boot, with the milestones reached.
 - bottleneck: w12 | 1 worker, no farms
+- 2026-11-21 18:50: w12 done, at 8635e4465 (from base3 e82590d45). It holds exactly the L4 paths from 04f1e5dfb plus the admit rows for boot, tests/bootguest and verify/tests/icount: 44 files, none outside L4's paths. Merged whole into claude/fnv-l4-verify, so the L4 line is now base3 plus L4's paths.
+  - recipe.py check: valid for boot, tests/bootguest, tests/bootrt, verify/tests/icount and render/gl4. Run it from the repo root.
+  - Builds: all five roots are red, and every red is in another layer:
+    - L1: recipe.py:3093 toolrt reads env.json `packages` (176) instead of the closure `debs.packages` (396), so libobjc-13-dev files are rejected. The env.json compiler-build profile lacks gmp, mpfr, mpc and zlib dev; L2 0bee5040e has them.
+    - L1/L2: toolchain/msvcmodel/records.py HERE resolves under /imp/fnvnx, and DATAMODEL.json is not mounted there (gen toolchain:0). This reds gl4 and bootrt.
+    - L3a: lift/sdm sdm.txt is missing in the store stage (lift/sdm/build.json:20, :34). This reds bootguest, icount and boot.
+  - Tests: none could reach a boot run. test_bootrt 1 case, 1 failed (gen toolchain:0). test_bootgpu, test_bootmachine and test_boot stop at their setup on the reds above.
+  - w12 archived.
+- bottleneck: L1 (toolrt key, compiler-build profile), L1/L2 (records.py /imp mount), L3a (lift/sdm sdm.txt); L1 answer on the boot-machine owner map | no workers, no farms

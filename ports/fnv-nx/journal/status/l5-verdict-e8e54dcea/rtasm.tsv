@@ -1,2 +1,0 @@
-item	reason
-jmpbuf:probe	jmp_buf facts: the pinned runtime external holds 0 include/setjmp.h (want exactly 1)

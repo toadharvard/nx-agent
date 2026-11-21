@@ -3,8 +3,9 @@
 import json, os, sys, shutil, tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports/fnv-nx: contract.X by its qualified name
-from contract import gatefile, store
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): contract.X by its qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.contract import gatefile, store
 
 d = tempfile.mkdtemp()
 F = dict(a=16, size=4, ret=(0,), calls=[(16, 32)], tails=[], icalls=[(16, 'reg', 'eax', None)], itails=[], stores=[],
@@ -46,7 +47,7 @@ assert gatefile.write('t', 1, 1, [], '') is None
 os.environ['GATE_OUT'] = d
 gatefile.write('t', 100, 40, ['%d' % i for i in range(60, 0, -1)], 'x')
 r = json.load(open(d + '/t.json'))
-assert list(r) == sorted(r) and r['format'] == 'fnvnx-gate/1' and r['status'] == 'red' and len(r['uncertified']) == 50
+assert list(r) == sorted(r) and r['format'] == 'fnvnx-gate/1' and r['status'] == 'red' and len(r['uncertified']) == 60 and r['uncertified_n'] == 60   # the whole list, no cap
 assert r['uncertified'] == sorted(r['uncertified'])
 gatefile.write('t', 3, 3, [], 'x')
 assert json.load(open(d + '/t.json'))['status'] == 'green'

@@ -4222,6 +4222,7 @@
     "ports/fnv-nx/lift/rt/fmath.h",
     "ports/fnv-nx/lift/rt/fnvl.h",
     "ports/fnv-nx/lift/rt/fnvl_abi.h",
+    "ports/fnv-nx/lift/rt/fnvl_fpc.h",
     "ports/fnv-nx/lift/rt/fnvl_x87.h",
     "ports/fnv-nx/lift/rt/x87.h",
     "ports/fnv-nx/platform/include/fnvl_host.h"

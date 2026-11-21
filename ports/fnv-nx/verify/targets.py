@@ -46,6 +46,10 @@ def datamodel_flags(t, repo=None, datamodel=None):
         return [r["flag"] for r in json.load(f)["rows"] if r.get("flag")]
 
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.contract.target.fpcr import FPCR_FIELDS, fpcr_value, fpcr_errors  # noqa: E402,F401  (qualified: ports is on the path of every importer of verify.targets, `fnvnx` is ports/fnvnx)
+
+
 def abi_flag(t):
     return "-mabi=" + t["guest_platform"]["abi"]
 
@@ -60,7 +64,7 @@ def check(t, ext=None, assumptions=None, repo=None):
     for rec in ("guest_platform", "console_cpu", "host_gl"):
         r = t.get(rec) or {}
         cites = r.get("cite") or {}
-        for field in sorted(set(r) - {"cite"} - ({"features"} if rec == "console_cpu" else set())):   # each feature is cited under its own name
+        for field in sorted(set(r) - {"cite"} - ({"features"} if rec == "console_cpu" else set())):   # each feature is cited under its own name; fpcr is one cited row
             if not cites.get(field):
                 bad.append("%s.%s has no citation" % (rec, field))
         for field, cs in sorted(cites.items()):
@@ -94,6 +98,7 @@ def check(t, ext=None, assumptions=None, repo=None):
     for f in t["console_cpu"]["features"]:
         if not t["console_cpu"]["cite"].get(f):
             bad.append("console_cpu feature %s has no citation" % f)
+    bad += fpcr_errors(t)
     for name, d in sorted(t.get("docs", {}).items()):
         if d["external"] not in t["externals"] or len(d["sha256"]) != 64:
             bad.append("doc %s: external or sha256" % name)

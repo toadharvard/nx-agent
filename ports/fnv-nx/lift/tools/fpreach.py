@@ -13,13 +13,15 @@ CLEAR (the path stops): fnclex / fclex / fninit / finit, and the imports _clearf
 fnstenv, fnsave, fxsave, stmxcsr, the imports _statusfp / _status87 / _clearfp); `cc-only` fnstsw reads observe only C0-C3 and are no hit.
 STARTS: P(c) of every call c through an import slot, and of every direct call c to an import thunk; with --native: P(c) of every direct call c to a listed function (all indirect P if one is address-taken).
 Output (<facts dir>/fpstate/): reach_imports.tsv (reader, shortest witness path from a start), reach_starts.tsv (start, import, first reader or '-'); counts on stdout."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import os, sys, bisect
 from collections import defaultdict, deque
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE); sys.path.insert(0, os.path.dirname(HERE))
 from multiprocessing import Pool
-import x86flow as W
-from x86flow import X, M32, mn, Fn, load_universe
+import fnvnx.lift.tools.x86flow as W
+from fnvnx.lift.tools.x86flow import X, M32, mn, Fn, load_universe
 CLEAR_M = ('fnclex', 'fclex', 'fninit', 'finit')
 CLEAR_IMP = ('_clearfp', '_fpreset')
 READ_IMP = ('_statusfp', '_status87', '_clearfp')

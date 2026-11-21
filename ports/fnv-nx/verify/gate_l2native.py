@@ -17,7 +17,7 @@ red item `<root>:inputs` naming it and its owner, never skipped. Stated limit: n
 bodysel gives no NATIVE and the universe is 0 until L1/L2 wire the N3 verdicts (reported, not worked around)."""
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx: qualified imports of another root's modules (contract.X, verify.X)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (contract.X, verify.X)
 import os
 import shutil
 import sys
@@ -26,10 +26,11 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "link"))
-import gate_build  # noqa: E402
-import gate_contract as gc  # noqa: E402
-import gatesdir  # noqa: E402
-import recipe  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import gate_build  # noqa: E402
+from fnvnx.verify import gate_contract as gc  # noqa: E402
+from fnvnx.verify import gatesdir  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
 
 
 def object_name(unit):
@@ -43,7 +44,7 @@ def stem_of(unit):
 
 def load_addrmap(path):
     """{(object basename, symbol): exe address} (contract/objfacts.py load_addrmap_tsv)."""
-    from contract import objfacts
+    from fnvnx.contract import objfacts
     return objfacts.load_addrmap_tsv(path)
 
 
@@ -128,7 +129,7 @@ def run_gate(name, judge_root):
     """The main() of a per-root gate over the native guest roots (gate_argorder.py's shape): writes GATE_OUT/<name>.json, returns the exit code.
     JUDGE_ROOT(repo, cache, root) -> (universe, certified, ids, detail)."""
     import json
-    import gate_argorder
+    from fnvnx.verify import gate_argorder
     repo = "."
     cache, tmp = os.environ.get("GATE_CACHE"), None
     if not cache:
@@ -149,7 +150,7 @@ def run_gate(name, judge_root):
         if tmp and not os.environ.get("GATE_KEEP"):
             shutil.rmtree(tmp, ignore_errors=True)
     res = {"format": "fnvnx-gate/1", "name": name, "status": "green" if u == c else "red", "universe": u, "certified": c,
-           "uncertified": sorted(ids)[:50], "detail": detail[:900]}
+           "uncertified": sorted(ids), "detail": detail[:900]}
     with open(os.path.join(os.environ["GATE_OUT"], name + ".json"), "w") as f:
         json.dump(res, f, sort_keys=True)
     print("%s: %s %d/%d %s" % (name, res["status"], c, u, detail[:200]))

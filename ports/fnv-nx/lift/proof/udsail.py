@@ -30,6 +30,8 @@ Rows carry their class: `sail` (rule b) or `feature` (rule a).  A `feature` row 
 
 The decision function is verdict(raw, run): `run(code16, free_from)` is model_sail.run_isla (cached by its key).  tools: main() writes udsail.tsv for the refused sequences of the images' baddecode.tsv files;
 the lifter reads that file (inputs `udsail`) through f_sys.ud_gap and never runs isla."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import argparse, os, re, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -61,7 +63,7 @@ def sdm_feature(raw, rows, table, cpu, nopflags=frozenset()):
     """-> (flag, extent) when the legacy-encoded sequence raw matches the SDM opcode-table rows (proof/sdmfeat.match_rows, the L3b rule of the cleared-feature partition) of exactly one CPUID flag expression, that flag is
     absent on the declared CPU (sdmfeat.eval_flag over the SDM's own flag table and lift/rt/cpumodel.c), and the SDM states no `executed as` alias and no NOP-without-flag rule for it; else None.  extent: prefixes + opcode bytes
     (+ the ModRM byte of a /digit or ModRM-class row).  A cleared-feature row decides the CLASS of the sequence (rule a); the site still needs its call-graph certificate"""
-    from proof import sdmfeat
+    from fnvnx.lift.proof import sdmfeat
     mand, body, pos = sdmfeat.form_of(_Bytes(raw))
     if not body or body[:1] in (b'\xc4', b'\xc5'): return None
     cand, _kind = sdmfeat.match_rows(mand, body, rows)
@@ -152,24 +154,25 @@ def verdict(raw, run, split_blocks, feature_ud, defaults, variants):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--sail-work', required=True); ap.add_argument('--sail-ir', required=True); ap.add_argument('--isla', required=True)
-    ap.add_argument('--x86sys', required=True); ap.add_argument('--cpufeat', required=True)
-    ap.add_argument('--sdm', required=True, help='pdftotext -layout of the Intel SDM combined volumes (proof/sdmfeat.py): the opcode rows and their CPUID flags')
+    ap.add_argument('--x86sys', required=True); ap.add_argument('--cpumodel', required=True)
+    ap.add_argument('--sdmrows', required=True, help='the sdmrows stage output (proof/sdmfeat.py dumprows): the SDM opcode rows, their flag table and NOP flags')
     ap.add_argument('--model-src', required=True, help='the pinned sail-x86-from-acl2 model/ directory (default arms, bit fields)')
-    ap.add_argument('--bad', action='append', required=True, help='an image baddecode.tsv (entry, address, 8 bytes)')
+    ap.add_argument('--bad', action='append', default=[], help='an image BADDECODE (entry, address, 8 bytes): the sequences capstone refuses (f_sys.decode_gap)')
+    ap.add_argument('--shapes', action='append', default=[], help='an image SHAPES file (first column the shape key, `<hex of the representative bytes>/...`; # comments): the decoded shapes of the image.  Those with no SDM row and no opcode-map entry (sdmfeat.match_form, the rule of fnvlift/cpufeat.decide) get a Sail verdict too')
     ap.add_argument('--out', required=True)
     a = ap.parse_args(argv)
-    from fnvlift import inputs
-    inputs.configure(x86sys=os.path.abspath(a.x86sys), cpufeat=os.path.abspath(a.cpufeat))
-    from proof import model_sail as M
-    from fnvlift import f_sys
+    from fnvnx.lift.fnvlift import inputs
+    inputs.configure(x86sys=os.path.abspath(a.x86sys), cpumodel=os.path.abspath(a.cpumodel))
+    from fnvnx.lift.proof import model_sail as M
+    from fnvnx.lift.fnvlift import f_sys
     M.configure(a.sail_work, a.sail_ir, a.isla)
     class B:
         def __init__(s, b): s.bytes = b
     import json
     model = os.path.abspath(a.model_src); record = json.load(open(a.x86sys)); defaults = default_opcodes(model); variants = sysvariants(record, model)
-    from proof import sdmfeat
-    lines = sdmfeat.load(a.sdm); table = sdmfeat.flag_table(lines); cpu = sdmfeat.declared_cpu(); allrows = sdmfeat.sdm_rows(lines, table)
-    nopflags = frozenset(re.findall(r'are NOP on processors that report CPUID\.\w+H?\.\w+H?:\w+\.(\w+)\[', ' '.join(l.strip() for l in lines)))
+    from fnvnx.lift.proof import sdmfeat
+    from fnvnx.lift.proof import cpufeat
+    allrows, table, nopflags = sdmfeat.load_rows(a.sdmrows); cpu = cpufeat._cpu()
     def feature_ud(r):
         kd = f_sys.encoding(B(r))[0]
         return kd if kd in ('vex', 'evex', 'xop', 'map38', 'map3a', 'map0f') else sdm_feature(r, allrows, table, cpu, nopflags)
@@ -180,6 +183,17 @@ def main(argv=None):
         for ln in open(f):
             if ln.startswith('#') or not ln.strip(): continue
             e, x, h = ln.split('\t')[:3]; rows.setdefault(h.strip(), []).append((os.path.basename(os.path.dirname(os.path.abspath(f))), x))
+    from fnvnx.lift.proof import shape
+    md = shape.decoder()
+    for f in a.shapes:
+        idx = sdmfeat.index_rows(allrows)
+        for ln in open(f):
+            if ln.startswith('#') or not ln.strip(): continue
+            raw = shape.rep_bytes(ln.split('\t')[0].strip()); ins = sdmfeat.decode(raw, md)
+            if ins is None or bytes(ins.bytes) != raw: continue         # a sequence capstone refuses is BADDECODE's
+            cand, _kind, mp = sdmfeat.match_form(ins, idx)
+            if not cand and not mp: rows.setdefault(raw.hex(), []).append((os.path.basename(os.path.dirname(os.path.abspath(f))), '0'))
+    if not a.bad and not a.shapes: ap.error('--bad or --shapes is required')
     res, red = [], 0
     for h in sorted(rows):
         raw = bytes.fromhex(h)

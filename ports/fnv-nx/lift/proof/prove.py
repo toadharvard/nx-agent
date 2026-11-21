@@ -2,7 +2,7 @@
 """The obligations of one shape against the reference model, as a library: shapeprove.py is the one prover (one per shape key, over the pinned IR) and calls prove_one().
 Per encoding: exists a pre-state with DSL post-state != reference post-state; unsat = proved (the obligations: field equalities, DEF0 for the undefined flags, fault conditions).
 (The key-by-key table mode, `--backends` and their encoding tables were deleted: by-construction row rule 3, one path.)
-Result: proved | FAILED(dsl) | FAILED(model-defect:ids) | model-gap | timeout.
+Result: proved | FAILED(dsl) | FAILED(model-defect:ids) | model-gap | bound (a query `unknown` at bounds.Z3_RLIMIT: red, never a verdict).
 Reference model plug-in: a module of the MODELS table below (proof/model_sail.py) with one function
     model_post(code: bytes, pre: dict) -> dict
   pre  = {'regs': {'eax'..'edi': z3 BitVec(name,32)}, 'flags': {'cf','pf','af','zf','sf','of': z3 BitVec(name,1)},
@@ -10,24 +10,26 @@ Reference model plug-in: a module of the MODELS table below (proof/model_sail.py
   ret  = {'regs': {8 names: BV32}, 'flags': {6 names: BV1}, 'mem': post-state Array, 'eip': BV32, optional `assume`: Bool (pre-states the model is defined on)}
   Other pre-state names shared with the model by name: fs_base, gs_base (BV32), rflags_other (BV32; DF = bit 10) which prove.py maps onto the DSL inputs df / flo.
   A model that cannot express the instruction raises an exception whose class is named ModelGap (result model-gap).
-Faults: a form with fault(DE) is compared on the pre-states where the DSL does not fault; additionally (1) assume => DSL does not fault, and (2) for forms
-  without a memory operand, DSL does not fault => assume (the model faults exactly where the DSL does).  The model's DE paths are tolerated for such forms only.
+Faults: a form with fault(DE) is compared on the pre-states where the DSL does not fault; additionally (1) `assume` => DSL does not fault, and (2) for forms
+  without a memory operand, DSL does not fault => `assume` (the model faults exactly where the DSL does).  The model's DE paths are tolerated for such forms only.
 Unobserved: the model interface returns neither DF nor the other EFLAGS bits; a form writing them is certified on its other fields only and reported model-gap."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import hashlib, json, os, re, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import z3
-from proof import certbasis, defects, rewrite, forms, model_sail
+from fnvnx.lift.proof import bounds, certbasis, defects, rewrite, forms, model_sail
 MODELS = {'model_sail': model_sail}      # the reference models --model can name
 ADDR = 0x401000
 REGS = ('eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi'); FLAGS = ('cf', 'pf', 'af', 'zf', 'sf', 'of')
 RFO = z3.BitVec('rflags_other', 32)
 SUBS = [(z3.BitVec('df', 1), z3.Extract(10, 10, RFO)), (z3.BitVec('flo', 32), RFO & 0xFFFFF328)]    # DSL inputs df / flo = bits of the model's free rflags_other
 OBLIGATIONS = certbasis.OBLIGATIONS      # what a record of this prover certifies beyond the field equalities (proof/certbasis.py)
-SEVERITY = ['FAILED(dsl)', 'FAILED(def0)', 'timeout', 'FAILED(model-defect)', 'model-gap', 'proved']
+SEVERITY = ['FAILED(dsl)', 'FAILED(def0)', bounds.BOUND, 'FAILED(model-defect)', 'model-gap', 'proved']
 
 MODEL_FAULT_BY_NAME = {'DE': r'\(!!FAULT-FRESH :DE |:(UN)?SIGNED-DIVIDE',            # DSL fault code -> the model's messages of that fault (divide error paths)
                        'AV': r':NON-WRITABLE-SEGMENT$'}                     # a store through CS (memory_accessors.sail store_bytes_to_ea): #GP(0)
-from fnvlift import dsl as _dsl
+from fnvnx.lift.fnvlift import dsl as _dsl
 MODEL_FAULT = {k: MODEL_FAULT_BY_NAME[n] for k, n in _dsl.FAULTS.items() if n in MODEL_FAULT_BY_NAME}      # the kind numbers are the DSL's (dsl.FAULTS), the model's messages are keyed by kind name
 class Perm(set):                      # tolerated model faults of a form: exactly the messages of the fault codes that the form declares (a fault the DSL does not declare stays a model-gap)
     declared = True
@@ -51,16 +53,16 @@ PRE = pre_state()
 def subst(t): return z3.substitute(t, *SUBS)
 # x87/MMX/SSE state of the Form's post (dsl.Form.post): the pre-state variables are the DSL's own (fr<i> 80, xmm<i> 128, ftop 3, ftag 16, fsw 16, mxcsr 32, fip fdp 32, fop 11, fcs fds 16)
 XPRE = {**{'fr%d' % i: z3.BitVec('fr%d' % i, 80) for i in range(8)}, **{'xmm%d' % i: z3.BitVec('xmm%d' % i, 128) for i in range(8)},
-        'ftop': z3.BitVec('ftop', 3), 'ftag': z3.BitVec('ftag', 16), 'fsw': z3.BitVec('fsw', 16), 'mxcsr': z3.BitVec('mxcsr', 32),
+        'ftop': z3.BitVec('ftop', 3), 'ftag': z3.BitVec('ftag', 16), 'fsw': z3.BitVec('fsw', 16), 'fcw': z3.BitVec('fcw', 16), 'mxcsr': z3.BitVec('mxcsr', 32),
         'fip': z3.BitVec('fip', 32), 'fdp': z3.BitVec('fdp', 32), 'fop': z3.BitVec('fop', 11), 'fcs': z3.BitVec('fcs', 16), 'fds': z3.BitVec('fds', 16)}
-XKEYS = ('fr', 'xmm', 'ftop', 'ftag', 'fsw', 'mxcsr', 'fptr')
+XKEYS = ('fr', 'xmm', 'ftop', 'ftag', 'fsw', 'fcw', 'mxcsr', 'fptr')
 
 def x_post(D):
     """{name: post term} of the x87/MMX/SSE state of a Form's post (empty for a Form of an older DSL)"""
     xs = {}
     for k in ('fr', 'xmm'):
         for i, v in enumerate(D.get(k, ())): xs['%s%d' % (k, i)] = v
-    for k in ('ftop', 'ftag', 'fsw', 'mxcsr'):
+    for k in ('ftop', 'ftag', 'fsw', 'fcw', 'mxcsr'):
         if k in D: xs[k] = D[k]
     if 'fptr' in D: xs.update(zip(('fip', 'fdp', 'fop', 'fcs', 'fds'), D['fptr']))
     return xs
@@ -71,11 +73,14 @@ def post_of(F):
     for k in ('regs', 'flags', 'defined', 'rdefined'): r[k] = {n: subst(v) for n, v in D[k].items()}
     return r
 
+def _bounded():
+    s = z3.Solver(); s.set('rlimit', bounds.Z3_RLIMIT); return s
+
 def check(conds, assume, args):
-    """assume AND (c1 OR ... OR cn) is checked as the n queries assume AND ci, one after the other (a complete case split of the disjunction: the disjunction is unsat iff
+    """`assume` AND (c1 OR ... OR cn) is checked as the n queries `assume` AND ci, one after the other (a complete case split of the disjunction: the disjunction is unsat iff
     every ci is; a sat ci gives a model of the whole).  Each query is much smaller than the disjunction (one register / flag / the memory), which the solver
-    decides in seconds where the disjunction takes minutes.  -> (sat, solver with the model) | (unknown, s) at the first query that times out | (unsat, s)"""
-    s = z3.Solver(); s.set('timeout', int(args.timeout * 1000)); s.add(assume)
+    decides in seconds where the disjunction takes minutes.  -> (sat, solver with the model) | (unknown, s) at the first query that is `unknown` at the bound | (unsat, s)"""
+    s = _bounded(); s.add(assume)
     for c in conds:
         s.push(); s.add(c); r = s.check()
         if r != z3.unsat: return r, s
@@ -148,14 +153,14 @@ def def0(M, D, flags, assume_d, side, args, extra, pre=None):
         ce = ''
         if r == z3.sat:
             mo = sv.model(); ce = ' CE: ' + ' '.join('%s=%s' % (k, mo.eval(v, model_completion=True)) for k, v in [(q, pre['regs'][q]) for q in ('eax', 'ecx')] + [(q, pre['flags'][q]) for q in FLAGS])
-        return ('FAILED(def0)' if r == z3.sat else 'timeout'), 'DEF0 flag %s: model[free := 0] %s the lifted 0 (%s)%s' % (f, 'differs from' if r == z3.sat else 'unknown against', r, ce)
+        return ('FAILED(def0)' if r == z3.sat else bounds.BOUND), 'DEF0 flag %s: model[free := 0] %s the lifted 0 (%s)%s' % (f, 'differs from' if r == z3.sat else 'unknown against', r, ce)
     proved = []
     for rg in sorted(prior):
         if ('r', rg) in bad: continue
         mw = z3.substitute(M['regs'][rg], *sub)
         r, _ = check([mw != D['regs'][rg]], aw, args)
         if r == z3.unsat: proved.append(rg); continue
-        return ('FAILED(def0)' if r == z3.sat else 'timeout'), 'DEFPRIOR register %s: model[free := pre-state %s] %s the lifted value (%s)' % (rg, rg, 'differs from' if r == z3.sat else 'unknown against', r)
+        return ('FAILED(def0)' if r == z3.sat else bounds.BOUND), 'DEFPRIOR register %s: model[free := pre-state %s] %s the lifted value (%s)' % (rg, rg, 'differs from' if r == z3.sat else 'unknown against', r)
     extra['def0']['defprior'] = proved
     extra['def0']['nonflag_free'] = sorted(nonflag_all - set(proved))
     return 'proved', ''
@@ -191,6 +196,7 @@ def declared_findings(F):
 def prove_one(mod, F, code, key, args, pre=None, model=None, fields=None):
     """-> (result, note, certificate extras).  Shape proofs (shapeprove.py) pass pre = a pre-state with a symbolic eip, model = a thunk returning the model
     post-state of the shape, fields = {name: (offset, size)} of the symbolic encoding bytes (z3 variables fld_<name>, free = universally quantified)"""
+    if getattr(F, 'x87', None): from fnvnx.lift.proof import x87form; return x87form.prove_form(F)      # an x87 Form is proved against its spec entry (x87spec), the Sail model has no x87
     pre = PRE if pre is None else pre
     model_sail.SYMSEL = any(n.op == 'var' and n.x.startswith('sel_') for n in _nodes(F.roots()))
     base = getattr(mod, 'FAULT_OK_ORIG', None) or set(mod.FAULT_OK); mod.FAULT_OK_ORIG = base; mod.FAULT_OK = Perm(base, {k for k, _ in F.faults}) if F.faults else base
@@ -202,7 +208,7 @@ def prove_one(mod, F, code, key, args, pre=None, model=None, fields=None):
     mm2 = {}; mm3 = {}; fx = lambda v: rewrite.div_norm(rewrite.pow2_mul(v, mm2), mm3)
     M = {k: (fx(v) if not isinstance(v, dict) else {n: fx(t) for n, t in v.items()}) for k, v in M.items()}; D = {k: (fx(v) if not isinstance(v, dict) else {n: fx(t) for n, t in v.items()}) for k, v in D.items()}
     assume = M.get('assume', z3.BoolVal(True))
-    side = M.pop('side', z3.BoolVal(True)); nofault = M.pop('nofault', None)
+    side = M.pop('side', z3.BoolVal(True)); nofault = M.pop('nofault', None); nowrite = M.pop('nowrite', None)
     assume_d = z3.And(assume, D['fault'] == 0, domain) if F.faults else z3.And(assume, domain)
     probe = z3.BitVec('probe', 32); diffs = []                     # (field, dsl, model, strict difference)
     declared = declared_outputs(F)                                # outputs the Form takes from a platform function (uf): the model is not their reference
@@ -217,7 +223,7 @@ def prove_one(mod, F, code, key, args, pre=None, model=None, fields=None):
     if extra_declared: extra['declared'] = extra_declared; extra['platform_sha256'] = certbasis.platform_sha(extra_declared.values())
     if not complete:                                             # every model path faults (a declared fault, prove.Perm): nothing to compare, but the DSL must fault in every pre-state of the domain
         r0, _ = check([D['fault'] == 0], domain, args); extra['fault_checks'] = 'model never completes => DSL faults in every state: %s' % r0
-        return ('proved', '', extra) if r0 == z3.unsat else ('timeout', '', extra) if r0 != z3.sat else ('FAILED(dsl)', 'the model faults on every path, the DSL does not: ' + extra['fault_checks'], extra)
+        return ('proved', '', extra) if r0 == z3.unsat else (bounds.BOUND, '', extra) if r0 != z3.sat else ('FAILED(dsl)', 'the model faults on every path, the DSL does not: ' + extra['fault_checks'], extra)
     r, s = check([d for *_, d in diffs], assume_d, args); notes = []; ids = []
     if r == z3.sat:                                              # does a declared model defect explain every disagreement?
         mo = s.model(); ev = lambda e: mo.eval(e, model_completion=True)
@@ -237,12 +243,14 @@ def prove_one(mod, F, code, key, args, pre=None, model=None, fields=None):
         inp = ' '.join('%s=%x' % (v, ev(z3.BitVec(v, 32)).as_long()) for v in REGS) + ' ' + ' '.join('%s=%d' % (v, ev(z3.BitVec(v, 1)).as_long()) for v in FLAGS) + ''.join(' fld_%s=%x' % (n, ev(z3.BitVec('fld_' + n, 8 * f[1])).as_long()) for n, f in (fields or {}).items() if f)
         d = [(a, c) for k, a, c, _ in diffs if k == fld][0]
         return 'FAILED(dsl)', 'CE %s: %s dsl=%s model=%s' % (fld, inp, ev(d[0]), ev(d[1])), extra
-    if r != z3.unsat: return 'timeout', '', extra
+    if r != z3.unsat: return bounds.BOUND, '', extra
     if F.faults:                                                 # the model faults exactly where the DSL does
         r1, _ = check([D['fault'] != 0], z3.And(assume, domain), args); has_mem = 'm' in key.split('|')[1].replace('imm', '')
-        r2 = z3.unsat if has_mem else check([z3.Not(assume if nofault is None else nofault)], z3.And(D['fault'] == 0, domain), args)[0]
-        if not has_mem and nofault is not None and z3.Solver().check(side) != z3.sat: r2 = z3.unknown       # exists free values with `side` (closed): one satisfiability check
-        extra['fault_checks'] = 'assume=>no DSL fault: %s; no DSL fault=>assume: %s' % (r1, 'not applicable (memory operand: segment-limit faults)' if has_mem else r2)
+        cstore = has_mem and any(a.startswith('codestore:') for a in getattr(F, 'access', ()))      # the Form carries the code-segment store fault: the model takes :NON-WRITABLE-SEGMENT exactly where it fires (segment limits stay excluded: the declared descriptors are flat)
+        if cstore: r2 = z3.unknown if nowrite is None else check([z3.Not(nowrite)], z3.And(D['fault'] == 0, domain), args)[0]
+        else: r2 = z3.unsat if has_mem else check([z3.Not(assume if nofault is None else nofault)], z3.And(D['fault'] == 0, domain), args)[0]
+        if not has_mem and nofault is not None and _bounded().check(side) != z3.sat: r2 = z3.unknown       # exists free values with `side` (closed): one satisfiability check
+        extra['fault_checks'] = 'assume=>no DSL fault: %s; no DSL fault=>assume: %s' % (r1, 'not applicable (memory operand: segment-limit faults)' if has_mem and not cstore else r2)
         if r1 != z3.unsat or r2 != z3.unsat: return 'FAILED(dsl)', 'fault condition differs: ' + extra['fault_checks'], extra
     d0, dnote = def0(M, D, FLAGS, assume_d, side, args, extra, pre)      # DEF0: every architecturally undefined flag output is 0 in the lifted body; prove model[free := 0] == lifted
     if d0 != 'proved': return d0, dnote, extra

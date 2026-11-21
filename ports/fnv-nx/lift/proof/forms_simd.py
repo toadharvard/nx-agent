@@ -1,8 +1,10 @@
 """SIMD integer, bitwise and move families (MMX and SSE/SSE2), SDM Vol 2 per mnemonic.  xmm / mm operands go through forms.rd / forms.wr; every MMX
 instruction gets the one MMX rule (Form.mmx) from forms.build.  Memory operands of 128 bits are two 64-bit accesses; the aligned forms fault with
 kind 7 (access violation: Windows reports a #GP for a misaligned 16-byte operand as STATUS_ACCESS_VIOLATION) when the address is not 16-byte aligned."""
-from fnvlift.dsl import C, V, ashr, concat, eq, extract, ite, lshr, shl, slt, sext, trunc, ult, zext
-from proof.forms import ea, handler, isvec, rd, wr
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
+from fnvnx.lift.fnvlift.dsl import C, V, ashr, concat, eq, extract, ite, lshr, shl, slt, sext, trunc, ult, zext
+from fnvnx.lift.proof.forms import ea, handler, isvec, rd, wr
 
 def lanes(v, e): return [extract(v, (i + 1) * e - 1, i * e) for i in range(v.w // e)]       # low lane first
 def join(ls):

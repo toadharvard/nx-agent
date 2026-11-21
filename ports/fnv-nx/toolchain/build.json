@@ -1,0 +1,152 @@
+{
+ "format": "fnvnx-recipe/1",
+ "compiler": {
+  "external": "stage1",
+  "cc": "prefix/bin/aarch64-none-elf-gcc",
+  "cxx": "prefix/bin/aarch64-none-elf-g++"
+ },
+ "plugins": [
+  {
+   "name": "fnvnx_ftoi"
+  },
+  {
+   "name": "fnvnx_order"
+  },
+  {
+   "name": "fnvnx_sdd"
+  },
+  {
+   "name": "fnvnx_pi"
+  },
+  {
+   "name": "fnvnx_dispatch"
+  },
+  {
+   "name": "fnvnx_addr"
+  },
+  {
+   "name": "fnvnx_names"
+  },
+  {
+   "name": "fnvnx_layout"
+  }
+ ],
+ "external": [
+  {
+   "name": "stage1",
+   "root": "ports/fnv-nx/toolchain-stage1",
+   "output": "STAGE1",
+   "at": "/ext/stage1"
+  },
+  {
+   "name": "gcc-src",
+   "repo": "fnv-nx-build",
+   "ref": "tools/gcc-src-13.3.0",
+   "commit": "f445876db6a60cbbeaabb74496feb3ac4d8dd9c0",
+   "tree_sha256": "f50e0b054a167e54dc26e28a4df50dcd1a263f406264904c8b90083b978d20ea",
+   "at": "/ext/gcc"
+  },
+  {
+   "name": "newlib-src",
+   "repo": "fnv-nx-build",
+   "ref": "tools/newlib-4.6.0.20260123",
+   "commit": "2fb73524ccbb9e2877b43376561ae6fd5dbd169f",
+   "tree_sha256": "af2b544d2f73809053d82ac46ca194ea49ba5d597ee3499077ecb2d10e61ad9e",
+   "at": "/ext/newlib"
+  },
+  {
+   "name": "autotools-src",
+   "repo": "fnv-nx-build",
+   "ref": "tools/autotools-src",
+   "commit": "2dee10986af8b42c2da5af3cde7bddc0cd0c1905",
+   "tree_sha256": "6dbd091d6837b4e4a980710334b210d30107829dae63ed63a1964313b8999ed3",
+   "at": "/ext/autotools"
+  },
+  {
+   "name": "devkitpro-buildscripts",
+   "repo": "fnv-nx-build",
+   "ref": "tools/devkitpro-buildscripts-5740da9b",
+   "commit": "f34068c82a55f7020028b40e9313cf0fe177f63c",
+   "tree_sha256": "f0923ebe46119eacc98a29483651927dd528b3993a8fac3f73c3c92140aef0e0",
+   "at": "/ext/buildscripts"
+  }
+ ],
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/toolchain/msvcmodel/records.py",
+   "args": [
+    "stage2",
+    "/out/records2.sh",
+    "/in/ports/fnv-nx/verify"
+   ],
+   "inputs": [
+    "ports/fnv-nx/verify",
+    "ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json"
+   ],
+   "outputs": [
+    "records2.sh"
+   ]
+  }
+ ],
+ "run": [
+  {
+   "name": "rt",
+   "exec": "/usr/bin/bash",
+   "args": [
+    "/in/1"
+   ],
+   "inputs": [
+    "ports/fnv-nx/toolchain/msvcmodel/rt.sh",
+    {
+     "stage": "ports/fnv-nx/toolchain:gen:0",
+     "path": "records2.sh"
+    },
+    "ports/fnv-nx/toolchain/msvcmodel/msvcmodel.patch",
+    "ports/fnv-nx/toolchain/gcc/x19-x27.patch",
+    "ports/fnv-nx/toolchain/gcc/libstdcxx-nosized.patch",
+    "ports/fnv-nx/toolchain/gcc/newlib-guest.patch",
+    "ports/fnv-nx/toolchain/gcc/cfg_link.py",
+    "ports/fnv-nx/link/guest.ld",
+    "ports/fnv-nx/toolchain/dispatch/fnvnx_dispatch.cc",
+    {
+     "external": "stage1",
+     "path": "."
+    },
+    {
+     "external": "gcc-src",
+     "path": "gcc-13.3.0.tar.xz"
+    },
+    {
+     "external": "newlib-src",
+     "path": "newlib-4.6.0.20260123.tar.gz"
+    },
+    {
+     "external": "autotools-src",
+     "path": "autoconf-2.69.tar.xz"
+    },
+    {
+     "external": "autotools-src",
+     "path": "automake-1.15.1.tar.xz"
+    },
+    {
+     "external": "devkitpro-buildscripts",
+     "path": "."
+    },
+    {
+     "plugins": "root"
+    }
+   ],
+   "debs": {"profile": "compiler-build"},
+   "outputs": [],
+   "dirs": [
+    "COMPILER"
+   ],
+   "scratch": [
+    "/scratch"
+   ]
+  }
+ ],
+ "outputs": {
+  "COMPILER": "COMPILER"
+ }
+}

@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
-"""The CPUID feature flag of every instruction form of the pack, read from the Intel SDM and from nothing else (OWNER 10, ASM-009: the x86 ISA as documented in the SDM).
+"""The CPUID feature flag of every instruction form, read from the Intel SDM (OWNER 10, ASM-009: the x86 ISA as documented in the SDM).
 
-    python3 -I sdmfeat.py rows SDM.txt SITES.tsv OUT_ROWS.tsv [PUBLIC_ROWS.tsv]   # the per-form feature rows; OUT_ROWS lists the shapes of each form (exe-derived: private), PUBLIC_ROWS (lift/proof/tests/sdm_cpuid_feature_rows.tsv) only their number
-    python3 -I sdmfeat.py dumprows SDM.txt OUT.json                 # the lifter's input `sdmrows` (fnvlift/f_cpufeat.py): the opcode rows and flag table, nothing exe-derived
-    python3 -I sdmfeat.py partition OUT_ROWS.tsv SITES.tsv OUT.tsv  # the cleared sites, from the rows file ONLY
+    python3 -I sdmfeat.py dumprows SDM.txt OUT.json                 # the lifter's input `sdmrows` (proof/cpufeat.py, udsail.py): the opcode rows and flag table, nothing exe-derived
 
-SDM.txt: `pdftotext -layout` of the Intel(R) 64 and IA-32 Architectures SDM, combined volumes (its sha256 is in every output header; the page numbers cited are those of that edition).
-SITES.tsv: packuniverse.py's sites file (`module:address<TAB>shape key<TAB>family`).
+SDM.txt: `pdftotext -layout` of the Intel(R) 64 and IA-32 Architectures SDM, combined volumes (its sha256 is in the output; the page numbers cited are those of that edition).
 
 Source of each fact:
  * the opcode forms and their `CPUID Feature Flag`: the opcode tables of the instruction reference (Vol. 2A-2D).  A table with a `CPUID Feature Flag` column gives the flag in that column.  A table without that
    column (the older layout: `Opcode / Instruction / Op/En / 64-Bit Mode / Compat/Leg Mode`) names no flag in the row; the flags such a form needs are those its section's Exceptions text names as
    `#UD If CPUID.<leaf>:<reg>.<NAME>[Bit n] = 0` (collected per section as `exc_flags`).  A section that names none has no feature flag: the form is base.
  * the flag name -> (leaf, register, bit): the SDM's own CPUID chapter tables (Vol. 1 Ch. 21, `Leaf 01H ... Returned in ECX/EDX`, `Leaf 07H.00H ...`, `Leaf 80000001H ...`: rows `REG[n] NAME`).
- * the declared CPU: lift/rt/cpumodel.c compiled and called (fnvl_cpuid): a flag is present iff its leaf is <= the max leaf of its range and its bit is set in the answer (CLAUDE.md "The declared CPU").
+ * the declared CPU: the declared CPU of verify/cpuid_model.json (cpumodel_bits.model_words, as rt/cpumodel.c answers it): a flag is present iff its leaf is <= the max leaf of its range and its bit is set in the answer (CLAUDE.md "The declared CPU").
  * a form with no row in the SDM opcode tables is an undefined opcode: #UD on every CPU (the 3DNow! 0F 0F family is AMD's; the Intel SDM defines no 0F 0F).  Its row is `undefined`.
  * the SDM states that a few forms execute as another legal instruction on a CPU without the flag (TZCNT/LZCNT as BSF/BSR, PREFETCHW as a hint).  Each such statement is cited in the row's `exec_as` column.
 The capstone groups are not read here.  Rows are matched to a decoded form by (mandatory prefix, opcode bytes, ModRM.reg or fixed ModRM byte); an ambiguity (two rows with different flags) is an error, not a choice."""
+import os as _q_os, sys as _q_sys
+_q_sys.path.insert(0, _q_os.path.join(_q_os.path.dirname(_q_os.path.abspath(__file__)), "..", "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): qualified imports of another root's modules (fnvnx.contract.X, fnvnx.verify.X)
 import collections
 import hashlib
+import json
 import os
 import re
 import sys
@@ -47,39 +47,102 @@ def region(lines):
     return a
 
 
-def flag_table(lines):
-    """NAME -> [(leaf, sub, reg, bit)]: the rows `REG[n]   NAME` of the SDM's CPUID-leaf tables (Vol. 1 chapter 21)"""
-    out = collections.defaultdict(list); leaf = None
-    for ln in lines[20000:30000]:
-        m = re.match(r'\s*Table 21-\d+\.\s+Leaf ([0-9A-F]+)H(?:\.([0-9A-F]+)H)?\s', ln)
+def title_leaf(title):
+    """(leaf, sub) addressed by the title of a Table 21-N of the SDM's CPUID chapter (`Leaf 07H.01H ...`, `Leaf 07H Sub-Leaf (ECX=2) ...`, `CPUID.07H.02H ...`, `Leaf 01H ...` = sub 0), or None when the title names no fixed address
+    (`Leaf 0DH.SUB-LEAVES`, `Leaf 18H.ECX >= 1`: a variable sub-leaf has no address, so none of its rows is a feature bit)"""
+    m = re.match(r'(?:Leaf\s+|CPUID\.)([0-9A-F]+)H(?=[\s\.])(?:\.([0-9A-F]+)H(?=\s))?', title)
+    if not m:
+        return None
+    if m.group(2):
+        return int(m.group(1), 16), int(m.group(2), 16)
+    if title[m.end():m.end() + 1] == '.':
+        return None
+    e = re.search(r'\(ECX=(\d+)\)', title)
+    return int(m.group(1), 16), int(e.group(1)) if e else 0
+
+
+def flag_rows(lines):
+    """[(NAME, leaf, sub, reg, bit, citation)]: the rows `REG[n]   NAME` of the Intel SDM's CPUID-leaf tables (Vol. 1 ch. 21), each under the address of the Table 21-N title it sits under; a Table 21-N whose title names no fixed address
+    resets the address (a row is never read under the address of an earlier table)"""
+    out = []; leaf = None; title = ''
+    for j, ln in enumerate(lines[20000:30000], 20000):
+        m = re.match(r'\s*(Table 21-\d+)\.\s+(.*)', ln)
         if m:
-            leaf = (int(m.group(1), 16), int(m.group(2), 16) if m.group(2) else 0)
+            leaf = title_leaf(m.group(2).strip()); title = m.group(1)
             continue
         m = re.match(r'\s*(EAX|EBX|ECX|EDX)\[(\d+)\]\s+([A-Za-z0-9_\.]+)\s', ln)
         if m and leaf:
-            out[m.group(3)].append((leaf[0], leaf[1], m.group(1), int(m.group(2))))
+            out.append((m.group(3), leaf[0], leaf[1], m.group(1), int(m.group(2)), 'Intel SDM %s, %s: %s[%s] %s' % (title, page_after(lines, j), m.group(1), m.group(2), m.group(3))))
     return out
 
 
-def declared_cpu():
-    """{(leaf, reg): value} of the declared CPU (lift/rt/cpumodel.c compiled and called), plus the two max leaves"""
-    import ctypes
-    import subprocess
-    import tempfile
-    d = tempfile.mkdtemp(); c = os.path.join(d, 'm.c'); so = os.path.join(d, 'm.so')
-    with open(c, 'w') as fh:
-        fh.write('#include "%s/cpumodel.c"\nunsigned long long fnvl_host_ticks_ns(void) { return 0; }\n' % RT)
-    subprocess.check_call(['gcc', '-shared', '-fPIC', '-O1', '-w', '-o', so, c])
-    lib = ctypes.CDLL(so); out = {}
-    for leaf, sub in ((0, 0), (1, 0), (7, 0), (0x80000000, 0), (0x80000001, 0)):
-        o = (ctypes.c_uint32 * 4)(); lib.fnvl_cpuid(ctypes.c_uint32(leaf), ctypes.c_uint32(sub), o)
-        for r, v in zip(('EAX', 'EBX', 'ECX', 'EDX'), o): out[(leaf, r)] = v
-    return out
+def unify(sdm_rows):
+    """-> [record]: ONE record per CPUID address (leaf, sub, reg, bit), {canonical, leaf, sub, reg, bit, sdm_name, apm_name, sdm_cite, apm_cite, mirror_of} (the Intel SDM's names; apm_name, apm_cite and mirror_of are empty: the record format of the sdmrows file).
+    An address that the SDM gives two names is an error. Any other name that labels several addresses is a different CPUID fact (an XCR0 or XSS state bit that shares a feature's name, a leaf-7 sub-leaf bit that shares a name with another sub-leaf's):
+    its canonical name takes the address as a suffix, so that a name is one fact."""
+    by = collections.defaultdict(dict)
+    for n, l, s_, r, b, c in sdm_rows:
+        by[(l, s_, r, b)].setdefault(n, c)
+    recs = {}
+    for (l, s_, r, b), v in sorted(by.items()):
+        if len(v) > 1:
+            raise SystemExit('SDM defines two names at %08X.%d %s[%d]: %s' % (l, s_, r, b, sorted(v)))
+        sn, sc = next(iter(v.items()))
+        recs[(l, s_, r, b)] = {'canonical': sn, 'leaf': l, 'sub': s_, 'reg': r, 'bit': b, 'sdm_name': sn, 'apm_name': '', 'sdm_cite': sc, 'apm_cite': '', 'mirror_of': ''}
+    labels = collections.defaultdict(set)
+    for k, rec in recs.items():
+        labels[rec['canonical']].add(k)
+    for k, rec in recs.items():
+        if len(labels[rec['canonical']]) > 1:
+            rec['canonical'] = '%s@%08X.%d.%s[%d]' % ((rec['canonical'],) + k[:3] + k[3:])
+    return list(recs.values())
+
+
+class Table:
+    """the feature table the partition reads: records of unify(); every lookup goes through the canonical name.  `canonicals(spelling)` is the set of canonical names that a vendor spelling (the SDM's, the APM's or the canonical itself) stands for"""
+    def __init__(self, records):
+        self.records = list(records)
+        a2c = {}; by_addr = {(r['leaf'], r['sub'], r['reg'], r['bit']): r for r in self.records}
+        for r in self.records:
+            k = (r['leaf'], r['sub'], r['reg'], r['bit'])
+            if a2c.setdefault(k, r['canonical']) != r['canonical']:
+                raise SystemExit('address %s has two canonical names' % (k,))           # address -> canonical is a function
+        c2a = collections.defaultdict(set)
+        for k, c in a2c.items():
+            c2a[c].add(k)
+        for c, ks in c2a.items():                                                        # canonical -> address is one-to-one; the only extra addresses of a name are the APM's own `Same as CPUID ...` mirrors
+            if len([k for k in ks if not by_addr[k]['mirror_of']]) > 1:
+                raise SystemExit('canonical %s labels several addresses %s' % (c, sorted(ks)))
+        self.alias = collections.defaultdict(set); self.addr = collections.defaultdict(list)
+        for r in self.records:
+            for n in (r['canonical'], r['sdm_name'], r['apm_name']):
+                if n:
+                    self.alias[n].add(r['canonical'])
+            self.addr[r['canonical']].append((r['leaf'], r['sub'], r['reg'], r['bit']))
+
+    def __contains__(self, name):
+        return name in self.alias
+
+    def canonicals(self, name):
+        return sorted(self.alias.get(name, ()))
+
+    def addresses(self, name):
+        return [a for c in self.canonicals(name) for a in self.addr[c]]
+
+
+def declared_cpu(cpumodel_bits, model_json):
+    """{(leaf, reg): value} of the declared CPU, plus the two max leaves: the feature words are cpumodel_bits.model_words of the record at MODEL_JSON (verify/cpuid_model.json: the caller passes the mounted input, there is no default path), the one derivation that tools/gen_cpuref.py
+    (the generator of rt/cpumodel_tab.inc and fnvl_cpuref.h) and the lifter's feature gate call; the max leaves are that record's too.  Nothing is compiled.  Only the fields a feature flag can
+    sit in are given (leaf 1 ECX/EDX, 0x80000001 ECX/EDX, the max leaves); a leaf above its range's max is absent (`present` tests it), and fields the platform owns (leaf 1 EBX, leaf 4 EAX) are not features."""
+    mod = json.load(open(model_json))
+    w = cpumodel_bits.model_words(mod); I = cpumodel_bits.I
+    return {(0, 'EAX'): mod['max_basic'], (0x80000000, 'EAX'): I(mod['max_ext']), (1, 'ECX'): w['leaf1_ecx'], (1, 'EDX'): w['leaf1_edx'],
+            (0x80000001, 'ECX'): w['ext1_ecx'], (0x80000001, 'EDX'): w['ext1_edx']}
 
 
 def present(name, table, cpu):
     """a flag is present iff its leaf is within the declared max of its range and its bit is set in the declared answer"""
-    for leaf, sub, reg, bit in table.get(name, ()):
+    for leaf, sub, reg, bit in table.addresses(name):
         mx = cpu[(0, 'EAX')] if leaf < 0x80000000 else cpu[(0x80000000, 'EAX')]
         if leaf <= mx and sub == 0 and (cpu.get((leaf, reg), 0) >> bit) & 1:
             return True
@@ -111,7 +174,7 @@ def eval_flag(text, table, cpu):
         if t == '(':
             v = expr(); pos[0] += 1
             return v
-        if t not in table: unknown.append(t)
+        if t not in table: unknown.append(t)           # `in` and `present` resolve the spelling to its canonical names
         return present(t, table, cpu)
     v = expr()
     return v, unknown
@@ -298,10 +361,6 @@ def flag_expr(cell, table):
     return ' '.join(out)
 
 
-def vexkey(d):
-    return d
-
-
 def decode(code, md, addr=0x1000):
     return next(iter(md.disasm(code, addr, 1)), None)
 
@@ -388,22 +447,6 @@ def sdm_rows(lines, table):
     return out
 
 
-def form_id(r):
-    d = r['p']
-    if d is None or d['vex']:
-        return 'vex:' + r['op']
-    return '%s|%s%s|%s' % (d['pfx'] or '-', ' '.join('%02X' % b for b in d['bytes']), '+r' if d['plus_r'] else '', '/%d' % d['digit'] if d['digit'] is not None else '-')
-
-
-def read_sites(path):
-    out = []
-    for ln in open(path):
-        if ln.startswith('#') or not ln.strip(): continue
-        a, k, f = ln.rstrip('\n').split('\t')
-        out.append((a, k, f))
-    return out
-
-
 # Forms with no row in the opcode tables of the instruction reference that the SDM still defines (so they are lifted with SDM semantics, not #UD): (name, matcher on (mandatory prefix, body bytes), the SDM text that
 # defines them: the line is searched in the SDM text and its page is cited).  Everything else without a row is SDM-undefined (class B: #UD on the declared machine).
 OPMAP = (
@@ -412,13 +455,6 @@ OPMAP = (
     ('C5 /r LDS', lambda m, b: b[:1] == b'\xc5', 'LDSi64', 'Table A-2: C5 is LDS (invalid only in 64-bit mode)'),
     ('0F 1E / 0F 1F Reserved-NOP', lambda m, b: b[:2] in (b'\x0f\x1e', b'\x0f\x1f'), 'are also reserved but may behave as NOP', 'Appendix A: "Reserved-NOP" opcodes may behave as NOP'),
 )
-
-
-def opmap_cite(lines, text):
-    for i, l in enumerate(lines):
-        if text in l and i > 140000:
-            return page_after(lines, i)
-    raise SystemExit('SDM text not found: %r' % text)
 
 
 def index_rows(allrows):
@@ -434,7 +470,7 @@ def index_rows(allrows):
 
 
 def match_form(ins, idx):
-    """-> (candidate rows, kind, opcode-map entry or None) of a decoded form: the one row match of cmd_rows, shared with the lifter's feature gate (fnvlift/f_cpufeat.py)"""
+    """-> (candidate rows, kind, opcode-map entry or None) of a decoded form: the one row match of cmd_rows, shared with the lifter's feature gate (proof/cpufeat.py)"""
     byfirst, vex = idx
     mand, body, pos = form_of(ins)
     isvex = body[:1] in (b'\xc4', b'\xc5') and ins.mnemonic.startswith('v')
@@ -447,102 +483,20 @@ def match_form(ins, idx):
     return cand, kind, mp
 
 
-def needs_of(rs, table, cpu, nopflags):
-    """-> (status, needs, value, exec_as, problems) of the matched rows rs: status found | ambiguous; needs: the flag expressions, ' | '-joined; value none | present | absent (the declared CPU); exec_as: the SDM's
-    `executed as` aliases and NOP for an MPX-style flag; problems: unknown flag names"""
-    needset = set(); bad = []
-    for r in rs:
-        if r['fmt'] == 'A' and r['flag']: needset.add(r['flag'])
-        elif r['fmt'] == 'A': needset.add(' AND '.join(r['exc']) or '-')
-        else: needset.add(' AND '.join(r['exc']) or '-')
-    if len(needset) > 1:
-        bad.append(sorted(needset))
-    st = 'found' if len(needset) == 1 else 'ambiguous'
-    needs = ' | '.join(sorted(needset))
-    vals = set()
-    for n in needset:
-        if n == '-': vals.add('none'); continue
-        ok, unk = eval_flag(n, table, cpu)
-        vals.add('present' if ok else 'absent')
-        if unk: bad.append('unknown flag %s' % unk)
-    val = 'none' if vals == {'none'} else ('absent' if 'absent' in vals else 'present')
-    ea = ','.join(sorted({x for r in rs for x in r['exec_as']} | {'NOP' for n in needset for t in re.findall(r'[A-Za-z0-9_\.]+', n) if t in nopflags})) or '-'
-    return st, needs, val, ea, bad
-
-
-def cmd_rows(sdm, sites, out, public=None):
-    from proof import shape
-    lines = load(sdm); table = flag_table(lines); cpu = declared_cpu()
-    allrows = sdm_rows(lines, table)
-    nopflags = set(re.findall(r'are NOP on processors that report CPUID\.\w+H?\.\w+H?:\w+\.(\w+)\[', ' '.join(l.strip() for l in lines)))     # SDM Vol. 1 ch. 17: all MPX instructions are NOP without the flag
-    idx = index_rows(allrows)
-    sv = read_sites(sites); shapes = collections.OrderedDict(); count = collections.Counter(); fam = {}
-    for a, k, f in sv:
-        count[k] += 1; fam[k] = f
-    md = shape.decoder(); forms = collections.OrderedDict(); problems = []
-    for k in sorted(count):
-        ins = decode(shape.rep_bytes(k), md)
-        cand, kind, mp = match_form(ins, idx)
-        mand, body, _pos = form_of(ins)
-        if not cand and mp:
-            key = 'map|%s|%s' % (mp[0], ' '.join('%02X' % b for b in body[:3]))
-            e = forms.setdefault(key, {'rows': [], 'shapes': [], 'fam': set(), 'map': mp})
-        elif not cand:
-            key = 'undefined|%s|%s' % (mand or '-', ' '.join('%02X' % b for b in body[:3]))
-            if kind == 'legacy' and False: pass
-            e = forms.setdefault(key, {'rows': [], 'shapes': [], 'fam': set()})
-        else:
-            fids = sorted({form_id(r) for r in cand})
-            key = fids[0] if len(fids) == 1 else ' ; '.join(fids)
-            e = forms.setdefault(key, {'rows': cand, 'shapes': [], 'fam': set()})
-        e['shapes'].append(k); e['fam'].add(fam[k])
-    nsites = collections.Counter(k for a, k, f in sv)
-    outs = [(out, True)] + ([(public, False)] if public else [])
-    fhs = [(open(o, 'w', newline='\n'), full) for o, full in outs]
-
-    class Tee:
-        def write(self, t):
-            for h, full in fhs: h.write(t)
-
-        def row(self, f):                       # the public copy names the number of shapes of a form instead of the (exe-derived) shape list
-            for h, full in fhs: h.write('\t'.join(f if full else f[:9] + ['n=%d' % len(f[9].split(','))] + f[10:]) + '\n')
-    fh = Tee()
-    if True:
-        fh.write('# fnvnx-sdm-cpuid-feature-rows/1 sdm_sha256=%s cpumodel_sha256=%s forms=%d shapes=%d sites=%d\n' % (sha_file(sdm.replace('.txt', '.pdf')) if os.path.exists(sdm.replace('.txt', '.pdf')) else sha_file(sdm), sha_file(os.path.join(RT, 'cpumodel.c')), len(forms), len(count), len(sv)))
-        fh.write('# source: Intel 64 and IA-32 Architectures SDM combined volumes (pdftotext -layout), opcode tables of Vol. 2A-2D; flag names and bits: Vol. 1 ch. 21 CPUID leaf tables; declared CPU: lift/rt/cpumodel.c\n')
-        fh.write('# form\tfamily\tstatus\tneeds\tvalue\texec_as\tsdm_opcode\tsdm_instr\tcitation\tshapes\tnsites\n')
-        for key in sorted(forms):
-            e = forms[key]; rs = e['rows']
-            if not rs and e.get('map'):
-                mp = e['map']
-                st, needs, val, ea, op, ins, cit = 'defined-by-opcode-map', '-', 'none', '-', mp[0], '-', 'SDM %s (%s)' % (mp[3], opmap_cite(lines, mp[2]))
-            elif not rs:
-                st, needs, val, ea, op, ins, cit = 'undefined', '-', 'none', '-', '-', '-', 'no row in the SDM opcode tables for this opcode form (undefined opcode: #UD, SDM Vol. 2 ch. 3 "Interrupt 6 - Invalid Opcode")'
-            else:
-                st, needs, val, ea, bad = needs_of(rs, table, cpu, nopflags)
-                problems.extend((key, b) for b in bad)
-                op = rs[0]['op']; ins = rs[0]['instr']; cit = 'SDM %s %s %s' % (rs[0]['sec'], rs[0]['page'], ('opcode table row "%s"' % rs[0]['op']) + ('' if rs[0]['fmt'] == 'A' else ' (no flag column; flags from the #UD CPUID lines of the section)'))
-            fh.row([key, ','.join(sorted(e['fam'])), st, needs, val, ea, op, ins, cit, ','.join(e['shapes']), str(sum(nsites[k] for k in e['shapes']))])
-    for h, full in fhs: h.close()
-    sys.stdout.write('forms %d shapes %d sites %d problems %d\n' % (len(forms), len(count), len(sv), len(problems)))
-    for p in problems[:40]: sys.stdout.write('  PROBLEM %s\n' % (p,))
-    return 1 if problems else 0
-
-
-ROWS_FORMAT = 'fnvnx-sdmrows/1'
+ROWS_FORMAT = 'fnvnx-sdmrows/2'
 
 
 def cmd_dumprows(sdm, out):
     """the lifter's input `sdmrows`: every SDM opcode-table row (the fields the form match and the flag decision read), the SDM's flag table and the MPX-style NOP flags, in one JSON file.
     The opcode cell `p` is re-parsed on load (parse_opcode), so the file holds the SDM's own text only."""
     import json
-    lines = load(sdm); table = flag_table(lines)
+    lines = load(sdm); recs = unify(flag_rows(lines)); table = Table(recs)      # the SDM's own feature table (no vendor layer): the records are the file's `features`
     nopflags = sorted(set(re.findall(r'are NOP on processors that report CPUID\.\w+H?\.\w+H?:\w+\.(\w+)\[', ' '.join(l.strip() for l in lines))))
     rows = [{k: r[k] for k in ('op', 'modc', 'instr', 'flag', 'fmt', 'sec', 'page', 'line', 'exc', 'exec_as')} for r in sdm_rows(lines, table)]
     with open(out, 'w', newline='\n') as fh:
         json.dump({'format': ROWS_FORMAT, 'sdm_sha256': sha_file(sdm.replace('.txt', '.pdf')) if os.path.exists(sdm.replace('.txt', '.pdf')) else sha_file(sdm),
-                   'flags': {k: [list(t) for t in v] for k, v in sorted(table.items())}, 'nopflags': nopflags, 'rows': rows}, fh, indent=0, sort_keys=True)
-    sys.stdout.write('rows %d flags %d nopflags %d\n' % (len(rows), len(table), len(nopflags)))
+                   'features': recs, 'nopflags': nopflags, 'rows': rows}, fh, indent=0, sort_keys=True)
+    sys.stdout.write('rows %d features %d nopflags %d\n' % (len(rows), len(recs), len(nopflags)))
     return 0
 
 
@@ -552,39 +506,11 @@ def load_rows(path):
     d = json.load(open(path))
     if d.get('format') != ROWS_FORMAT: raise ValueError('sdmrows: %s is not a %s file' % (path, ROWS_FORMAT))
     rows = [dict(r, p=parse_opcode(r['op'])) for r in d['rows']]
-    return rows, {k: [tuple(t) for t in v] for k, v in d['flags'].items()}, frozenset(d['nopflags'])
-
-
-def cmd_partition(rows, sites, out):
-    by = {}; hdr = ''
-    for ln in open(rows):
-        if ln.startswith('#'):
-            if not hdr: hdr = ln.strip()
-            continue
-        f = ln.rstrip('\n').split('\t')
-        form, fam, st, needs, val, ea, op, ins, cit, shp, n = f
-        if st == 'ambiguous':
-            raise SystemExit('ambiguous row %s' % form)
-        cleared = st == 'undefined' or (val == 'absent' and ea == '-')               # class B: #UD on the declared machine
-        for k in shp.split(','): by[k] = (cleared, form, st, needs, ea)
-    cnt = collections.Counter(); total = 0
-    with open(out, 'w', newline='\n') as fh:
-        fh.write('# fnvnx-sdm-cleared-sites/1 from %s\n# module:address\tshape\tform\treason\n' % hdr[:200])
-        for a, k, f in read_sites(sites):
-            total += 1
-            c, form, st, needs, ea = by[k]
-            if c:
-                why = 'undefined opcode' if st == 'undefined' else 'needs %s' % needs
-                cnt[why] += 1
-                fh.write('%s\t%s\t%s\t%s\n' % (a, k, form, why))
-    sys.stdout.write('sites %d cleared %d: %s\n' % (total, sum(cnt.values()), dict(cnt)))
-    return 0
+    return rows, Table(d['features']), frozenset(d['nopflags'])
 
 
 def main(argv):
-    if len(argv) in (4, 5) and argv[0] == 'rows': return cmd_rows(*argv[1:])
     if len(argv) == 3 and argv[0] == 'dumprows': return cmd_dumprows(*argv[1:])
-    if len(argv) == 4 and argv[0] == 'partition': return cmd_partition(*argv[1:])
     sys.stderr.write(__doc__); return 2
 
 

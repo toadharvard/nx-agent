@@ -25,9 +25,11 @@
      "path": "intel-64-ia-32-sdm-combined.pdf"
     }
    ],
-   "debs": [
-    "poppler-utils"
-   ],
+   "debs": {
+    "closure": [
+     "poppler-utils"
+    ]
+   },
    "outputs": [
     "sdm.txt"
    ]

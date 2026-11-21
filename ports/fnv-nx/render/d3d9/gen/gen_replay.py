@@ -2,14 +2,14 @@
 """gen_replay.py OUTDIR [SPEC.json]: generates OUTDIR/d9replay.gen.cpp (not checked in): the spec-driven tables and call invokers of the G-REPLAY replayer.
 Runtime: render/tools/cmp/d9replay_rt.cpp (+ .h).  Every item comes from the spec by rule; exit 2 naming the item when the spec has something with no emitter (no fallbacks)."""
 import json, os, sys
-HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE); sys.dont_write_bytecode = True
-from gen_expr import Ctx, GenError            # noqa: E402
-import gen_tab as T                           # noqa: E402
+HERE = os.path.dirname(os.path.abspath(__file__)); sys.dont_write_bytecode = True
+from fnvnx.render.d3d9.gen.gen_expr import Ctx, GenError            # noqa: E402
+from fnvnx.render.d3d9.gen import gen_tab as T  # noqa: E402
 
 KIND = {"value": 0, "enum": 1, "flags": 2, "float": 3, "ohandle": 4, "handle": 5, "struct": 6, "buffer": 7, "locked": 8}
 DIR = {"in": 0, "out": 1, "inout": 2}
 SHAPE = {"linear": 0, "rect": 1, "box": 2, "dc": 3}
-from gen_expr import REFS  # noqa: E402
+from fnvnx.render.d3d9.gen.gen_expr import REFS  # noqa: E402
 
 
 def isptr(p): return p["byref"] or p["kind"] in ("buffer", "locked", "struct")

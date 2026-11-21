@@ -58,11 +58,13 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import cas  # noqa: E402
-import recipe  # noqa: E402
-import gate_admit  # noqa: E402
-import gate_tests  # noqa: E402
-import gatesdir  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))   # ports (`fnvnx` is ports/fnvnx -> fnv-nx): the siblings are imported by their qualified name
+from fnvnx.verify import cas  # noqa: E402
+from fnvnx.verify import recipe  # noqa: E402
+from fnvnx.verify import gate_admit  # noqa: E402
+from fnvnx.verify import gate_tests  # noqa: E402
+from fnvnx.verify import gatesdir  # noqa: E402
 
 TREE = "ports/fnv-nx"
 ADMIT = TREE + "/verify/admit.json"
@@ -429,8 +431,8 @@ def main():
     if dang:
         detail += "; %d dangling oracle.json keys: %s" % (len(dang), ", ".join(dang[:5]))
     res = {"format": "fnvnx-gate/1", "name": "oracle", "status": status, "universe": len(files) + len(dang), "certified": n,
-           "uncertified": (sorted(bad) + dang)[:50], "detail": "; ".join(errors + [detail]),
-           "reasons": dict({f: bad[f] for f in sorted(bad)[:50]}, **{d: "names no tracked test file" for d in dang[:50]}), "references": kinds}
+           "uncertified": (sorted(bad) + dang), "detail": "; ".join(errors + [detail]),
+           "reasons": dict({f: bad[f] for f in sorted(bad)}, **{d: "names no tracked test file" for d in dang}), "references": kinds}
     with open(os.path.join(out, "oracle.json"), "w") as fh:
         json.dump(res, fh, sort_keys=True)
     return 0 if status == "green" else 2
