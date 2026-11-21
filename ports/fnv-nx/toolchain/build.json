@@ -77,8 +77,7 @@
    "args": [
     "stage2",
     "/out/records2.sh",
-    "/in/ports/fnv-nx/verify",
-   "/in/ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json"
+    "/in/ports/fnv-nx/verify"
    ],
    "inputs": [
     "ports/fnv-nx/verify",

@@ -4,7 +4,7 @@ floating-point value (scalar or vector lanes) to an integer, with its rounding. 
 aarch64-builtins.cc and iterators.md of the sha256-pinned GNU tarball gcc-13.3.0 (the one toolchain/msvcmodel/build.sh builds the game's
 compiler from).
 
-  gen_f2i_builtins.py [--check] GCC_SRC_DIR f2i_builtins.inc      GCC_SRC_DIR holds gcc/config/aarch64/ of the tarball; --check compares, never writes; both paths are declared inputs
+  gen_f2i_builtins.py GCC_SRC_DIR [--check]      GCC_SRC_DIR holds gcc/config/aarch64/ of the tarball; --check compares, never writes
 
 The class is the .def's own: a row is in it iff the machinery that registers it (aarch64-builtins.cc, aarch64_init_simd_builtin_functions)
 builds a builtin for one of the conversion patterns
@@ -75,9 +75,8 @@ def text(d):
 
 
 if __name__ == "__main__":
-    if len([a for a in sys.argv[1:] if a != "--check"]) != 2:
-        sys.exit("usage: gen_f2i_builtins.py [--check] GCC_DIR f2i_builtins.inc   (both are declared inputs of the caller; no path is derived from this file's location)")
-    d, here = [a for a in sys.argv[1:] if a != "--check"]
+    d = sys.argv[1]
+    here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "f2i_builtins.inc")
     s = text(d)
     if "--check" in sys.argv:
         sys.exit(0 if open(here).read() == s else "f2i_builtins.inc differs from the .def")
