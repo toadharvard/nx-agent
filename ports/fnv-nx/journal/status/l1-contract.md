@@ -3188,3 +3188,9 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - Condition: archive_tree and recipe.py:3929 share one ar function. w28 makes the change at cand6 assembly.
   - The env.json profile and ctypes_compat `!` come from w29-c5, not from L2.
 - 18:53 L2 cand6-l1 head is now 778457923 (12 contributions; env.json and ctypes_compat come via w29).
+- 18:58 w29-c5 0b0735c7c done. Accepted:
+  - ce63f9aee: .fnvnx.clones parser; test_objstub_clones 18/18.
+  - 1f2e77386: ctypes_compat `!`.
+  - 0b0735c7c: envcheck.declared_debs is the one pinned set; compiler-build gmp/mpfr/mpc/zlib; pathflow mounts sibling-tree data.
+  - Forwarded to L4 and w8.
+  - Open: item 0 (objstub judges external units); the deb pin rows for the 4 new packages (deb_pins red until the mirror run); test_pathrules IndexError (pre-existing?); the lift/rt measurement.
