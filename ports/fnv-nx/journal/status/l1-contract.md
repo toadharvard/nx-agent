@@ -3177,3 +3177,6 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - 18:48 DATAMODEL class: L1's rule (pathflow import-mount data) is the one fix, and L2 drops w3's argv conversion.
   - cand6 sources: L4 claude/fnv-l4-verify ab7b1bf36 (L4 prefixes, boot roots); L5 c6 09ceed68d (0 transfers to L1).
 - Open rule gap (L1, after the first frame): a recipe form for a root's tracked Python tests, e.g. platform/com/test_gen_cxx.py. Until then they are measurements.
+- 18:48 w29 const.h 6d228dad accepted (FNVNX_CONST/_VOID/_IDENT; the tests pass). L5 replaces gen_env_const's RECORD templates with the macros.
+  - w29 order: `!`, then pinned closure, then the import-mount data, then the clone parser, then the lift/rt measurement.
+  - L2 reverted w3's argv version (932a00c3d / bca6714e1).
