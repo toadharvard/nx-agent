@@ -3160,3 +3160,8 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - cand5 assembled: c5 e4e9b7e53. candcheck shows 0 reds: 2102 files, 233 roots, 10 cuts, 24 superseded pair records covering 1918 non-owner edits. The verdict RUN is sent to the farm.
 - Each lead (L2, L3a, L4, L5, L6) has its private-edit section: deliver the real ones to the owner for cand6, or declare them stale.
 - Sent to the orchestrator: the CLAUDE.md hygiene order, the vacuity-behind-calls gap, and the check-time probe DEBT.
+- Orchestrator 18:42:
+  - The "one owner per tree" order is at integ CLAUDE.md 8cf56d298. Pair records are allowed for cand5 and cand6 only, so 0 from cand7 on. cand6 carries that CLAUDE.md section.
+  - Known gap, no rule, after the first frame: vacuity hidden behind calls (lock/unlock around dead state).
+  - L1 DEBT, after the first frame: compiler probes at check time (PROBE_ENV, keyed by the compiler tree hash).
+- Next: the cand5 verdict at e4e9b7e53, then cand4 dcc88df77. The lead delivery lists were sent 18:41.
