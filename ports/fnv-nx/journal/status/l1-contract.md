@@ -3165,3 +3165,4 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - Known gap, no rule, after the first frame: vacuity hidden behind calls (lock/unlock around dead state).
   - L1 DEBT, after the first frame: compiler probes at check time (PROBE_ENV, keyed by the compiler tree hash).
 - Next: the cand5 verdict at e4e9b7e53, then cand4 dcc88df77. The lead delivery lists were sent 18:41.
+- L6 delivery: 3 admit-only commits; 293 files stale; L1's share empty. bridgefacts/com stays admitted in c5 (L5's platform and bridgetable use it); L6 admits it on its own head for cand6.
