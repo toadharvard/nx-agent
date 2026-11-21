@@ -3102,3 +3102,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
 - cand4 (w15 dcc88df77) and cand5 (c5 eaeb17ffd, with L2 overlay 2ba233f20): the farm's 11-16 run stopped at the weekly limit before either verdict finished. RUN re-sent to farm session_01KmtZKTV1mniUErarfUpdJZ. Status: doing.
 - const.h (w29-c5 6d228dada) sent to L6, for its 9 .fnvnx.const records, and to L5 for review, gen_env_const via w40 and taking 568d0049. Status: waiting on L5 and L6.
 - Trunk: fac693694.
+- const.h 6d228dada: L5 accepted it for hostabi. L5's optional `constinit` hardening is declined, after the first frame.
+  - Probe with g++ 13.3.0-6ubuntu2~24.04.1, gnu++20: it compiles the (void *)(fn) records only through GCC's leniency; standard C++ forbids reinterpret_cast in a constant initializer.
+  - objstub's "exactly one record per accepted body" already makes a dynamically initialized record red.
+  - L5 puts the w29 items on claude/fnv-l5-platform-c6 (c5 + 568d0049 + const.h + gen_env_const on the macros), as the candidate after cand5. cand5 keeps L5 563e1273f.
