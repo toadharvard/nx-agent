@@ -82,11 +82,11 @@ check("version_script: a tracked file of a doc root is red", any("link must be" 
 # the tools of the ldcheck stage (link/ldcheck.py, contract/gatefile.py): tracked files under a tree of an admitted tool root
 need = lambda rs: [e for e in recipe.check(rec("a.elf"), EXE, files, rs, pin, REPO) if "ldcheck stage needs" in e]  # noqa: E731
 check("link tools under the declared trees of the tool root (contract, link) are valid", need(roots) == [], need(roots))
-TOOL_ROOTS = ("ports/fnv-nx/contract", "ports/fnv-nx/link")   # the admitted tool roots that hold the ldcheck stage's files (one root per tree)
-nt = {k: v for k, v in roots.items() if k not in TOOL_ROOTS}
-check("the same tools with no admitted root that holds them are red, one finding per tool", len(need(nt)) >= 2, need(nt))
-dc = {k: (dict(v, **{"class": "doc"}) if k in TOOL_ROOTS else v) for k, v in roots.items()}
-check("a root that is not a tool root does not admit a link tool", len(need(dc)) >= 2, need(dc))
+cr = next(r for r in roots.values() if r.get("class") == "tool" and "ports/fnv-nx/link" in (r.get("trees") or []))
+nt = dict(roots, **{cr["path"]: {k: v for k, v in cr.items() if k != "trees"}})
+check("the same tools with no admitted tree that holds them are red, one finding per tool", len(need(nt)) >= 2, need(nt))
+dc = dict(roots, **{cr["path"]: dict(cr, **{"class": "doc"})})
+check("a tree of a root that is not a tool root does not admit a link tool", len(need(dc)) >= 2, need(dc))
 check("tool_file is the one membership function: a file under a declared tree is a tool file, one outside every tree is not",
       recipe.tool_file(roots, files, "ports/fnv-nx/link/ldcheck.py") and not recipe.tool_file(nt, files, "ports/fnv-nx/link/ldcheck.py"))
 print("FAILED: %s" % FAILED if FAILED else "all pass")

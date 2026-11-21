@@ -8,7 +8,7 @@ Stages are cached by key in GATE_CACHE/store (a temp dir without GATE_CACHE); th
 compares a warm and a cold build). Keep going (RECIPE.md): a red root lists every red unit and stage and every blocked unit; all that was buildable is built and kept.
 Hand-over to later gates: verdict.py gives EVERY gate its own GATE_OUT, so a later gate cannot
 read this gate's GATE_OUT. objects.json of a root is therefore also kept at GATE_CACHE/objects/<tree>/<root name>/objects.json (with
-obj/, the ELF and constants.tsv beside it; <tree> = git tree of the commit under test, <root name> = path with / as __), and later
+obj/, the ELF beside it; <tree> = git tree of the commit under test, <root name> = path with / as __), and later
 gates call ensure() (build or cache hits, same result). Without GATE_CACHE nothing outlives the gate except GATE_OUT/objects/<root name>.json."""
 import atexit
 import hashlib

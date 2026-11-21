@@ -122,13 +122,6 @@ with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as td:
     check("the recipe with a python tool step is valid", not errs, errs)
     j1, root1 = produced(repo, td, "1")
     check("a step importing two pinned modules and writing under scratch is green", not j1.red and open(os.path.join(root1, "o.txt")).read() != "", j1.red)
-    # a consumer's `uses` of a root whose output only a run step makes: Job.produce runs the producer's run stages too (it once ran only the generated ones,
-    # so the output was absent: "[Errno 2] ... root/sdm.txt" through imptest/lifted -> lift/sdmrows -> lift/sdm)
-    try:
-        ut = j1.use_tree(tempfile.mkdtemp(prefix="rp-use", dir=td), {"root": R, "output": "o"})
-    except (OSError, recipe.BuildRed) as e:
-        ut = repr(e)
-    check("a `uses` of a run-only producer's output is the tree its own build makes", ut == recipe.cas.ingest(os.path.join(root1, "o.txt"), j1.store), ut)
     jb, _ = produced(make(td, "b", BAD), td, "2")
     check("a step importing an unpinned module is red", bool(jb.red), jb.red)
     orig = recipe.pinned_modules

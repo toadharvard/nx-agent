@@ -91,8 +91,8 @@ check("declared test without a linked ELF: red", kinds({"R": res})[0] == ["test-
 k, f, st, _ = kinds({"R": result(["a", "u_dup", "b"], [])})
 check("undeclared test source (a product unit that replaces a product body): product-duplicate", k == ["product-duplicate"] and "real_b" in f[0][3] and "R/b" in f[0][3] and "R/u_dup" in f[0][3], (k, f))
 check("two product objects with the same WEAK symbol: no finding (inline functions)",
-      doubles.judge({"R": {"units": ["a", "b"], "defined": [{"symbol": "inl", "bind": "WEAK", "type": "FUNC", "object": "a"},
-                                                                {"symbol": "inl", "bind": "WEAK", "type": "FUNC", "object": "b"}], "tests": []}})[1] == [])
+      doubles.judge({"R": {"units": ["a", "b"], "defined": [{"symbol": "inl", "bind": "WEAK", "type": "FUNC", "object": "a", "target": [2, 183]},
+                                                                {"symbol": "inl", "bind": "WEAK", "type": "FUNC", "object": "b", "target": [2, 183]}], "tests": []}})[1] == [])
 # a ROOT of admit class test (tests/bootrt): its whole object set is test code
 tr = {"units": ["o"], "defined": defined("t_other") + defined("t_clean"), "tests": []}
 tr["defined"] = [dict(d, object="t_other") for d in defined("t_other")] + [dict(d, object="t_clean") for d in defined("t_clean")]
@@ -104,6 +104,25 @@ k, f, st, items = kinds({"P": result(["a", "o"], []), "T": tc}, {"T"})
 check("a test root with only its own names: green, its objects are not product objects", k == [] and sorted(i for i, _ in items) == ["P:product-units", "T:test-root"], (k, f, items))
 check("a test root's symbol that a product root defines is red even when the product root is listed after it",
       kinds({"Z": result(["a", "o"], []), "A": tr}, {"A"})[0] == ["test-double"])
+# per link target: the same name in a host (x86-64) test and a guest (AArch64) product root is no double; within one target it is red
+def hobj(unit, src):
+    c = os.path.join(BASE, unit + ".c")
+    open(c, "w").write(src)
+    subprocess.run(["gcc", "-O1", "-ffreestanding", "-c", "-o", os.path.join(BASE, unit + ".o"), c], check=True)
+    return unit
+
+
+hobj("h_main", "int real_a(void){return 5;}\nint host_only(void){return 1;}\n")
+hobj("h_prod", "int host_fn(void){return 2;}\n")
+hobj("h_dbl", "int host_fn(void){return 3;}\n")
+check("symbols carry the object's target (class, e_machine)", defined("a")[0]["target"] == [2, 183] and defined("h_main")[0]["target"] == [2, 62], (defined("a")[0], defined("h_main")[0]))
+trh = {"units": ["h_main"], "defined": defined("h_main"), "tests": []}
+k, f, st, _ = kinds({"P": result(["a", "b"], []), "T": trh}, {"T"})
+check("a host test root defining a name that a GUEST product root defines: no finding", k == [] and st["double_symbols"] == 0, (k, f))
+k, f, st, _ = kinds({"P": result(["h_prod"], []), "T": {"units": ["h_dbl"], "defined": defined("h_dbl"), "tests": []}}, {"T"})
+check("a host test root defining a name of a HOST product root: red test-double", k == ["test-double"] and "host_fn" in f[0][3], (k, f))
+k, f, st, _ = kinds({"P": result(["a", "b", "h_prod"], [("host", ["h_dbl"], None)])})
+check("a declared host test against a host product object of the same root: red; the guest objects of the root do not mask it", k == ["test-double"], (k, f))
 check("no roots: universe 0, no finding, stats 0", doubles.judge({}) == ([], [], {"tests_total": 0, "tests_with_doubles": 0, "double_symbols": 0}))
 
 # recipe.check: the `tests` key

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """gate_admit.judge: every tracked file under a root (the nearest one), the class of the root one of CLASSES, no row naming gates."""
 import os
 import subprocess
@@ -111,6 +110,14 @@ for k, v in (("target", "host"), ("recipe", T + "/inc/build.json"), ("variants",
 for u in ("/inc/x/c.c", "/inc/x/d.cc", "/inc/x/e.S", "/inc/build.json"):
     bad, err = ga.judge(hf + [T + u], adm(tool, doc, hroot), yes)
     check("a header root with %s is refused (it has a unit: a product or test root)" % u, bad and any("unit" in e for e in err))
+# RULE QUALIFIED-IMPORT: a module of another root is imported by its qualified path, never by its bare name
+Q = "ports/fnv-nx"
+qadm = {"format": "fnvnx-admit/1", "roots": [{"path": Q + "/a", "class": "tool", "entry": []}, {"path": Q + "/b/c", "class": "tool", "entry": []}]}
+qsrc = {Q + "/a/x.py": "import json\n", Q + "/a/y.py": "import x\nfrom x import z\n", Q + "/b/c/m.py": "import x\n",
+        Q + "/b/c/n.py": "from a import x\nimport m\n", Q + "/b/c/sub/t.py": "def f():\n    import x as q\n", Q + "/a/own.py": "import y\n"}
+qb = ga.cross_root_bare(sorted(qsrc), qadm, qsrc.__getitem__)
+check("a bare import of another root module is found at any depth, a qualified one, a sibling and the stdlib are not",
+      set(qb) == {Q + "/b/c/m.py", Q + "/b/c/sub/t.py"} and "a.x" in qb[Q + "/b/c/m.py"])
 # the gate set of a root is derived from gates.d covers, never from a table of the gate
 os.chdir(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", ".."))   # gatesdir reads the tree from the checkout root
 covers = {g["name"]: set(g.get("covers", [])) for g in gatesdir.load_dir().get("gates", [])}
