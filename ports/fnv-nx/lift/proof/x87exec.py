@@ -123,8 +123,8 @@ def spec_de(cx):
     nan, den = [], []
     for j in regs:
         v, e, k = cx.car[cx.phys(j)]
-        n, s, dn = K._carrier_flags(v, k)
-        n2, s2, u2, d2 = K._image_flags(cx.img[cx.phys(j)])
+        n, s, dn = X.carrier_flags(K.kinds(), v, k)
+        n2, s2, u2, d2 = X.image_flags(cx.img[cx.phys(j)])
         m80 = z3.Or(k == cx.kinds['FK_M80'], k == cx.kinds['FK_E'])
         nan.append(z3.If(m80, n2, n)); den.append(z3.If(m80, d2, dn))
     if fmt:

@@ -19,7 +19,7 @@ import os, sys, time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [HERE, os.path.dirname(HERE)]
 import z3
-import fnvnx.lift.proof.ctrans as ctrans, fnvnx.lift.proof.x87carrier as XC
+import fnvnx.lift.proof.ctrans as ctrans, fnvnx.lift.proof.x87carrier as XC, fnvnx.lift.proof.x87spec as X
 
 _KIND = None
 
@@ -73,40 +73,15 @@ def _fvx(b):
     return z3.Concat(r.ret['se'].e, r.ret['m'].e)
 
 
-def _carrier_flags(v, k):
-    K = kinds(); is64, is32 = k == K['FK_F64'], k == K['FK_F32']
-    e64, f64, q64 = z3.Extract(62, 52, v), z3.Extract(51, 0, v), z3.Extract(51, 51, v)
-    e32, f32, q32 = z3.Extract(30, 23, v), z3.Extract(22, 0, v), z3.Extract(22, 22, v)
-    nan = z3.Or(z3.And(is64, e64 == 0x7ff, f64 != 0), z3.And(is32, e32 == 0xff, f32 != 0))
-    snan = z3.Or(z3.And(is64, e64 == 0x7ff, f64 != 0, q64 == 0), z3.And(is32, e32 == 0xff, f32 != 0, q32 == 0))
-    den = z3.Or(z3.And(is64, e64 == 0, f64 != 0), z3.And(is32, e32 == 0, f32 != 0))
-    return nan, snan, den
+def _carrier_flags(v, k): return X.carrier_flags(kinds(), v, k)
 
 
-def _image_flags(x):
-    se, m = z3.Extract(79, 64, x), z3.Extract(63, 0, x)
-    e, ib, fr = z3.Extract(14, 0, se), z3.Extract(63, 63, m), z3.Extract(62, 0, m)
-    nan = z3.And(e == 0x7fff, ib == 1, fr != 0)
-    snan = z3.And(nan, z3.Extract(62, 62, m) == 0)
-    unsup = z3.Or(z3.And(e == 0x7fff, ib == 0), z3.And(e != 0, e != 0x7fff, ib == 0))
-    den = z3.And(e == 0, m != 0)
-    return nan, snan, unsup, den
+def _image_flags(x): return X.image_flags(x)
 
 
 def spec_fex(fex0, ops, q):
-    """the compare's c->fex on the kinds: ops = [(v, k, image)] of the two operands"""
-    K = kinds(); F = []
-    for v, k, x in ops:
-        n1, s1, d1 = _carrier_flags(v, k); n2, s2, u2, d2 = _image_flags(x)
-        m80 = z3.Or(k == K['FK_M80'], k == K['FK_E'])
-        fl = z3.Or(k == K['FK_F64'], k == K['FK_F32'])
-        F.append((z3.If(fl, n1, z3.If(m80, n2, z3.BoolVal(False))), z3.If(fl, s1, z3.If(m80, s2, z3.BoolVal(False))),
-                  z3.If(fl, d1, z3.If(m80, d2, z3.BoolVal(False))), z3.If(m80, u2, z3.BoolVal(False))))
-    (na, sa, da, ua), (nb, sb, db, ub) = F
-    ie = z3.If(q == 0, z3.Or(na, nb, ua, ub), z3.Or(sa, sb, ua, ub))
-    de = z3.And(z3.Or(da, db), z3.Not(ie), z3.Not(z3.Or(na, nb)))
-    bit = lambda c, v: z3.If(c, z3.BitVecVal(v, 32), z3.BitVecVal(0, 32))
-    return (fex0 & ~z3.BitVecVal(0x200, 32)) | bit(ie, 1) | bit(de, 2)
+    """the compare's c->fex on the kinds (the rule's single home is x87spec.spec_fex)"""
+    return X.spec_fex(kinds(), fex0, ops, q)
 
 
 def compare_obligations(budget_ms=240000):

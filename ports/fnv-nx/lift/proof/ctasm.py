@@ -3,7 +3,7 @@
 
 1. `__asm__ volatile("template" : outputs : inputs : clobbers)` (GCC manual, Extended Asm).  `convert_asm` turns each statement into the call `__asm_N(out exprs..., in exprs...)`; N indexes
    ASMS, the record of the statement (template string, operand names and constraints).  ctrans executes the call by `run_asm`: the A64 instructions of the template, one by one, with the
-   semantics of the Arm ARM (DDI 0487) for exactly the mnemonics MNEMONICS lists; any other mnemonic is Unsupported (the function is refused, no instruction is guessed).
+   semantics of the pinned Arm A64 ISA XML (asl.py, asmenc.py); a mnemonic asmenc has no row for is Unsupported (the function is refused, no instruction is guessed).
 2. The guest memory accessors: `GM<T>{a}`, `GMF<F,T>{a}`, `GMK<T,A>{}`, `GMKF<F,T,A>{}` (the classes of rt/fnvl.h, which the access macros M8..MF64, MK8..MKF64 expand to).  `accessor_c` reads the
    class definitions from the preprocessed header text and writes each operator as a C function `NAME_ld(a)` / `NAME_st(a, v)` (NAME = class and type arguments, e.g. GM_u32, GMF_float_u32); `rewrite`
    turns a class temporary `CLS<args>{init}[.g(lkwin_)]` into the call `NAME(init)`, and `macro_defs` does the same for the macro bodies.  ctrans reads the call `NAME(x)` as `NAME_ld(x)` and the
@@ -13,7 +13,6 @@ import re
 import z3
 
 ASMS = []
-MNEMONICS = ('mov', 'movz', 'movk', 'tst', 'b', 'b.ne', 'b.eq', 'ldar', 'ldarb', 'ldarh', 'ldr', 'ldrb', 'ldrh', 'stlr', 'stlrb', 'stlrh', 'str', 'strb', 'strh', 'dmb', 'bfxil')
 
 
 def _match(t, i, o, c):
@@ -187,114 +186,98 @@ def _bv(m, v, w):
     return e if e.size() == w else (z3.ZeroExt(w - e.size(), e) if e.size() < w else z3.Extract(w - 1, 0, e))
 
 
+def mnemonics():
+    """the set of mnemonics that occur in the asm templates of the statements converted so far (the closure's), derived from ASMS"""
+    out = set()
+    for r in ASMS:
+        for ln in r['template'].replace(';', '\n').split('\n'):
+            ln = re.sub(r'^\s*\d+:\s*', '', ln).strip()
+            if ln and not ln.startswith('.'): out.add(ln.split()[0].lower())
+    return out
+
+
 def run_asm(m, fr, n, args, ctrans):
-    """execute ASMS[n] on the argument values; writes the output operands back.  The A64 semantics are the Arm ARM's for each MNEMONIC."""
-    rec = ASMS[n]; regs, imm, outs = {}, {}, []
-    for (kind, name, con), a in zip(rec['ops'], args):
+    """execute ASMS[n] on the argument values; writes the output operands back.  Each instruction is the `Decode`/`Execute` ASL of the pinned Arm A64 ISA XML (asl.py), the encoding chosen by asmenc.py.
+    Single-thread value equality is the obligation: the acquire/release/barrier ordering of ldar/stlr/dmb is not value semantics (it is certified by the access gate, tools/gate_order.py)."""
+    import asl, asmenc
+    rec = ASMS[n]; names, imm, outs = {}, {}, []
+    st0 = asl.State(); st0.mem = m.mem
+    argv = list(zip(rec['ops'], args)); regs = {}
+    for (kind, name, con), a in argv:
         if 'i' in con and kind == 'in':
-            imm[name] = z3.simplify(a.e); continue
-        w = 64
+            imm[name] = z3.simplify(a.e).as_long(); continue
         if kind == 'out' and '+' not in con:
-            regs[name] = z3.BitVec('asm%d_%s_%d' % (n, name, m.fresh), 64); m.fresh += 1      # an output before its first write: any value
+            v = z3.BitVec('asm%d_%s_%d' % (n, name, m.fresh), 64); m.fresh += 1      # an output before its first write: any value
         else:
             hi = z3.BitVec('asm%d_%s_hi_%d' % (n, name, m.fresh), 32); m.fresh += 1
-            regs[name] = _bv(m, a, 64) if a.e.size() == 64 else z3.Concat(hi, a.e)      # C passes a 32-bit value in a register whose upper 32 bits are unspecified
+            v = _bv(m, a, 64) if a.e.size() == 64 else z3.Concat(hi, a.e)      # C passes a 32-bit value in a register whose upper 32 bits are unspecified
+        names[name] = len(names); regs[name] = v
         if kind == 'out': outs.append((name, a))
-    tmpl = rec['template']
+    for nm, num in names.items(): st0.R[num] = regs[nm]
+    for f in 'NZCV': st0.nzcv[f] = asl.B(1, z3.BitVec('asm%d_flag%s_%d' % (n, f, m.fresh), 1)); m.fresh += 1       # the flags before the first flag-setting instruction: any value
     lines = []
-    for ln in tmpl.replace(';', '\n').split('\n'):
+    for ln in rec['template'].replace(';', '\n').split('\n'):
         ln = ln.strip()
         if not ln: continue
         lab = re.match(r'(\d+):\s*(.*)$', ln)
         if lab: lines.append(('label', lab.group(1))); ln = lab.group(2).strip()
         if ln: lines.append(('ins', ln))
+    BASE = 0x10000
     labels = {l[1]: i for i, l in enumerate(lines) if l[0] == 'label'}
 
     def sub(t):
         def f(mm):
             v, nm = mm.group(1), mm.group(2)
-            if nm in imm: return '#%d' % imm[nm].as_long()
+            if nm in imm: return '#%d' % imm[nm]
             return '%s:%s' % (v or 'w', nm)
         return re.sub(r'%([wx]?)\[(\w+)\]', f, t)
 
-    def reg(t, st):
-        mm = re.fullmatch(r'\[?([wx]):(\w+)\]?', t)
-        if mm: return mm.group(1), mm.group(2)
+    def operand(t):
+        t = t.strip()
+        mm = re.fullmatch(r'\[(x):(\w+)\]', t)
+        if mm: return ('mem', names[mm.group(2)])
+        mm = re.fullmatch(r'([wx]):(\w+)', t)
+        if mm: return ('reg', mm.group(1), names[mm.group(2)])
+        mm = re.fullmatch(r'(\d+)[fb]', t)
+        if mm: return ('label', BASE + 4 * labels[mm.group(1)])
+        if re.fullmatch(r'#?-?\d+|#?0x[0-9a-fA-F]+', t): return ('imm', int(t.lstrip('#'), 0))
+        if re.fullmatch(r'[a-z]+', t): return ('opt', t)
         raise ctrans.Unsupported('asm operand ' + t)
 
-    def val(t, st):
-        t = t.strip()
-        if t.startswith('#'): return int(t[1:], 0)
-        if re.fullmatch(r'-?\d+|0x[0-9a-fA-F]+', t): return int(t, 0)
-        w, nm = reg(t, st); r = st['regs'][nm]
-        return z3.Extract(31, 0, r) if w == 'w' else r
-
-    def setreg(st, t, e):
-        w, nm = reg(t, st)
-        st['regs'][nm] = z3.ZeroExt(64 - e.size(), e) if e.size() < 64 else e      # a write of a W register zeroes bits 63:32 (Arm ARM, "Register width in AArch64")
-
-    def mem_addr(t, st):
-        mm = re.fullmatch(r'\[(x:\w+)\]', t.strip())
-        if not mm: raise ctrans.Unsupported('asm address ' + t)
-        return st['regs'][reg(mm.group(1), st)[1]]
-
-    SZ = {'': None, 'b': 1, 'h': 2}
-
-    def step(st, pc, cond, results):
+    def step(st, pc, results):
         while pc < len(lines):
             k, x = lines[pc]; pc += 1
             if k == 'label': continue
             mn, _, rest = x.partition(' '); mn = mn.strip().lower()
-            ops = [o.strip() for o in _split_top(sub(rest), ',')] if rest.strip() else []
-            if mn not in MNEMONICS: raise ctrans.Unsupported('asm mnemonic ' + mn)
-            if mn == 'mov': setreg(st, ops[0], val(ops[1], st) if not isinstance(val(ops[1], st), int) else z3.BitVecVal(val(ops[1], st), 32))
-            elif mn == 'movz':
-                sh = int(ops[2].split()[-1]) if len(ops) > 2 else 0
-                setreg(st, ops[0], z3.BitVecVal(val(ops[1], st) << sh, 32))
-            elif mn == 'movk':
-                sh = int(ops[2].split()[-1]) if len(ops) > 2 else 0
-                cur = val(ops[0], st); mask = 0xffffffff & ~(0xffff << sh)
-                setreg(st, ops[0], (cur & z3.BitVecVal(mask, 32)) | z3.BitVecVal(val(ops[1], st) << sh, 32))
-            elif mn == 'tst':
-                a = val(ops[0], st); b = val(ops[1], st); b = z3.BitVecVal(b, 32) if isinstance(b, int) else b
-                st['Z'] = (a & b) == 0
-            elif mn in ('b', 'b.ne', 'b.eq'):
-                lab = ops[0].rstrip('fb')
-                tgt = labels[lab]
-                if tgt < pc: raise ctrans.Unsupported('asm backward branch')
-                if mn == 'b': pc = tgt; continue
-                c_ = st['Z'] if mn == 'b.eq' else z3.Not(st['Z'])
-                s2 = {'regs': dict(st['regs']), 'Z': st['Z'], 'mem': st['mem']}
-                step(s2, tgt, z3.And(cond, c_), results)      # taken
-                cond = z3.And(cond, z3.Not(c_))                # fall through
-            elif mn == 'dmb': pass      # a barrier orders accesses; it changes no value (the ordering is certified by the access gate: tools/gate_order.py)
-            elif mn in ('ldar', 'ldarb', 'ldarh', 'ldr', 'ldrb', 'ldrh', 'stlr', 'stlrb', 'stlrh', 'str', 'strb', 'strh'):
-                base = mn.rstrip('brh') if mn[:3] != 'str' else mn
-                suf = mn[-1] if mn[-1] in 'bh' and mn not in ('ldr', 'str') else ''
-                w, nm = reg(ops[0], st); nb = SZ[suf] or (4 if w == 'w' else 8)
-                addr = mem_addr(ops[1], st)
-                if mn.startswith(('ldar', 'stlr')):      # Arm ARM: a load-acquire / store-release of a misaligned address is an alignment fault: an obligation on the path
-                    m.ub.append(z3.Implies(z3.And(fr.L, cond), z3.URem(addr, z3.BitVecVal(nb, 64)) == 0))
-                if mn.startswith('ld'):
-                    bs = [z3.Select(st['mem'], addr + i) for i in range(nb)]
-                    e = z3.Concat(*reversed(bs)) if nb > 1 else bs[0]
-                    setreg(st, ops[0], e)
-                else:
-                    v = val(ops[0], st)
-                    mm = st['mem']
-                    for i in range(nb): mm = z3.Store(mm, addr + i, z3.Extract(8 * i + 7, 8 * i, v))
-                    st['mem'] = mm
-            elif mn == 'bfxil':
-                lsb, wd = val(ops[2], st), val(ops[3], st)
-                d, s = val(ops[0], st), val(ops[1], st); mask = ((1 << wd) - 1)
-                setreg(st, ops[0], (d & z3.BitVecVal(0xffffffff & ~mask, 32)) | ((z3.LShR(s, lsb)) & z3.BitVecVal(mask, 32)))
-        results.append((cond, st))
+            if mn.startswith('.'): continue      # an assembler directive (GNU as: a name that starts with '.'): it emits a record into another section, no register or memory effect of the executed program
+            ops = []
+            for o in ([o.strip() for o in _split_top(sub(rest), ',')] if rest.strip() else []):
+                mm = re.fullmatch(r'lsl\s+#?(\d+)', o)       # `movk w, #imm, lsl 16`
+                ops.append(('imm', int(mm.group(1))) if mm else operand(o))
+            ipc = BASE + 4 * (pc - 1)
+            try: fname, enc, fields = asmenc.encode(mn, ops, ipc, labels)
+            except asl.Unsupported as e: raise ctrans.Unsupported(str(e))
+            st.pc = z3.BitVecVal(ipc, 64); st.nextpc = z3.BitVecVal(ipc + 4, 64)
+            try: st = asl.run_encoding(fname, enc, fields, st)
+            except asl.Unsupported as e: raise ctrans.Unsupported('asm %s: %s' % (mn, e))
+            if mn == 'b': pc = labels[x.split()[-1].rstrip('fb')] + 0; continue
+            if mn in ('b.ne', 'b.eq'):
+                tgt = ops[0][1]; taken = z3.simplify(st.nextpc == z3.BitVecVal(tgt, 64))
+                if z3.is_true(taken): pc = labels[x.split()[-1].rstrip('fb')]; continue
+                if z3.is_false(taken): continue
+                lab = labels[x.split()[-1].rstrip('fb')]
+                if lab < pc: raise ctrans.Unsupported('asm backward branch')
+                s2 = st.copy(); s2.cond = z3.And(st.cond, taken)
+                step(s2, lab, results)
+                st.cond = z3.And(st.cond, z3.Not(taken))
+        results.append(st)
 
+    st0.cond = fr.L
     res = []
-    step({'regs': regs, 'Z': z3.BoolVal(False), 'mem': m.mem}, 0, z3.BoolVal(True), res)
-    # merge the paths: the last path's state under the others' conditions
-    final = res[-1][1]
-    for cnd, st in reversed(res[:-1]):
-        final = {'regs': {k: z3.If(cnd, st['regs'][k], final['regs'][k]) for k in final['regs']}, 'Z': final['Z'], 'mem': z3.If(cnd, st['mem'], final['mem'])}
-    m.mem = z3.If(fr.L, final['mem'], m.mem) if final['mem'] is not m.mem else m.mem
-    return {nm: final['regs'][nm] for nm, _ in outs}, outs
+    step(st0, 0, res)
+    # merge the paths: a path's state where its condition (which includes the function's L) holds, else the later path's state; the paths partition L
+    final = res[-1]
+    for st in reversed(res[:-1]): final = st.merge(st.cond, final)
+    for u in final.ub: m.ub.append(u)
+    m.mem = z3.If(fr.L, final.mem, m.mem) if final.mem is not m.mem else m.mem
+    return {nm: z3.Extract(63, 0, final.R[names[nm]]) for nm, _ in outs}, outs

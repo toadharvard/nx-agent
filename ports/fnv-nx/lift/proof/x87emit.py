@@ -22,6 +22,16 @@ def configure():
     _inputs.configure(); _CONF[0] = True
 
 
+def lifted(raw):
+    """the whole function the lifter emits for the instruction bytes RAW followed by `ret`: the static-stack prologue, the instruction's lines and the epilogue (the emitter's own text)"""
+    configure()
+    import fnvnx.lift.fnvlift as L
+    from fnvnx.lift.fnvlift.image import Image
+    code = bytes(raw) + b'\xc3'
+    t, _ = L.lift(Image.from_bytes(code, BASE), BASE, len(code))
+    return t
+
+
 def emitted(raw):
     """the instruction's emitted lines for the instruction bytes RAW (a key)"""
     configure()
@@ -58,7 +68,21 @@ def boundary():
     return ['#define %s(%s) %s' % (k, a, b) for k, (a, b) in defs.items()], code
 
 
-def unit(body):
+def header_macros(body, have):
+    """the #define lines of rt/fnvl.h for every macro the text BODY names (transitively) that is not yet defined (HAVE): the header's own macro table is the source, nothing is listed here"""
+    t = _sc(open(os.path.join(RT, 'fnvl.h')).read()).replace('\\\n', ' ')
+    tab = {}
+    for m in re.finditer(r'(?m)^[ \t]*#define[ \t]+(\w+)(\([^)]*\))?[ \t]*(.*)$', t): tab[m.group(1)] = m.group(0).strip()
+    out, todo = [], set(re.findall(r'\w+', body))
+    done = set(have)
+    while todo:
+        n = todo.pop()
+        if n in done or n not in tab: continue
+        done.add(n); out.append(tab[n]); todo |= set(re.findall(r'\w+', tab[n]))
+    return '\n'.join(out)
+
+
+def unit(body, whole=False):
     """the preprocessed unit: the runtime's type prelude, x87.h, fnvl_x87.h, x87.c (as FNVNX_PP's closure) and `frag` with BODY"""
     rd = lambda n: open(os.path.join(RT, n)).read()
     pre = '\n'.join(l for l in _sc(rd('fnvl.h')).split('\n') if l.startswith(('typedef', 'struct fv ', 'struct cpu ', 'struct fnvl_nframe;')))
@@ -69,7 +93,13 @@ def unit(body):
     txt = re.sub(r'unsigned\s+__int128', 'u128', txt)
     mdefs, acc = boundary()
     txt += '\n' + '\n'.join(mdefs) + '\n' + acc
-    if body is not None: txt += '\n' + decl + '\n' + segcs + '\nstatic void frag(void){ DECL;\n' + body + '\n}\n'
+    if body is not None and whole:       # BODY is a whole lifted function (the emitter's own text): its macros from the header's table, then the function
+        have = set(re.findall(r'(?m)^#define\s+(\w+)', txt + '\n' + decl + '\n' + segcs))
+        txt += '\n' + header_macros(body, have) + '\n' + decl + '\n' + segcs + '\n' + re.sub(r'^extern "C" ', '', body)
+    elif body is not None:
+        have = set(re.findall(r'(?m)^#define\s+(\w+)', txt)) | set(re.findall(r'(?m)^#define\s+(\w+)', decl + '\n' + segcs))
+        txt += '\n' + header_macros(body, have)       # the macros of rt/fnvl.h the emitted text names (and, transitively, their bodies): found by name over the header's #define table
+    if body is not None and not whole: txt += '\n' + decl + '\n' + segcs + '\nstatic void frag(void){ DECL;\n' + body + '\n}\n'
     p = subprocess.run(['cpp', '-E', '-x', 'c', '-DFNVL_TYPES=1', '-'], input=txt, capture_output=True, text=True)
     if p.returncode: raise SystemExit(p.stderr[:800])
     return p.stdout
@@ -82,16 +112,17 @@ def unit(body):
 def _frag(raw, top):
     """-> (machine, result) of `frag` for the instruction bytes RAW on a symbolic state with TOP = top (0..7), the x87 sticky flags and the owner clear at entry; the registers c.fx[i] are free (kind, v, e)"""
     import z3, fnvnx.lift.proof.ctrans as ctrans, fnvnx.lift.proof.x87carrier as XC
-    body = emitted(raw); u = unit(body)
+    body = lifted(raw); u = unit(body, whole=True)
     fd, p = tempfile.mkstemp(suffix='.i'); os.write(fd, u.encode()); os.close(fd)
     try:
         mc, src, refused = ctrans.load([p], XC.MACRO_FILES, None)
     finally:
         os.unlink(p)
-    if 'frag' not in mc.funcs: raise SystemExit('frag not parsed: %s' % refused.get('frag'))
+    fn = 'L_%08x' % BASE
+    if fn not in mc.funcs: raise SystemExit('%s not parsed: %s' % (fn, refused.get(fn)))
     mc.G.pop('c', None); mc.cpu(); c = mc.G['c']
     c['ftop'] = ctrans.V(z3.BitVecVal(top, 32), ('i', 32, 0)); c['fex'] = ctrans.V(z3.BitVecVal(0, 32), ('i', 32, 0))
-    r = mc.apply('frag', [])
+    r = mc.apply(fn, [])
     return mc, r
 
 

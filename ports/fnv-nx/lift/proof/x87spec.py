@@ -424,6 +424,13 @@ def is_sub(b):
     return And(ex(b) == K(0, 11), fr(b) != K(0, 52))         # SDM 1:T4-3 denormals: exponent 0, fraction non-zero
 
 
+def de_rule(denormal, ie, nan):
+    """the denormal-operand exception flag, the ONE rule for every instruction: SDM 1:8.5.2 (an arithmetic instruction operating on a denormal operand reports #D) with the priority of SDM 1:4.9.2
+    (page 4-24): invalid-operation (item 1: an SNaN or an unsupported format, IE) and the handling of a QNaN operand (item 2) come before the denormal-operand exception (item 4), so DE needs
+    no IE and no NaN source.  DENORMAL: some source is a denormal at ITS OWN type; NAN: some source is a NaN."""
+    return And(denormal, Not(ie), Not(nan))
+
+
 QNAN_INDEF = 0xFFF8000000000000
 # SDM 1:4.8.3.7 'QNaN Floating-Point Indefinite', encoding SDM 1:T4-3: sign 1, exponent all ones, integer bit 1, fraction 10..0
 
@@ -1219,7 +1226,7 @@ def arith2(x, y, op, fcw, u=FALSE):
         inv = Or(And(is_inf(x), is_inf(y)), And(is_zero(x), is_zero(y)))
     inv = Or(inv, u)
     ie = Or(Or(is_snan(x), is_snan(y)), And(Not(nan_any), inv))
-    de = And(Not(ie), Or(is_sub(x), is_sub(y)))
+    de = de_rule(Or(is_sub(x), is_sub(y)), ie, Or(is_nan(x), is_nan(y)))
     ze = And(Not(nan_any), Not(u), op == "div", _finite(x), Not(is_zero(x)), is_zero(y)) if op == "div" else FALSE
     rx, ry = real(x), real(y)
     exact = {"add": rx + ry, "sub": rx - ry, "mul": rx * ry, "div": If(ry == 0, z3.RealVal(0), rx / ry)}[op]
@@ -1382,7 +1389,7 @@ def fscale(s):
     res = If(nan_any, nres, If(inv, K(QNAN_INDEF, 64), If(inf_res, a, If(zero_res, a,
          If(is_inf(b), If(b_posinf, Concat(sgn(a), K(0x7FF, 11), K(0, 52)), Concat(sgn(a), K(0, 63))), rbits)))))
     ie = Or(is_snan(a), is_snan(b), And(Not(nan_any), inv))
-    de = And(Not(ie), Or(is_sub(a), is_sub(b)))
+    de = de_rule(Or(is_sub(a), is_sub(b)), ie, Or(is_nan(a), is_nan(b)))
     uf = Or(is_empty(s, 0), is_empty(s, 1))
     s_ok = _c1(write_reg(s, 0, res), up)
     o = finish(s, St.ite(uf, _uf_state(s, 0, False), s_ok),
@@ -1419,7 +1426,7 @@ def _prem(s, nearest):
     nres, _ = nan_result2(a, b)
     inv = Or(is_inf(a), is_zero(b), u)                    # dividend infinite or modulus zero, or an unsupported operand (SDM 2A:FPREM Exc '#IA Source operand is an SNaN value, modulus is 0, dividend is ∞, or unsupported format.')
     ie = Or(is_snan(a), is_snan(b), And(Not(nan_any), inv))
-    de = And(Not(ie), Or(is_sub(a), is_sub(b)))
+    de = de_rule(Or(is_sub(a), is_sub(b)), ie, Or(is_nan(a), is_nan(b)))
     passthru = And(Not(nan_any), Not(inv), Or(is_zero(a), is_inf(b)))     # result = ST(0)
     gen = And(Not(nan_any), Not(inv), Not(is_zero(a)), Not(is_inf(b)))
     ra, rb_ = real(a), real(b)
@@ -1652,7 +1659,7 @@ def fyl2x(s):
     res = If(u, K(QNAN_INDEF, 64), If(nan_any, nres, If(x_neg, K(QNAN_INDEF, 64), If(inv_sp, K(QNAN_INDEF, 64),
           If(special, bits(prod), gres)))))
     ie = Or(is_snan(x), is_snan(y), u, And(Not(nan_any), Or(x_neg, inv_sp)))
-    de = And(Not(ie), Or(is_sub(x), is_sub(y)))
+    de = de_rule(Or(is_sub(x), is_sub(y)), ie, Or(is_nan(x), is_nan(y)))
     gen_nz = And(generic, Not(is_zero(y)), Not(yinf))
     uf = Or(is_empty(s, 0), is_empty(s, 1))
     s_ok = do_pop(_c1(write_reg(s, 1, res), And(gen_nz, gup)))
@@ -1688,7 +1695,7 @@ def fpatan(s):
     rb, oe_, ue_, pe_, up_ = _tr_flags(rm, exact)
     res = If(u, K(QNAN_INDEF, 64), If(nan_any, nres, If(zero_case, Concat(sgn(y), K(0, 63)), rb)))
     ie = Or(is_snan(x), is_snan(y), u)
-    de = And(Not(ie), Or(is_sub(x), is_sub(y)))
+    de = de_rule(Or(is_sub(x), is_sub(y)), ie, Or(is_nan(x), is_nan(y)))
     live = And(Not(nan_any), Not(u), Not(zero_case))
     uf = Or(is_empty(s, 0), is_empty(s, 1))
     s_ok = do_pop(_c1(write_reg(s, 1, res), And(live, up_)))
@@ -2042,6 +2049,48 @@ def emms_effect(d):
 
 # DSL fault kinds: the one source is L3a's fault table fnvlift/faults.json (read through fnvlift/faults.py: FAULTS, BYNAME); the order of the unmasked
 # checks is that of Wine 9.0 get_fpu_code (dlls/ntdll/unix/signal_i386.c): IE (with SF: STACK_CHECK), then DE, ZE, OE, UE, PE.
+
+# ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# The exception flags of an arithmetic or compare operand READ AT THE CARRIER TYPE (ruling 3b / OWNER 8, SDM 1:8.5.2): the single home of the rule that the Forms' emitted text is proved against
+def carrier_flags(KN, v, k):
+    """(nan, snan, denormal) of a binary32 / binary64 carrier (value bits v, kind k, KN the enum of kinds), each at the carrier's OWN type (SDM 1:4.2.2 T4-1 fields); other kinds: no flag"""
+    is64, is32 = k == KN['FK_F64'], k == KN['FK_F32']
+    e64, f64, q64 = z3.Extract(62, 52, v), z3.Extract(51, 0, v), z3.Extract(51, 51, v)
+    e32, f32, q32 = z3.Extract(30, 23, v), z3.Extract(22, 0, v), z3.Extract(22, 22, v)
+    nan = z3.Or(z3.And(is64, e64 == 0x7ff, f64 != 0), z3.And(is32, e32 == 0xff, f32 != 0))
+    snan = z3.Or(z3.And(is64, e64 == 0x7ff, f64 != 0, q64 == 0), z3.And(is32, e32 == 0xff, f32 != 0, q32 == 0))
+    den = z3.Or(z3.And(is64, e64 == 0, f64 != 0), z3.And(is32, e32 == 0, f32 != 0))
+    return nan, snan, den
+
+
+def image_flags(x):
+    """(nan, snan, unsupported, denormal) of an 80-bit register image (SDM 1:4.2.2 T4-3, 1:8.2.2 pseudo-denormals are denormal, 1:T8-3 unsupported encodings)"""
+    se, m = z3.Extract(79, 64, x), z3.Extract(63, 0, x)
+    e, ib, fr_ = z3.Extract(14, 0, se), z3.Extract(63, 63, m), z3.Extract(62, 0, m)
+    nan = z3.And(e == 0x7fff, ib == 1, fr_ != 0)
+    snan = z3.And(nan, z3.Extract(62, 62, m) == 0)
+    unsup = z3.Or(z3.And(e == 0x7fff, ib == 0), z3.And(e != 0, e != 0x7fff, ib == 0))
+    den = z3.And(e == 0, m != 0)
+    return nan, snan, unsup, den
+
+
+def operand_flags_kind(KN, v, k, x):
+    """(nan, snan, denormal, unsupported) of one operand: its carrier (v, k) at the carrier type for F32/F64, its image x for M80/E, none for the integer kinds"""
+    n1, s1, d1 = carrier_flags(KN, v, k); n2, s2, u2, d2 = image_flags(x)
+    m80 = z3.Or(k == KN['FK_M80'], k == KN['FK_E'])
+    fl = z3.Or(k == KN['FK_F64'], k == KN['FK_F32'])
+    F_ = z3.BoolVal(False)
+    return (z3.If(fl, n1, z3.If(m80, n2, F_)), z3.If(fl, s1, z3.If(m80, s2, F_)), z3.If(fl, d1, z3.If(m80, d2, F_)), z3.If(m80, u2, F_))
+
+
+def spec_fex(KN, fex0, ops, q):
+    """the compare's c->fex on the kinds: ops = [(v, k, image)] of the two operands (SDM 2A:FCOM/FUCOM/FCOMI Exc: ordered q = 0: any NaN or unsupported -> IE; unordered q = 1: SNaN or unsupported)"""
+    (na, sa, da, ua), (nb, sb, db, ub) = [operand_flags_kind(KN, v, k, x) for v, k, x in ops]
+    ie = z3.If(q == 0, z3.Or(na, nb, ua, ub), z3.Or(sa, sb, ua, ub))
+    de = de_rule(z3.Or(da, db), ie, z3.Or(na, nb))
+    bit = lambda c, v: z3.If(c, z3.BitVecVal(v, 32), z3.BitVecVal(0, 32))
+    return (fex0 & ~z3.BitVecVal(0x200, 32)) | bit(ie, 1) | bit(de, 2)
+
 from fnvnx.lift.fnvlift import faults as _faults
 FLT = {n: _faults.BYNAME[n]["code"] for n in ("FLT_IE", "FLT_DE", "FLT_ZE", "FLT_OE", "FLT_UE", "FLT_PE", "FLT_SF")}
 
