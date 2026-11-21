@@ -1,3 +1,5 @@
+step 1-2: platform, loader and rt/guest_main roots are in cand5 e4e9b7e53. Missing: its L1 verdict (farm, running now); then merge the green roots and drop the reds to their owners. cand4 dcc88df77: red only on selftests (23/169), so drop those and merge the rest.
+
 # L1 CONTRACT status (lead: Opus 5.5, session started 2026-11-11 22:34Z)
 
 Branch `claude/fnv-l1-contract`. Trunk: `claude/fnv-nx-clean` 29b41938 (07862d5a + CLAUDE.md), 26 gates, 0 product roots. Target: first frame in this budget (CLAUDE.md 08f6ea30).
@@ -3194,3 +3196,7 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - 0b0735c7c: envcheck.declared_debs is the one pinned set; compiler-build gmp/mpfr/mpc/zlib; pathflow mounts sibling-tree data.
   - Forwarded to L4 and w8.
   - Open: item 0 (objstub judges external units); the deb pin rows for the 4 new packages (deb_pins red until the mirror run); test_pathrules IndexError (pre-existing?); the lift/rt measurement.
+- 18:59 Owner order 0aa926371: only steps 1-4.
+  - Farm reordered: cand5 verdict, then cand4 per-test errors, then the toolchain rerun.
+  - w29 keeps the deb pins (toolchain for platform) and the lift/rt measurement; drops item 0, test_pathrules and the test_recipe baseline.
+  - cand4 verdict: 44 green, 1 red (selftests 146/169, 1466.6 s against the 300 s budget).
