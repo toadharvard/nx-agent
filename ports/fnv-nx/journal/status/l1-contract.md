@@ -3157,3 +3157,6 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
     - superseded is a pair record {owner, head, reason}, and the check still prints its files;
     - from now on a lead edits no file outside its trees and sends such changes to the owner.
   - Status: w28 doing. Each lead then gets its own private-edit list for the next candidate.
+- cand5 assembled: c5 e4e9b7e53. candcheck shows 0 reds: 2102 files, 233 roots, 10 cuts, 24 superseded pair records covering 1918 non-owner edits. The verdict RUN is sent to the farm.
+- Each lead (L2, L3a, L4, L5, L6) has its private-edit section: deliver the real ones to the owner for cand6, or declare them stale.
+- Sent to the orchestrator: the CLAUDE.md hygiene order, the vacuity-behind-calls gap, and the check-time probe DEBT.
