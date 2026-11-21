@@ -1,3 +1,5 @@
+step 1: a green L1 verdict for cand5 with the platform root (L5 head c5 @a3d039bf0, 112 objects green; the verdict is running on w40), then the merge to claude/fnv-nx-clean. Step 2 next: rt/guest_main (admit row on c5) and the loader root.
+
 # L5 PLATFORM — status
 
 Handoff read: l5-platform-handoff-opus.md @ cabcaddc.
@@ -5,6 +7,7 @@ Lead: Opus 5.5, session_01KmtZKTGM2tLun8zgoE6X44 (from 2026-11-11 22:35; replace
 Branch: claude/fnv-l5-platform. Workers: Sonnet 5.5, branches claude/fnv-l5-platform-w<N>.
 
 ## RESTART 2026-11-12 08:23Z (orchestrator): ONE task, the platform product root
+- 2026-11-21: owner order 0aa926371: only the four product steps. L5 is on step 1 (the platform root), then rt/guest_main for step 2. The only worker is w40, on the step-1 verdict; no others.
 - 2026-11-21: L1 took c6 @09ceed68d for cand6. The Python-test recipe form is an L1 open rule gap, to be closed after the first frame; L5 Python tests stay measurements. Bottleneck: the c5 verdict (w40). Workers 1 (w40).
 - 2026-11-21: out-of-tree share of a3d039bf0 is closed. 275 files: 1 real hunk (lift/rt/build.json uses-root to contract/exporthdr/include, from 599f1bb26), sent to L3a. The rest are stale: shared-history commits on 57+ branches, or L5-only commits already in L1 w29-c5 d55573f95 or in the owner head. L1 told its 75 are 0-to-transfer; L2 18 stale; orch 1 stale. Table: journal/inbox/l5-w43-a3d039bf0-outoftree.md on claude/fnv-l5-platform-w43 @051909a6. w43 archived. Bottleneck: the c5 verdict (w40). Workers 1 (w40).
 - 2026-11-21: c6 @09ceed68d (+48fad17a1). Python generator tests (test_gen_cxx.py) have no recipe form, so they are measurements; the gap is reported to L1 (off path). Workers 2 (w40, w43).
