@@ -1,3 +1,5 @@
+step 1: nothing from L6. The platform root (L5 c6 platform/build.json) uses only bridgefacts/com (COM_SPEC, COM_ROWS, COM_WORDS), already admitted on L1 c5; no render root is linked by steps 1-3. render/d3d9, gl4 and the translator enter at step 4 (the ELF link root).
+
 # L6 RENDER status (lead: Opus 5.5, session started 2026-11-11 22:34Z)
 
 Branch `claude/fnv-l6-render`. Handoff read: `journal/inbox/l6-render-handoff-opus.md` at ce235cf5. Trunk measured against:
@@ -1670,4 +1672,5 @@ Paused: w3b, w4, farm; no other work.
   - translator: valid, build green, 8 objects; objstub 6 const-mismatch.
   - Whole objstub: 7081 bodies, 6950 certified, 133 findings, 127 of them L5's.
   - Cause of the 6 (objects read): every body is V and its record matches. objstub skips the objects of external units (objstub.py:2056) before marking them V, then reds every record in them (:2164). Two rules for one class; sent to L1 with a recommendation to judge external units like our own (the mirror holds L6 patches), or else L6 deletes the 6 records.
-- bottleneck: L1's ruling on external-unit judgment (objstub :2056 vs :2164); L2's IPA-clone param-map fact (dk_cfg.isra.0); reached.tsv (L1 w28). 0 of 4 workers, 0 farms.
+- 18:57Z Owner order (integ CLAUDE.md 0aa926371, "only what puts the product on the trunk"): the const records are parked, because no candidate for steps 1-3 needs them. Head claude/fnv-l6-render-w15-const d4537e160 waits for step 4, with L1 w29's objstub external-unit fix and L2's clone fact. No workers, no farms.
+- bottleneck: none on steps 1-3. For step 4: L1 w29 objstub external-unit fix, L2 clone param-map fact (dk_cfg.isra.0), reached.tsv (L1 w28).
