@@ -345,20 +345,6 @@
    "recipe": "ports/fnv-nx/lift/rt/build.json"
   },
   {
-   "path": "ports/fnv-nx/lift/sdm",
-   "class": "tool",
-   "target": "host",
-   "entry": [],
-   "recipe": "ports/fnv-nx/lift/sdm/build.json"
-  },
-  {
-   "path": "ports/fnv-nx/lift/sdmrows",
-   "class": "tool",
-   "target": "host",
-   "recipe": "ports/fnv-nx/lift/sdmrows/build.json",
-   "entry": []
-  },
-  {
    "path": "ports/fnv-nx/lift/test",
    "class": "tool",
    "entry": []

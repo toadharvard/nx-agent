@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Gate M (module universes):  modules_check.py [MODULE.dll ...] [--no-c]     (default: the six lifted modules; the declared inputs of tests/inputs.json: FNVNX_INPUT_FACTS = lift/facts FACTS (the parent of the per-module dirs, the exe universe is FACTS/universe.tsv),
-FNVNX_INPUT_EXE and FNVNX_INPUT_REDIST (the module files, the exe), FNVNX_INPUT_MODULES_TSV = the loader's modules.tsv, FNVNX_INPUT_SDMROWS, FPSTATE, FPDEPTH, SEGWRITES for the lifter of (c))
+FNVNX_INPUT_EXE and FNVNX_INPUT_REDIST (the module files, the exe), FNVNX_INPUT_MODULES_TSV = the loader's modules.tsv, FPSTATE, FPDEPTH, SEGWRITES for the lifter of (c))
 Per module (file located by name, sha256 and size checked against modules.tsv; the image is the one at the base the loader assigned there):
   - the image range [assigned_base, assigned_base + SizeOfImage) is disjoint from the exe's [0x00400000, + its SizeOfImage) and from every other module of modules.tsv;
     every HIGHLOW relocation site has file bytes (the rebase can patch it);

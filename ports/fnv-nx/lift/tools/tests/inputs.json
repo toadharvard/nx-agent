@@ -5,10 +5,6 @@
    "exe",
    "facts",
    {
-    "root": "ports/fnv-nx/lift/sdmrows",
-    "output": "SDMROWS"
-   },
-   {
     "root": "ports/fnv-nx/lift/fpfacts",
     "output": "FPSTATE"
    },
@@ -25,10 +21,6 @@
    "exe",
    "facts",
    {
-    "root": "ports/fnv-nx/lift/sdmrows",
-    "output": "SDMROWS"
-   },
-   {
     "root": "ports/fnv-nx/lift/fpfacts",
     "output": "FPSTATE"
    },
@@ -42,10 +34,6 @@
    }
   ],
   "test_lock_only.py": [
-   {
-    "root": "ports/fnv-nx/lift/sdmrows",
-    "output": "SDMROWS"
-   },
    {
     "root": "ports/fnv-nx/lift/rt",
     "output": "GEN"
@@ -67,10 +55,6 @@
    {
     "root": "ports/fnv-nx/loader",
     "output": "MODULES_TSV"
-   },
-   {
-    "root": "ports/fnv-nx/lift/sdmrows",
-    "output": "SDMROWS"
    },
    {
     "root": "ports/fnv-nx/lift/fpfacts",

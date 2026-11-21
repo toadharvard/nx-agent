@@ -2,7 +2,7 @@
 """Gate R3 (exe universe):  universe_r3_check.py [FACTS_DIR] [--exe PATH] [--base HEX] [--no-c]
 Defaults: FACTS_DIR and the exe are the declared inputs of this test (inputs.json: the gate gives them as FNVNX_INPUT_FACTS / FNVNX_INPUT_EXE, the checkouts pinned in
 verify/contract_inputs.json); --exe/--base name the image under test (modules_check passes a module and the base the loader assigned);
-(c) takes the lifter's inputs from the mounts FNVNX_INPUT_FPSTATE, FPDEPTH, SEGWRITES, SDMROWS (fnvlift/tests/_inputs.configure_image) and the tracked platform/declared/x86sys.json.
+(c) takes the lifter's inputs from the mounts FNVNX_INPUT_FPSTATE, FPDEPTH, SEGWRITES (fnvlift/tests/_inputs.configure_image) and the tracked platform/declared/x86sys.json.
 Recomputes from the exe alone the set of relocated pointer targets in executable sections (PE .reloc HIGHLOW fixups whose stored value lies
 in an executable section) and checks (a) every target is an entry of universe.tsv; (b) gate_codemap.json is green and codemap.tsv classifies
 every byte of the executable sections exactly once (contiguous runs, no UNEXPLAINED); (c) closure under direct targets: lifting every entry with fnvlift
