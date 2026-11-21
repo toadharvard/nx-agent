@@ -3150,3 +3150,10 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - Ruling: owner-directed. Each source row declares disjoint `trees`; the L1 row is the candidate itself; the integration branch owns CLAUDE.md and ORCHESTRATION.md.
   - The candidate holds the owner's version. A non-owner edit must be contained in the owner (merge(O,G) == O), else not-in-owner, remedied by the owner: take the change, or a superseded record.
   - Status: w28 rerunning; the per-(O,G) lists then go to the owners.
+- Owner-directed candcheck (w28 38e8a3685) at c5 9bd09cfee: 2102 files; 2097 equal their owner's version; 4 owner-red; 1 unowned (the ports/fnvnx symlink); 1918 not-in-owner, 568 of them from the old integration line.
+  - Rulings:
+    - the ports/fnvnx symlink is owned by self;
+    - the 4 owner-red files are taken from their owners;
+    - superseded is a pair record {owner, head, reason}, and the check still prints its files;
+    - from now on a lead edits no file outside its trees and sends such changes to the owner.
+  - Status: w28 doing. Each lead then gets its own private-edit list for the next candidate.
