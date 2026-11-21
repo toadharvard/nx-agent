@@ -4199,7 +4199,7 @@ class Job:
         name = lk["output"]
         _, py = self.cached_rt("python", lambda: runtime.build(self.store, sys.executable, []))
         tmp = tempfile.mkdtemp(dir=ws)
-        ins = []
+        ins = [{"at": "/launch/genlaunch.py", "tree": cas.ingest(GEN_LAUNCH, self.store)}, {"at": "/launch/mounts.json", "tree": self.mounts_file(tmp)}]   # run as every python tool stage is: through the one launcher (no second `python -m` form)
         imp = import_mount(LD_TOOL, LD_TOOLS[0], set(self.files), [], self.roots, self.repo)[1]   # ldcheck and its import closure at /imp/fnvnx/<rel>: the one module path, no /tool and no /contract
         ins.append({"at": toolflags.IMPORT_ROOT + "/" + gate_admit.MODULE_TOP, "tree": self.ingest_files(tmp, "imp", imp, TREE)})
         if loader_defs is not None:      # the names the declared loader defines, one per line, a declared input at /loader (its content is in the key)
@@ -4212,7 +4212,7 @@ class Job:
         env = {k: v for k, v in py["env"].items() if k != "PYTHONNOUSERSITE"}
         env.update({"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80", "PATH": os.path.dirname(py["python"]), "PYTHONPATH": toolflags.IMPORT_ROOT})
         doc = {"format": "fnvnx-stage/1", "stage": "ldcheck:" + self.root, "class": "build", "tool": "python", "cwd": "/work",
-               "argv": [py["python"], "-s", "-B", "-m", tool_module(LD_TOOL)[0], "--elf", "/linked/" + name, "--objs", "/objs", "--out", "/out", "--name", name, "--kind", lk.get("kind", "pie")]
+               "argv": [py["python"], "-s", "-B", "/launch/genlaunch.py", "\n".join([name, "ld.json"]), tool_module(LD_TOOL)[0], "--elf", "/linked/" + name, "--objs", "/objs", "--out", "/out", "--name", name, "--kind", lk.get("kind", "pie")]
                + (["--version-script", "/ld/" + os.path.basename(lk["version_script"])] if "version_script" in lk else [])
                + (["--script", "/ld/" + os.path.basename(lk["script"])] if "script" in lk else [])
                + (["--entry", lk["entry"]] if "entry" in lk else [])
