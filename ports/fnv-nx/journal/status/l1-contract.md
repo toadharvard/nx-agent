@@ -3134,3 +3134,10 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - c5 2517340f9 (the cand5 head); w29-c5 1e819979c.
 - declared_machine.tsv rows 20-21 (void with value `-`): red in objstub, on cand5 and c6. One form: void has an empty value. Status: blocked on L5's fix, on its c5 and c6 lines.
 - L6 w15 const records: ce7a2adda (8 records; constants.tsv deleted). Its rerun waits on the L5 fix.
+- Import closure (found by w8): a directory with __init__.py was treated as a namespace package, so fnvnx.lift.fnvlift's __init__ was never mounted.
+  - Rule: only a directory without __init__.py is a namespace package.
+  - Test: test_regular_package (fails before the fix, passes after).
+  - Heads: c5 9bd09cfee (cand5); w29-c5 d55573f95. Both also carry L5's declared_machine.tsv fix (a3d039bf0 / c6 57cf1307a).
+- candcheck at c5 4dc09319c, 6 sources: 1389 files; 606 equal the clean merge; 261 merge-red; 522 conflicts (an upper bound, from an old octopus base); 0 roots red after 10 cut records.
+  - Ruling: the per-step base is git merge-base G_i G_1..G_{i-1}; files under cut roots are excluded.
+  - Status: w28 rerunning.
