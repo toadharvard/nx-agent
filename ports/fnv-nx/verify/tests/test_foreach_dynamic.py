@@ -71,14 +71,14 @@ if os.geteuid() != 0:
 td = tempfile.mkdtemp(prefix="fed-")
 store = os.path.join(td, "store")
 os.makedirs(store)
-r1, o1 = build(make(td, "a", "shape\tclass\nadd\tint\nmul\tint\n"), store, "1")
+r1, o1 = build(make(td, "a", "#shape\tclass\nadd\tint\nmul\tint\n"), store, "1")
 check("a table made at build time gives one step per row, the directory holds one file per row", r1["status"] == "green", r1.get("failure"))
-r2, _ = build(make(td, "b", "shape\tclass\nadd\tint\nmul\tint\nsub\tint\n"), store, "2")
+r2, _ = build(make(td, "b", "#shape\tclass\nadd\tint\nmul\tint\nsub\tint\n"), store, "2")
 check("one more row executes the table step (its script holds the table) and exactly one row step; the two old rows are hits", r2["status"] == "green" and r2["stages"]["run"] == 2 and r2["stages"]["hit"] >= 2, r2["stages"])
-r3, _ = build(make(td, "c", "shape\tclass\n"), store, "3")
+r3, _ = build(make(td, "c", "#shape\tclass\n"), store, "3")
 check("an empty table is red", r3["status"] == "red", r3["status"])
 try:
-    build(make(td, "d", "shape\tclass\nadd\tint\n", "other/{shape}.txt"), store, "4")
+    build(make(td, "d", "#shape\tclass\nadd\tint\n", "other/{shape}.txt"), store, "4")
     msg = ""
 except (recipe.RecipeError, ValueError) as e:
     msg = str(e.errors if hasattr(e, "errors") else e)
