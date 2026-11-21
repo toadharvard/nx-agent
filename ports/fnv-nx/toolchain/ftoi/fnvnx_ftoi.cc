@@ -40,7 +40,9 @@
 //              asm       an inline asm that could read a float: a float, vector or complex-typed operand or an FP/SIMD register
 //                        clobber (asm_may_read_float).
 //            Types and GCC's function codes decide; no name, no text of source or assembly is looked at.
-// Report (-fplugin-arg-fnvnx_ftoi-out=FILE, required, both modes), JSON "fnvnx-f2i/2" for gate fpexact: unit (main input file); sites (every
+// Report (-fplugin-arg-fnvnx_ftoi-out=FILE, or -fplugin-arg-fnvnx_ftoi-beside: exactly one, both modes; `beside` writes the report next to the object this
+// compile makes, at <the compiler's own output name without its suffix>.f2i.json: aux_base_name, which the driver derives from -o, so every compile has its own
+// file and none is shared; the runtime build of the guest compiler uses it, one report per object), JSON "fnvnx-f2i/2" for gate fpexact: unit (main input file); sites (every
 // site seen in every analysed function, helpers included: conversions, builtins, mdbuiltins and asm), rewritten (sites rewritten here), helper
 // (sites inside fnvnx_f2i functions), helpers (their printable names), ranged (always empty: every site is rewritten, none is left on a GCC range
 // fact), rewrites and findings [{function, file, line, kind}] (what is outside a helper and not rewritten: in lifted mode the errors, in native
@@ -67,6 +69,7 @@
 #include "langhooks.h"
 #include "attribs.h"
 #include "tm.h"
+#include "toplev.h"
 #include "target.h"
 #include "output.h"
 #include "config/aarch64/aarch64-protos.h"
@@ -83,6 +86,7 @@ static bool verbose;
 static bool lifted;
 static unsigned long total;
 static std::string outpath;
+static bool beside = false;   // the report goes next to the object (aux_base_name), not to out=FILE
 static unsigned long sites, helper_sites;
 static std::set<std::string> helpers;
 static std::vector<std::tuple<std::string, std::string, int, std::string>> findings;   // function, file, line, report kind (one per site: a site is counted once)
@@ -577,6 +581,10 @@ static void js(FILE *f, const std::string &s) {
 
 static void finish(void *, void *) {
   if (verbose) inform(UNKNOWN_LOCATION, "%<fnvnx_ftoi%>: %lu conversions in this unit", total);
+  if (beside) {
+    if (!aux_base_name || !*aux_base_name) { error("%<fnvnx_ftoi%>: beside: the compiler has no output name for this unit"); return; }
+    outpath = std::string(aux_base_name) + ".f2i.json";
+  }
   FILE *f = fopen(outpath.c_str(), "w");
   if (!f) { error("%<fnvnx_ftoi%>: cannot write %s", outpath.c_str()); return; }
   std::sort(findings.begin(), findings.end());
@@ -628,6 +636,7 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *versio
     if (!strcmp(info->argv[i].key, "verbose")) verbose = true;
     else if (!strcmp(info->argv[i].key, "mode") && info->argv[i].value) mode = info->argv[i].value;
     else if (!strcmp(info->argv[i].key, "out") && info->argv[i].value) outpath = info->argv[i].value;
+    else if (!strcmp(info->argv[i].key, "beside") && !info->argv[i].value) beside = true;
     else {
       error("%<fnvnx_ftoi%>: unknown plugin argument %qs", info->argv[i].key);
       return 1;
@@ -637,7 +646,7 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *versio
     return 1;
   }
   lifted = !strcmp(mode, "lifted");
-  if (outpath.empty()) { error("%<fnvnx_ftoi%>: the plugin argument %<out=FILE%> is required"); return 1; }
+  if (outpath.empty() == !beside) { error("%<fnvnx_ftoi%>: exactly one of the plugin arguments %<out=FILE%> and %<beside%> is required"); return 1; }
   struct register_pass_info pass;
   pass.pass = new ftoi_pass(g);
   pass.reference_pass_name = "cfg";
