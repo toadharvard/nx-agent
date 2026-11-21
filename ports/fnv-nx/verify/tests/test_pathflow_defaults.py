@@ -26,4 +26,15 @@ for name, body, want_in, want_esc in CASES:
     ok = inside == want_in and len(esc) == want_esc
     print("%s %s" % ("PASS" if ok else "FAIL", name), "" if ok else (inside, esc))
     fails += 0 if ok else 1
+# the trees the stage mounts (a list): a read in a sibling tree of a declared root is inside, a read outside every mounted tree is an escape
+SIB = "import os\nHERE = os.path.dirname(os.path.abspath(__file__))\nD = os.path.join(HERE, '..', 'msvcmodel', 'DATAMODEL.json')\nopen(D).read()\n"
+for name, owners, want_in, want_esc in (
+        ("a read in a sibling tree: escape for the module's own tree alone", "ports/fnv-nx/verify", [], 1),
+        ("a read in a sibling tree: inside when that tree is mounted", ["ports/fnv-nx/verify", "ports/fnv-nx/msvcmodel"], ["ports/fnv-nx/msvcmodel/DATAMODEL.json"], 0),
+        ("a read in a tree that is not mounted: escape", ["ports/fnv-nx/verify", "ports/fnv-nx/other"], [], 1)):
+    inside = []
+    esc = pathflow.escapes_of(ME, SIB, owners, inside)
+    ok = inside == want_in and len(esc) == want_esc
+    print("%s %s" % ("PASS" if ok else "FAIL", name), "" if ok else (inside, esc))
+    fails += 0 if ok else 1
 sys.exit(1 if fails else 0)

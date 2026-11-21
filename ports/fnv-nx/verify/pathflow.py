@@ -308,7 +308,8 @@ def flow_of(sc):
 
 def escapes(path, mod, sc, flow, owner, inside=None):
     """[(line, detail)] of the file reads in the stage tool PATH (module MOD, scopes SC, def-use FLOW) whose path is built from __file__, __path__ or sys.argv[0] and
-    leaves OWNER, the repo tree the stage mounts the tool from, or cannot be decided ("undecided" / a "?" part). Inside OWNER it is a mounted file (green);
+    leaves OWNER, the repo tree the stage mounts the tool from (or a list of the trees the stage mounts, the declared import roots at their repo layout: a data file that a
+    module reads in a sibling tree of its own location, `<module dir>/../msvcmodel/DATAMODEL.json`, is mounted at the same relative place), or cannot be decided ("undecided" / a "?" part). Inside OWNER it is a mounted file (green);
     through require_mounted it is guarded (green). INSIDE: a list that receives the resolved repo path of every read that stays inside OWNER (what a stage must mount for
     the module to run). The one implementation: gate_abspath (abspath:escape) and recipe.check (gen:file-escape)."""
     out_f = []
@@ -324,7 +325,8 @@ def escapes(path, mod, sc, flow, owner, inside=None):
                     continue
                 v = pathval(t, idx, flow, sc, path, mod)
                 if v is not None and v[1]:
-                    out, res = leaves(v[0], owner)
+                    outs = [leaves(v[0], o) for o in ([owner] if isinstance(owner, str) else owner)]   # OWNER: one tree, or the trees the stage mounts (a read is green inside any)
+                    out, res = (all(x[0] for x in outs), outs[0][1])
                     if out or "?" in v[0]:   # a path the gate cannot decide (a non-constant part) is never green
                         out_f.append((n.lineno, res))
                     elif inside is not None:

@@ -961,7 +961,7 @@ def import_mount(tool, owner, files, inputs, roots, repo="."):
     for f in mods:   # the data a module reads by a path of its own location, resolved by pathflow inside its root's tree (a directory: every tracked file under it)
         try:
             ins = []
-            pathflow.escapes_of(f, open(os.path.join(repo, f)).read(), tree_of(roots, f), ins)
+            pathflow.escapes_of(f, open(os.path.join(repo, f)).read(), import_roots_of(roots, owner), ins)   # every tree the stage mounts at its repo layout, not only the module's own
         except (OSError, SyntaxError, ValueError):
             continue
         data |= {g for g in files if any(g == p or under(g, p) for p in ins)}
@@ -2114,7 +2114,7 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
 
                 try:
                     src = open(os.path.join(repo, cf)).read()
-                    esc = pathflow.escapes_of(cf, src, ot)
+                    esc = pathflow.escapes_of(cf, src, sorted(set(import_roots_of(roots, owner)) | {ot}))
                 except (OSError, SyntaxError, ValueError):
                     continue
                 err += ["gen:file-escape:%s:gen:%d:%s:%d:%s (the stage mounts only the tool's tree and the declared inputs: take data of another root through a declared `uses` input, passed as an argument or read through require_mounted)" % (root, i, cf, ln, d)
