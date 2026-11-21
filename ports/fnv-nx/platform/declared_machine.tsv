@@ -30,5 +30,5 @@
 18	SteamApps	no-galaxy	steamworks-sdk:isteamapps.h#SteamApps	u32	0	-
 19	SteamUserStats	no-galaxy	steamworks-sdk:isteamuserstats.h#SteamUserStats	u32	0	-
 # 20-21: SteamAPI_Shutdown and SteamAPI_RunCallbacks of galaxywrp.dll, void bodies on the declared machine (no Steam client: nothing to release, nothing to dispatch)
-20	SteamAPI_Shutdown	no-galaxy	steamworks-sdk:steam_api.h#SteamAPI_Shutdown	void	-	-
-21	SteamAPI_RunCallbacks	no-galaxy	steamworks-sdk:steam_api.h#SteamAPI_RunCallbacks	void	-	-
+20	SteamAPI_Shutdown	no-galaxy	steamworks-sdk:steam_api.h#SteamAPI_Shutdown	void		-
+21	SteamAPI_RunCallbacks	no-galaxy	steamworks-sdk:steam_api.h#SteamAPI_RunCallbacks	void		-
