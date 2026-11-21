@@ -793,3 +793,4 @@ After the first frame:
   - w2 does the names clone-origin fact.
   - Overlay head: 2ba233f20.
 - bottleneck: the farm's rt rerun at fc87efde2 -> the pin commit.
+- 2026-11-21 18:20Z: L1 refined the names clone-origin fact. The params map runs from each clone parameter to its origin (copy / split offset,size / const value / removed), read from ipa_param_adjustments and tree_map. It blocks L6's translator root (objstub on dk_cfg.isra.0) -> w2's first item.
