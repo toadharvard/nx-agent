@@ -26,20 +26,20 @@ DATAMODEL `types` commits f7b5d9b3b and badb397be touch only toolchain/msvcmodel
 
 ## Category 3: original -> commit on claude/fnv-l2-source-cand6-l1
 
-- 0bee5040e -> 93f64edf8  env.json: the compiler-build profile holds libgmp-dev, libmpfr-dev, libmpc-dev, zlib1g-dev (gcc's configure)
-- 8611f2cb1 -> 9e0caefe7  coremath root: CORE-MATH binary64 exp2m1 log2 log2p1 tan atan2 sin cos as a guest product root over the tools/
-- 33e2f9b26 -> 5e9c54018  coremath root: admit entry without cxx_origin (no C++ units), -Werror=attributes in both flag lists, NOTES
-- 798eacad4 -> bd159c4c5  guest_compiler.json: the citation of the -frounding-math row (CORE-MATH README:173)
-- bb9456e2c -> a89fa4e73  gmp root: configure, generated tables and the compile list as one generate stage
-- f5cf85c53 -> c3e353814  recipe: archive input {archive: ROOT} for tool steps; gmpgen makes BUILT_SOURCES first; tests and RECIPE.md fo
-- 6c2557ab8 -> 1428391e3  gmp: the headers of a unit's source directory are written beside the unit (quoted includes)
-- 497b68cb3 -> af5a8bca9  mpfr root, archive input mounts the root's directory outputs, mkunits supplied include dirs
-- 953bfc096 -> e97612f6c  gmp mkunits: -DNAME is NAME 1; directory outputs of a run step count for include_uses
-- 434813099 -> 6c91fbce2  recipe: archive builds are memoised per Job in their own table
-- 7bedd49a8 -> de84379e1  recipe: run steps take include_uses like CC stages; the archive mount holds only the archive
-- 00fb791f5 -> cf17baec0  test_archive_sources: behavioural include_uses toy for run steps (green and red)
-- 67d1ae6fe -> b80dd5f15  recipe: archive input is a guest root only; probes compile and link only (cross_compiling asserted in gmpgen/m
-- 6f147b874 -> 625926737  layout: LAYOUT-CALLTRIVIAL, a complete record whose compiler type is TREE_ADDRESSABLE is spelled struct:TAG{..
+- 0bee5040e -> dropped: lands on w29-c5 (env.json compiler-build profile)
+- 8611f2cb1 -> 5ba642253  coremath root: CORE-MATH binary64 exp2m1 log2 log2p1 tan atan2 sin cos as a guest product root over the tools/
+- 33e2f9b26 -> 6caf2eb5e  coremath root: admit entry without cxx_origin (no C++ units), -Werror=attributes in both flag lists, NOTES
+- 798eacad4 -> 19242e1a8  guest_compiler.json: the citation of the -frounding-math row (CORE-MATH README:173)
+- bb9456e2c -> ffa9b4b62  gmp root: configure, generated tables and the compile list as one generate stage
+- f5cf85c53 -> 1d14ad384  recipe: archive input {archive: ROOT} for tool steps; gmpgen makes BUILT_SOURCES first; tests and RECIPE.md fo
+- 6c2557ab8 -> 47f428c34  gmp: the headers of a unit's source directory are written beside the unit (quoted includes)
+- 497b68cb3 -> 69f27bbaa  mpfr root, archive input mounts the root's directory outputs, mkunits supplied include dirs
+- 953bfc096 -> 595519213  gmp mkunits: -DNAME is NAME 1; directory outputs of a run step count for include_uses
+- 434813099 -> c20f8f7c2  recipe: archive builds are memoised per Job in their own table
+- 7bedd49a8 -> 5bc8d8271  recipe: run steps take include_uses like CC stages; the archive mount holds only the archive
+- 00fb791f5 -> d80f32194  test_archive_sources: behavioural include_uses toy for run steps (green and red)
+- 67d1ae6fe -> 129fabd80  recipe: archive input is a guest root only; probes compile and link only (cross_compiling asserted in gmpgen/m
+- 6f147b874 -> dropped: the ctypes_compat part lands on w29-c5; the toolchain test part stays on the overlay
 
 Applied by their L1-tree part only (conflicts resolved to c5's surrounding code: the archive code of f5cf85c53 is placed after c5's pp_errors / run_foreach, admit.json entries are written in c5's one-key-per-line format).
 
@@ -751,3 +751,6 @@ Applied by their L1-tree part only (conflicts resolved to c5's surrounding code:
 - test_recipe: 6 FAIL, all environmental in this container, none touched by these commits: the toy root's env check wants cargo/rustc 1.75.0+dfsg0ubuntu1-0ubuntu7.4 (not installed), python module pycparser (sha256 differs) and the cargo dependency closure. env.json's cargo/rustc/pycparser rows are c5's own; the 14 picks change env.json only in an unrelated hunk. Run on a farm with the pinned env to confirm.
 - Fixed on the branch: the coremath/gmp/mpfr admit entries (52d92bd54 drops them) pointed at build.json files that live in platform/{coremath,gmp,mpfr}, outside the universe; they stay on the overlay branch.
 - d9995de2d superseded (c5's produce() runs run_all); recipe.py archive code re-inserted by hand at c5's insertion points.
+
+## Revision
+Branch rebuilt on e4e9b7e53 without the two commits w29 lands (0bee5040e env.json, 6f147b874 ctypes_compat); the mapping above is updated. 12 cherry-picks remain.
