@@ -92,9 +92,9 @@ with tempfile.TemporaryDirectory() as td:
 
 # args_class: the argument letters of the definer's declared parameters
 for typ, want in (('()void', '-'), ('(*void,int)int', 'ii'), ('(float,double,long_double,long_long_int)void', 'fddq'), ('(enum:E=unsigned_int,ref:4:4:int,[4]int)void', 'iii'),
-                  ('(const:long_long_unsigned_int)void', 'q')):
+                  ('(const:long_long_unsigned_int)void', 'q'), ('(*struct:S{a:int;b:int}!,int,int)void', 'iii')):
     check('args_class %s -> %s' % (typ, want), exportgen.args_class(exportgen.ctypes_compat.parse(typ)) == want, typ)
-for typ in ('(struct:S{a:int;})void', '(vec:4:16:16:float)void', '(complex:8:4:float)void', '(?)int', '(*void,...)int', '*int'):
+for typ in ('(struct:S{a:int;})void', '(struct:S{a:int;}!)void', '(vec:4:16:16:float)void', '(complex:8:4:float)void', '(?)int', '(*void,...)int', '*int'):
     try:
         exportgen.args_class(exportgen.ctypes_compat.parse(typ))
         check('args_class %s is an error' % typ, False)

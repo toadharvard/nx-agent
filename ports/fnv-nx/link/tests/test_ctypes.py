@@ -88,6 +88,17 @@ for a, b, want in (('complex:8:4:float', 'complex:8:4:float', True), ('complex:8
                   ('entry:*()void', 'entry:*()void', True), ('entry:*()void', '*()void', False), ('*entry:*()void', '*entry:*(int)void', False)):
     if C.compatible(C.parse(a), C.parse(b)) != want:
         fails.append('compatible %s %s != %s' % (a, b, want))
+SA = 'struct:S{x:int;y:*char}!'   # LAYOUT-CALLTRIVIAL: `!` is a fact of the spelling, not of compatibility
+ok(SA, SA, True, 'identical, non-trivial for calls')
+ok(SA, S, True, 'the `!` suffix does not change compatibility')
+ok(SA, 'struct:S{x:int;y:*int}!', False, 'a member type differs under `!`')
+ok('union:U{a:int}!', 'union:U{a:int}', True, 'union with the suffix')
+ok('*struct:S{x:int}!', '*struct:S', True, 'a pointer to a `!` record against the incomplete tag')
+try:
+    C.parse('struct:S{x:int}!!')
+    fails.append('two `!` suffixes accepted')
+except ValueError:
+    pass
 if fails:
     print('FAIL\n' + '\n'.join(fails))
     sys.exit(1)
