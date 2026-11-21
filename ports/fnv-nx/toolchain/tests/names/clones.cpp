@@ -24,9 +24,11 @@ static int part_f(int *p, int n)
 }
 int use_part(int *p, int n) { return part_f(p, n) + part_f(p, n + 1); }
 
-// 4. the first case of L1: a body that answers a constant object and ignores its argument, like render's dk_cfg.isra.0
-static __attribute__((noinline)) const Cfg *dk_cfg(int unused) { return &g_cfg; }
-int use_cfg(int u) { return dk_cfg(u)->a + dk_cfg(u + 1)->b; }
+// 4. the first case of L1, render's dk_cfg: the body answers one pointer field of its context, so IPA-SRA passes the loaded field: dk_cfg.isra.0(const Cfg *) is
+//    the pointer at byte offsetof(Context, dk) of the origin's parameter 0 (a pointer: a load through it, by_ref)
+struct Context { int pad; const Cfg *dk; };
+static __attribute__((noinline)) const Cfg *dk_cfg(const Context *ctx) { return ctx->dk; }
+int use_cfg(const Context *c) { return dk_cfg(c)->a + dk_cfg(c + 1)->b; }
 
 // 5. not a clone: no record
 __attribute__((noinline)) int plain(int a) { return opaque(a) + 1; }
@@ -39,3 +41,8 @@ int use_split(const Big *p) { return split_f(p) + split_f(p + 1); }
 // 7. a clone of a clone: IPA-CP makes chain_f.constprop.0 (parameter 1 is the constant 9); in it the struct pointer is read at one field, so IPA-SRA clones that clone
 static __attribute__((noinline)) int chain_f(const Big *p, int c) { return opaque(p->b) * c; }
 int use_chain(const Big *p) { return chain_f(p, 9) + chain_f(p + 1, 9); }
+
+// 8. IPA-SRA split by value: a struct passed by value of which one field is read; val_f.isra.0(int) is the int at byte 4 of parameter 0 (not a pointer: by_ref false)
+struct Pair { int a; int b; int c; int d; };
+static __attribute__((noinline)) int val_f(Pair q) { return opaque(q.b) + 7; }
+int use_val(Pair q) { return val_f(q) + val_f(Pair{q.b, q.a, q.d, q.c}); }

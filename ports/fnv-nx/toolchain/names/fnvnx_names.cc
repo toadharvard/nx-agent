@@ -1425,8 +1425,10 @@ static std::vector<tree> sdd_slot_decls()
  *   after m_always_copy_start, copied behind them) one of
  *     {"j":j,"origin":i,"op":"copy"}                                      op COPY: the origin's parameter prev_clone_index (the index in the previous clone;
  *                                                                          base_index is the index in the root), unchanged;
- *     {"j":j,"origin":i,"op":"split","offset":O,"size":S}                 op SPLIT: the component of origin parameter i at byte unit_offset O, of the adjusted
- *                                                                          parameter's type size S in bytes;
+ *     {"j":j,"origin":i,"op":"split","offset":O,"size":S,"by_ref":B}                 op SPLIT: the component of origin parameter i at byte unit_offset O, of the adjusted
+ *                                                                          parameter's type size S in bytes; B is POINTER_TYPE_P of the origin parameter's
+ *                                                                          type: true = a load through the pointer (by-reference split), false = a piece of
+ *                                                                          an aggregate passed by value;
  *     {"j":j,"op":"new"}                                                  op NEW: a parameter with no origin;
  *   then, per origin parameter i that has no clone parameter or is replaced:
  *     {"origin":i,"op":"const","value":V}                                 a tree_map entry (parm_num i): the clone's body takes the value V, an integer constant as
@@ -1508,23 +1510,34 @@ static void clone_dup(cgraph_node *src, cgraph_node *dst, void *)
     int n = param_count(src->decl);
     std::vector<bool> covered(n, false);
     std::vector<std::string> side_clone, side_origin;   /* entries by clone parameter j, then entries by origin parameter */
-    auto copy = [&](int j, int i) { side_clone.push_back("{\"j\":" + std::to_string(j) + ",\"origin\":" + std::to_string(i) + ",\"op\":\"copy\"}"); };
+    std::set<int> js;                                    /* the clone parameters named so far: each exactly once */
+    auto addj = [&](int j, const std::string &entry) {
+      if (!js.insert(j).second) error("%<fnvnx_names%>: clone parameter %d of %s is described twice", j, asmname(dst->decl).c_str());
+      side_clone.push_back(entry);
+    };
+    auto head = [](int j, int i, const char *op) { return "{\"j\":" + std::to_string(j) + ",\"origin\":" + std::to_string(i) + ",\"op\":\"" + op + "\""; };
     if (pa) {
       unsigned len = vec_safe_length(pa->m_adj_params);
       for (unsigned j = 0; j < len; j++) {
         ipa_adjusted_param &p = (*pa->m_adj_params)[j];
         int i = (int)p.prev_clone_index;
-        if (p.op == IPA_PARAM_OP_COPY) { copy(j, i); if (i < n) covered[i] = true; }
+        if (p.op == IPA_PARAM_OP_COPY) { addj(j, head(j, i, "copy") + "}"); if (i < n) covered[i] = true; }
         else if (p.op == IPA_PARAM_OP_SPLIT) {
-          side_clone.push_back("{\"j\":" + std::to_string(j) + ",\"origin\":" + std::to_string(i) + ",\"op\":\"split\",\"offset\":" + std::to_string(p.unit_offset)
-                               + ",\"size\":" + std::to_string(tree_to_uhwi(TYPE_SIZE_UNIT(p.type))) + "}");
+          /* by_ref: the origin parameter is a pointer, so the piece is loaded through it (IPA-SRA's by-reference split); otherwise it is a piece of an
+           * aggregate passed by value. The type is the origin's own parameter type (the function type of the origin). */
+          bool by_ref = false;
+          int x = 0;
+          for (tree a = TYPE_ARG_TYPES(TREE_TYPE(src->decl)); a && a != void_list_node; a = TREE_CHAIN(a), x++)
+            if (x == i) by_ref = POINTER_TYPE_P(TREE_VALUE(a));
+          addj(j, head(j, i, "split") + ",\"offset\":" + std::to_string(p.unit_offset) + ",\"size\":" + std::to_string(tree_to_uhwi(TYPE_SIZE_UNIT(p.type)))
+                  + ",\"by_ref\":" + (by_ref ? "true" : "false") + "}");
           if (i < n) covered[i] = true;
-        } else side_clone.push_back("{\"j\":" + std::to_string(j) + ",\"op\":\"new\"}");   /* a parameter with no origin */
+        } else addj(j, "{\"j\":" + std::to_string(j) + ",\"op\":\"new\"}");   /* a parameter with no origin */
       }
       if (pa->m_always_copy_start >= 0)
-        for (int k = pa->m_always_copy_start; k < n; k++) { copy(len + k - pa->m_always_copy_start, k); covered[k] = true; }
+        for (int k = pa->m_always_copy_start; k < n; k++) { addj(len + k - pa->m_always_copy_start, head(len + k - pa->m_always_copy_start, k, "copy") + "}"); covered[k] = true; }
     } else
-      for (int k = 0; k < n; k++) { copy(k, k); covered[k] = true; }   /* IPA-CP keeps the signature */
+      for (int k = 0; k < n; k++) { addj(k, head(k, k, "copy") + "}"); covered[k] = true; }   /* IPA-CP keeps the signature */
     std::map<int, std::string> consts;
     for (unsigned i = 0; tm && i < tm->length(); i++) consts[(*tm)[i]->parm_num] = const_json((*tm)[i]->new_tree);
     for (int k = 0; k < n; k++) {
@@ -1532,6 +1545,15 @@ static void clone_dup(cgraph_node *src, cgraph_node *dst, void *)
       if (c != consts.end()) side_origin.push_back("{\"origin\":" + std::to_string(k) + ",\"op\":\"const\",\"value\":" + c->second + "}");
       else if (!covered[k]) side_origin.push_back("{\"origin\":" + std::to_string(k) + ",\"op\":\"removed\"}");
     }
+    /* the invariant of the fact (a defect of this emitter, never of the unit): every origin parameter appears (copy, split, const or removed: by the loop above, so
+     * here only a parameter number outside the origin can break it) and the clone parameters are exactly 0..m-1, m the clone's own parameter count (the function type
+     * the pass built); a violation is a build error */
+    int m = param_count(dst->decl);
+    for (int j : js) if (j >= m) error("%<fnvnx_names%>: clone parameter %d of %s is past its %d parameters", j, asmname(dst->decl).c_str(), m);
+    if ((int)js.size() != m) error("%<fnvnx_names%>: %s has %d parameters and the clone map names %d of them", asmname(dst->decl).c_str(), m, (int)js.size());
+    for (unsigned a = 0; pa && a < vec_safe_length(pa->m_adj_params); a++)
+      if ((*pa->m_adj_params)[a].op != IPA_PARAM_OP_NEW && (int)(*pa->m_adj_params)[a].prev_clone_index >= n)
+        error("%<fnvnx_names%>: clone parameter %u of %s has origin %d, past the origin's %d parameters", a, asmname(dst->decl).c_str(), (int)(*pa->m_adj_params)[a].prev_clone_index, n);
     r.params = "[";
     for (auto *v : {&side_clone, &side_origin}) for (auto &e : *v) r.params += (r.params.size() > 1 ? "," : "") + e;
     r.params += "]";
