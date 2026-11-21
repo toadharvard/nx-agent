@@ -935,3 +935,22 @@ Cause (rule 8): cand5 was assembled by taking each tree whole from its owner. Th
 - The pair records are a transition aid for cand5 and cand6 (24 records at L1 c5 e4e9b7e53). Every lead delivers its
   edits in other owners' files to those owners, or declares them stale, before cand6. Each pair record is deleted once
   its owner holds the edit. From cand7 on there are none.
+
+## Owner, 2026-11-21 18:50Z: "Мы заняты какой-то хуйней" — only what puts the product on the trunk (binding, overrides any plan)
+
+Fact at trunk fac693694 (2026-11-16 05:28Z), from verify/admit.json: 2 product roots (shim, hostabi/product). There is
+no platform root, no loader root, no lifted pack root and no ELF. Most of the work since 11-14 went into the machinery
+checking itself: gates, records, certificates, candidate assembly, rulings.
+
+Until the ELF links, a lead or worker works only on one of these four steps, in this order:
+1. the platform root on the trunk;
+2. the loader root and rt/guest/main;
+3. the lifted pack roots: lift/rt and the image packs;
+4. the ELF link root.
+
+- No new gate, rule, record, certificate, census or proof unless a red on one of these four steps cannot be closed
+  without it. That case is reported to the orchestrator first.
+- Candidates: what is green merges now. A red item is dropped from the candidate and fixed on its owner's branch; the
+  candidate does not wait for it.
+- The first line of every status file reads "step N: <what is missing for it to reach the trunk>".
+- Any worker on something else stops and is archived.
