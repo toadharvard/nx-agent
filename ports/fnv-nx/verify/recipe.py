@@ -2876,6 +2876,7 @@ class Job:
         self.arts = {}   # {artifact root: its build result}: a root is built once per Job, whatever number of steps run its artifact
         self.shard, self.shard_units = None, None   # (i, N) of a shard build (build(shard=...)); the units it compiled
         self.aux = []   # build(aux): AUX_FLAGS of the CC stage
+        self.archives = {}   # {root: its objects-only build result}: one per `{"archive": ROOT}` input (archive_tree), built once per Job
         self.analysis = None   # tree of the objstub plugin's /out (analysis_plugin), built once per root that has C/C++ units
         self.dukeys = {}   # {unit: key of its macro-fact stage (-dU, unitstage.DU_TAIL)}
         self.red, self.blocked, self.failed = [], {}, []   # KEEP GOING: red stages (failure dicts) and {unit: stage it is blocked by}; nothing is masked (see build)
@@ -3346,8 +3347,6 @@ class Job:
         """The tree {lib.a} of archive input REF: the objects of root REF["archive"], built objects-only through the stage cache (the same build a link offers), as ar_bytes in
         unit order. Its content is the key: a changed unit of the root is a changed archive. A red root is red here (blocked, never an empty archive)."""
         owner = ref["archive"]
-        if not hasattr(self, "archives"):
-            self.archives = {}   # {archive root: its objects-only build result}: a root is built once per Job
         r = self.archives.get(owner)
         if r is None:
             r = self.archives[owner] = build(self.repo, owner, self.store, tempfile.mkdtemp(dir=ws), self.jobs, self.extcache, link=False)
@@ -4474,7 +4473,7 @@ def is_archive(ref):
 
 def archive_errors(where, ref, root, rec, roots, repo="."):
     """[str]: the ONE rule of the `archive` input (check, and the mount). Red: a ref of another shape; ROOT is this root; not an admitted root; not a root this recipe `uses`;
-    its recipe cannot be read, has no units, or has another compiler record than this root (the objects of another compiler are not this root's libraries)."""
+    its recipe cannot be read, has no units, is no guest root (its expanded compiler record is not the guest pin's), or has another compiler record than this root (the objects of another compiler are not this root's libraries)."""
     if not is_archive(ref):
         return ["%s: %r is not {archive: ROOT}" % (where, ref)]
     owner, me = ref["archive"], split_spec(root)[0]
@@ -4490,6 +4489,9 @@ def archive_errors(where, ref, root, rec, roots, repo="."):
         return ["%s: the recipe of %s cannot be read: %s" % (where, owner, str(e)[:200])]
     if not isinstance(orec, dict) or not orec.get("units") or not orec.get("compiler"):
         return ["%s: %s is no product root with units and a compiler" % (where, owner)]
+    gc = profile_fields("guest", load_pin(repo))[0]
+    if not gc or orec.get("compiler") != gc["compiler"]:
+        return ["%s: archive %s is not a guest product root (its compiler record is not the guest pin's, profile guest)" % (where, owner)]
     if orec.get("compiler") != rec.get("compiler"):
         return ["%s: %s is built by another compiler record than this root (an archive of objects needs the same compiler)" % (where, owner)]
     return []

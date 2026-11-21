@@ -35,13 +35,13 @@ def w(repo, rel, text):
     open(p, "w").write(text)
 
 
-def make(td, lib_cc="gcc-13", con_cc="gcc-13"):
+def make(td, lib_prof="guest"):   # the toy pair is GUEST roots (profile guest, the pin of this checkout); lib_prof "host" is the red case
     repo = os.path.join(td, "repo")
     os.makedirs(repo)
     git(repo, "init", "-q")
     step = {"name": "gen", "exec": "/usr/bin/bash", "args": ["/in/1"], "inputs": [T + "con/gen.sh"], "debs": {"profile": "compiler-build"}, "outputs": ["units.list"], "dirs": ["u"]}
-    lib = {"format": "fnvnx-recipe/1", "compiler": {"cc": lib_cc, "cxx": "g++-13"}, "units": "all", "include": [], "flags": {"c": ["-O2"], "cxx": [], "asm": []}, "outputs": {"l": "l.c"}}
-    con = {"format": "fnvnx-recipe/1", "compiler": {"cc": con_cc, "cxx": "g++-13"}, "units": "all", "include": [], "flags": {"c": ["-O2"], "cxx": [], "asm": []}, "outputs": {"c": "c.c"},
+    lib = {"format": "fnvnx-recipe/1", "profile": lib_prof, "units": "all", "include": [], "flags": {"c": ["-O2"], "cxx": [], "asm": []}, "outputs": {"l": "l.c"}}
+    con = {"format": "fnvnx-recipe/1", "profile": "guest", "units": "all", "include": [], "flags": {"c": ["-O2"], "cxx": [], "asm": []}, "outputs": {"c": "c.c"},
            "uses": [{"root": T + "lib", "output": "l"}], "sources": "units.list", "run": [step]}
     w(repo, T + "lib/build.json", json.dumps(lib))
     w(repo, T + "lib/l.c", "int l(void){return 1;}\n")
@@ -50,9 +50,10 @@ def make(td, lib_cc="gcc-13", con_cc="gcc-13"):
     w(repo, T + "con/c.c", "int c(void){return 2;}\n")
     w(repo, T + "con/units.list", "gen:u\n")
     w(repo, T + "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [
-        {"path": T + "lib", "class": "product", "target": "host", "recipe": T + "lib/build.json"},
-        {"path": T + "con", "class": "product", "target": "host", "recipe": T + "con/build.json"}]}))
+        {"path": T + "lib", "class": "product", "target": "guest" if lib_prof == "guest" else "host", "recipe": T + "lib/build.json"},
+        {"path": T + "con", "class": "product", "target": "guest", "recipe": T + "con/build.json"}]}))
     w(repo, T + "verify/env.json", open(os.path.join(HERE, "..", "env.json")).read())
+    w(repo, T + "verify/guest_compiler.json", open(os.path.join(HERE, "..", "guest_compiler.json")).read())
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "toy")
     return repo
@@ -112,9 +113,9 @@ with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as td:
     check("archive of a non-root is red", any("not an admitted root" in e for e in ae({"archive": T + "ghost"})))
     check("archive of a root this recipe does not `uses` is red", any("`uses`" in e for e in ae({"archive": T + "lib"}, dict(rec, uses=[]))))
     check("a malformed archive ref is red", any("is not {archive" in e for e in ae({"archive": 1})) and not recipe.is_archive({"archive": "x", "k": "y"}))
-    repo_b = make(os.path.join(td, "b"), lib_cc="g++-13")
+    repo_b = make(os.path.join(td, "b"), lib_prof="host")
     rb = recipe.load_admit(repo_b)
-    check("an archive of a root with another compiler record is red", any("another compiler" in e for e in recipe.archive_errors("t", {"archive": T + "lib"}, T + "con", recipe.load_recipe(repo_b, rb, T + "con"), rb, repo_b)))
+    check("an archive of a host root (not the guest pin's compiler record) is red", any("not a guest product root" in e for e in recipe.archive_errors("t", {"archive": T + "lib"}, T + "con", recipe.load_recipe(repo_b, rb, T + "con"), rb, repo_b)))
     # tool steps only: the same ref in a non-tool run step is red through recipe.check
     recipe.env_blocked = lambda r: None
     bad = dict(rec, run=[dict(rec["run"][0], inputs=[{"archive": T + "lib"}])])
@@ -136,7 +137,6 @@ with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as td:
     def tree(objs, store):
         os.makedirs(store, exist_ok=True)
         jj = recipe.Job(repo, T + "con", store, 1, os.path.join(td, "ext"))
-        jj.archives = {}
         jj.archives[T + "lib"] = {"status": "green", "objects": [{"unit": u, "object": o} for u, o in objs], "stage_keys": []}
         tmp = tempfile.mkdtemp(dir=td)
         return jj.archive_tree(tmp, tmp, 1, {"archive": T + "lib"})
@@ -151,7 +151,6 @@ with tempfile.TemporaryDirectory(dir=os.path.expanduser("~")) as td:
     recipe.cas.materialize(t1, os.path.join(td, "s1"), mt)
     check("an archive mount holds only the archive (no directory outputs of the root)", os.listdir(mt) == ["liblib.a"], os.listdir(mt))
     red = recipe.Job(repo, T + "con", os.path.join(td, "s4"), 1, os.path.join(td, "ext"))
-    red.archives = {}
     red.archives[T + "lib"] = {"status": "red", "failure": {"stage": "cc:u/f.c", "exit": 1, "stderr": ["boom"]}, "objects": [], "stage_keys": []}
     try:
         t = tempfile.mkdtemp(dir=td)
