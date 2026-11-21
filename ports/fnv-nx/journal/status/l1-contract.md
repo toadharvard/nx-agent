@@ -3187,3 +3187,4 @@ bottleneck: cand3b (w15); cand4: the w28 merged line for L2 w3.
   - Reviewed and accepted into cand6: the archive inputs, include_uses for run steps, semantics_cite and scratch.store.
   - Condition: archive_tree and recipe.py:3929 share one ar function. w28 makes the change at cand6 assembly.
   - The env.json profile and ctypes_compat `!` come from w29-c5, not from L2.
+- 18:53 L2 cand6-l1 head is now 778457923 (12 contributions; env.json and ctypes_compat come via w29).
